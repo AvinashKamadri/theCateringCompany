@@ -1,0 +1,682 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model activity_log {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_user_id    String?   @db.Uuid
+  actor_profile_id String?   @db.Uuid
+  project_id       String?   @db.Uuid
+  action           String
+  payload          Json?
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  users            users?    @relation(fields: [actor_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects         projects? @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([project_id], map: "ix_activity_log_project")
+}
+
+model api_keys {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  service_account_id String?           @db.Uuid
+  name               String
+  key_hash           String
+  scopes             String[]
+  expires_at         DateTime?         @db.Timestamptz(6)
+  revoked_at         DateTime?         @db.Timestamptz(6)
+  created_at         DateTime?         @default(now()) @db.Timestamptz(6)
+  service_accounts   service_accounts? @relation(fields: [service_account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([service_account_id], map: "ix_api_keys_service")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model attachments {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_type        String
+  owner_id          String    @db.Uuid
+  project_id        String?   @db.Uuid
+  filename          String
+  mime_type         String?
+  size_bytes        BigInt?
+  storage_provider  String?
+  storage_path      String?
+  checksum          String?
+  virus_scan_status String    @default("pending")
+  quarantine_reason String?
+  quarantined_at    DateTime? @db.Timestamptz(6)
+  preview_allowed   Boolean   @default(false)
+  uploaded_by       String?   @db.Uuid
+  uploaded_at       DateTime  @default(now()) @db.Timestamptz(6)
+  projects          projects? @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users             users?    @relation(fields: [uploaded_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([owner_type, owner_id], map: "ix_attachments_owner")
+}
+
+model auth_tokens {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String?   @db.Uuid
+  token_hash  String
+  type        String
+  expires_at  DateTime  @db.Timestamptz(6)
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+  consumed_at DateTime? @db.Timestamptz(6)
+  users       users?    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model change_order_lines {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  change_order_id String        @db.Uuid
+  description     String
+  amount          Decimal       @db.Decimal(12, 2)
+  change_orders   change_orders @relation(fields: [change_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model change_orders {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id         String               @db.Uuid
+  created_by         String?              @db.Uuid
+  status             String               @default("draft")
+  metadata           Json?
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  change_order_lines change_order_lines[]
+  users              users?               @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects           projects             @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model clause_rules {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clause_template_id String           @db.Uuid
+  condition          Json
+  created_at         DateTime         @default(now()) @db.Timestamptz(6)
+  clause_templates   clause_templates @relation(fields: [clause_template_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model clause_templates {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  content          String
+  last_reviewed_at DateTime?          @db.Timestamptz(6)
+  tags             String[]
+  clause_rules     clause_rules[]
+  contract_clauses contract_clauses[]
+
+  @@index([name], map: "ix_clause_templates_name")
+  @@index([tags], map: "ix_clause_templates_tags", type: Gin)
+  @@index([tags], map: "ix_clause_templates_tags_gin", type: Gin)
+}
+
+model contract_clauses {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contract_id        String            @db.Uuid
+  clause_template_id String?           @db.Uuid
+  content            String
+  created_at         DateTime          @default(now()) @db.Timestamptz(6)
+  clause_templates   clause_templates? @relation(fields: [clause_template_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  contracts          contracts         @relation(fields: [contract_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model contracts {
+  id                                              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contract_group_id                               String             @db.Uuid
+  version_number                                  Int
+  previous_version_id                             String?            @db.Uuid
+  project_id                                      String             @db.Uuid
+  status                                          contract_status
+  title                                           String?
+  body                                            Json
+  pdf_path                                        String?
+  total_amount                                    Decimal?           @db.Decimal(12, 2)
+  change_reason                                   String?
+  metadata                                        Json?
+  is_active                                       Boolean            @default(true)
+  created_by                                      String             @db.Uuid
+  approved_by_user_id                             String?            @db.Uuid
+  seen_by_client_at                               DateTime?          @db.Timestamptz(6)
+  sent_at                                         DateTime?          @db.Timestamptz(6)
+  client_signed_at                                DateTime?          @db.Timestamptz(6)
+  expires_at                                      DateTime?          @db.Timestamptz(6)
+  created_at                                      DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                                      DateTime           @default(now()) @db.Timestamptz(6)
+  deleted_at                                      DateTime?          @db.Timestamptz(6)
+  deleted_by                                      String?            @db.Uuid
+  contract_clauses                                contract_clauses[]
+  users_contracts_approved_by_user_idTousers      users?             @relation("contracts_approved_by_user_idTousers", fields: [approved_by_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_contracts_created_byTousers               users              @relation("contracts_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  contracts                                       contracts?         @relation("contractsTocontracts", fields: [previous_version_id], references: [id], onUpdate: NoAction)
+  other_contracts                                 contracts[]        @relation("contractsTocontracts")
+  projects_contracts_project_idToprojects         projects           @relation("contracts_project_idToprojects", fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  projects_projects_signed_contract_idTocontracts projects[]         @relation("projects_signed_contract_idTocontracts")
+
+  @@unique([contract_group_id, version_number], map: "ux_contract_group_version")
+  @@index([status], map: "ix_contracts_status")
+}
+
+model cost_of_goods {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_pricing_id String?          @db.Uuid
+  line_item          Json
+  cost_amount        Decimal          @db.Decimal(12, 2)
+  project_pricing    project_pricing? @relation(fields: [project_pricing_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model crm_pipeline {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id             String    @unique @db.Uuid
+  assigned_staff_user_id String?   @db.Uuid
+  pipeline_stage         String?
+  lead_source            String?
+  lead_score             Int?
+  follow_up_at           DateTime? @db.Timestamptz(6)
+  lost_reason            String?
+  notes                  String?
+  created_at             DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime  @default(now()) @db.Timestamptz(6)
+  users                  users?    @relation(fields: [assigned_staff_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects               projects  @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model event_analytics {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id    String   @db.Uuid
+  profit        Decimal? @db.Decimal(12, 2)
+  revenue       Decimal? @db.Decimal(12, 2)
+  costs         Decimal? @db.Decimal(12, 2)
+  calculated_at DateTime @default(now()) @db.Timestamptz(6)
+  projects      projects @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([project_id], map: "ix_event_analytics_project")
+}
+
+model event_timeline_items {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id   String    @db.Uuid
+  title        String
+  scheduled_at DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  projects     projects  @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model events {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id    String?         @db.Uuid
+  event_type    String
+  actor_id      String?         @db.Uuid
+  payload       Json?
+  created_at    DateTime        @default(now()) @db.Timestamptz(6)
+  users         users?          @relation(fields: [actor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects      projects?       @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  notifications notifications[]
+
+  @@index([project_id, event_type], map: "ix_events_project_type")
+}
+
+model follow_ups {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id   String    @db.Uuid
+  template_id  String?
+  scheduled_at DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  projects     projects  @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model margin_alerts {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id     String    @db.Uuid
+  threshold      Decimal?  @db.Decimal(5, 2)
+  current_margin Decimal?  @db.Decimal(5, 2)
+  triggered_at   DateTime? @db.Timestamptz(6)
+  projects       projects  @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([project_id], map: "ix_margin_alerts_project")
+}
+
+model message_mentions {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  message_id        String   @db.Uuid
+  mentioned_user_id String   @db.Uuid
+  mention_type      String   @default("direct")
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  users             users    @relation(fields: [mentioned_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  messages          messages @relation(fields: [message_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model messages {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  thread_id         String             @db.Uuid
+  parent_message_id String?            @db.Uuid
+  project_id        String             @db.Uuid
+  author_id         String?            @db.Uuid
+  sender_type       String?
+  content           String
+  attachments       Json?
+  qdrant_vector_id  String?
+  vector_indexed_at DateTime?          @db.Timestamptz(6)
+  vector_status     String?            @default("pending")
+  is_deleted        Boolean            @default(false)
+  created_at        DateTime           @default(now()) @db.Timestamptz(6)
+  last_edited_at    DateTime?          @db.Timestamptz(6)
+  message_mentions  message_mentions[]
+  users             users?             @relation(fields: [author_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  messages          messages?          @relation("messagesTomessages", fields: [parent_message_id], references: [id], onUpdate: NoAction)
+  other_messages    messages[]         @relation("messagesTomessages")
+  projects          projects           @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  threads           threads            @relation(fields: [thread_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([thread_id, created_at(sort: Desc)], map: "ix_messages_thread_created_at")
+}
+
+model notifications {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id          String?   @db.Uuid
+  recipient_user_id String?   @db.Uuid
+  channel           String    @db.VarChar(32)
+  template_id       String?
+  payload           Json?
+  status            String    @default("pending") @db.VarChar(32)
+  attempt_count     Int       @default(0)
+  last_attempt_at   DateTime? @db.Timestamptz(6)
+  sent_at           DateTime? @db.Timestamptz(6)
+  created_at        DateTime  @default(now()) @db.Timestamptz(6)
+  is_read           Boolean   @default(false)
+  events            events?   @relation(fields: [event_id], references: [id], onUpdate: NoAction)
+  users             users?    @relation(fields: [recipient_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([status], map: "ix_notifications_status")
+}
+
+model oauth_accounts {
+  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                 String?   @db.Uuid
+  provider                String
+  provider_account_id     String
+  access_token            String?
+  refresh_token_encrypted String?
+  raw_profile             Json?
+  created_at              DateTime? @default(now()) @db.Timestamptz(6)
+  users                   users?    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([provider, provider_account_id])
+}
+
+model payment_requests {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client_id       String?    @db.Uuid
+  idempotency_key String
+  request_hash    String?
+  payment_id      String?    @db.Uuid
+  gateway_txn_id  String?
+  status          String     @default("pending") @db.VarChar(32)
+  created_at      DateTime   @default(now()) @db.Timestamptz(6)
+  users           users?     @relation(fields: [client_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  payments        payments[]
+
+  @@unique([client_id, idempotency_key], map: "ux_payment_requests_client_key")
+}
+
+model payment_schedule_items {
+  id                        String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  schedule_id               String            @db.Uuid
+  label                     String?           @db.VarChar(100)
+  amount                    Decimal           @db.Decimal(12, 2)
+  due_date                  DateTime?         @db.Date
+  status                    payment_status    @default(pending)
+  gateway_payment_intent_id String?           @db.VarChar(255)
+  paid_at                   DateTime?         @db.Timestamptz(6)
+  created_at                DateTime          @default(now()) @db.Timestamptz(6)
+  payment_schedules         payment_schedules @relation(fields: [schedule_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([schedule_id, due_date], map: "ix_schedule_items_schedule_due")
+}
+
+model payment_schedules {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id             String                   @db.Uuid
+  installment_type       String?
+  amount                 Decimal?                 @db.Decimal(12, 2)
+  due_date               DateTime?                @db.Date
+  reminder_sent_at       DateTime?                @db.Timestamptz(6)
+  auto_charge            Boolean                  @default(false)
+  status                 String                   @default("scheduled")
+  created_by_user_id     String?                  @db.Uuid
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  payment_schedule_items payment_schedule_items[]
+  users                  users?                   @relation(fields: [created_by_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects               projects                 @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([project_id, due_date], map: "ix_payment_schedules_project_due")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model payments {
+  id                        String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id                String?           @db.Uuid
+  payment_schedule_id       String?           @db.Uuid
+  schedule_item_id          String?           @db.Uuid
+  payment_request_id        String?           @db.Uuid
+  gateway_payment_intent_id String?
+  gateway_customer_id       String?
+  type                      String?
+  amount                    Decimal           @db.Decimal(12, 2)
+  currency                  String            @default("USD") @db.Char(3)
+  status                    payment_status    @default(pending)
+  paid_at                   DateTime?         @db.Timestamptz(6)
+  created_at                DateTime          @default(now()) @db.Timestamptz(6)
+  deleted_at                DateTime?         @db.Timestamptz(6)
+  deleted_by                String?           @db.Uuid
+  idempotency_key           String?
+  payment_requests          payment_requests? @relation(fields: [payment_request_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects                  projects?         @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([project_id, status], map: "ix_payments_project_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model pricing_packages {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  description String?
+  category    String?   @db.VarChar(100)
+  base_price  Decimal?  @db.Decimal(12, 2)
+  currency    String    @default("USD") @db.Char(3)
+  price_type  String?   @db.VarChar(50)
+  valid_from  DateTime? @db.Date
+  valid_to    DateTime? @db.Date
+  priority    Int       @default(0)
+  active      Boolean   @default(true)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([active, priority(sort: Desc)], map: "ix_pricing_packages_active")
+}
+
+model project_collaborators {
+  project_id String   @db.Uuid
+  user_id    String   @db.Uuid
+  added_at   DateTime @default(now()) @db.Timestamptz(6)
+  projects   projects @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([project_id, user_id])
+}
+
+model project_portions {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id String   @db.Uuid
+  portions   Json
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  projects   projects @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model project_pricing {
+  id                        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id                String          @db.Uuid
+  source_pricing_package_id String?         @db.Uuid
+  snapshot_name             String?
+  snapshot_base_price       Decimal?        @db.Decimal(12, 2)
+  snapshot_currency         String?         @db.Char(3)
+  guest_count_snapshot      Int?
+  line_items                Json?
+  subtotal                  Decimal?        @db.Decimal(12, 2)
+  tax                       Decimal?        @db.Decimal(12, 2)
+  service_charge            Decimal?        @db.Decimal(12, 2)
+  admin_fee                 Decimal?        @db.Decimal(12, 2)
+  negotiated_adjustment     Decimal?        @db.Decimal(12, 2)
+  final_total               Decimal?        @db.Decimal(12, 2)
+  status                    String          @default("calculated")
+  approved_by_user_id       String?         @db.Uuid
+  copied_at                 DateTime        @default(now()) @db.Timestamptz(6)
+  cost_of_goods             cost_of_goods[]
+  users                     users?          @relation(fields: [approved_by_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects                  projects        @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([line_items], map: "ix_project_pricing_line_items_gin", type: Gin)
+  @@index([project_id], map: "ix_project_pricing_project")
+}
+
+model project_staffing {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id    String   @db.Uuid
+  staffing_plan Json
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  projects      projects @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model projects {
+  id                                               String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_user_id                                    String                  @db.Uuid
+  title                                            String
+  event_date                                       DateTime?               @db.Date
+  event_end_date                                   DateTime?               @db.Date
+  guest_count                                      Int?
+  status                                           project_status          @default(draft)
+  ai_event_summary                                 String?
+  created_at                                       DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at                                       DateTime                @default(now()) @db.Timestamptz(6)
+  deleted_at                                       DateTime?               @db.Timestamptz(6)
+  deleted_by                                       String?                 @db.Uuid
+  signed_contract_id                               String?                 @db.Uuid
+  activity_log                                     activity_log[]
+  attachments                                      attachments[]
+  change_orders                                    change_orders[]
+  contracts_contracts_project_idToprojects         contracts[]             @relation("contracts_project_idToprojects")
+  crm_pipeline                                     crm_pipeline?
+  event_analytics                                  event_analytics[]
+  event_timeline_items                             event_timeline_items[]
+  events                                           events[]
+  follow_ups                                       follow_ups[]
+  margin_alerts                                    margin_alerts[]
+  messages                                         messages[]
+  payment_schedules                                payment_schedules[]
+  payments                                         payments[]
+  project_collaborators                            project_collaborators[]
+  project_portions                                 project_portions[]
+  project_pricing                                  project_pricing[]
+  project_staffing                                 project_staffing[]
+  contracts_projects_signed_contract_idTocontracts contracts?              @relation("projects_signed_contract_idTocontracts", fields: [signed_contract_id], references: [id], onUpdate: NoAction, map: "fk_projects_signed_contract")
+  users                                            users                   @relation(fields: [owner_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  threads                                          threads[]
+  upsell_suggestions                               upsell_suggestions[]
+
+  @@index([owner_user_id], map: "ix_projects_owner")
+  @@index([status, event_date], map: "ix_projects_status_event_date")
+}
+
+model refresh_tokens {
+  id                           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  session_id                   String?   @db.Uuid
+  token_hash                   String
+  issued_at                    DateTime  @default(now()) @db.Timestamptz(6)
+  used_at                      DateTime? @db.Timestamptz(6)
+  revoked_at                   DateTime? @db.Timestamptz(6)
+  replaced_by_refresh_token_id String?   @db.Uuid
+  sessions                     sessions? @relation(fields: [session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model role_permissions {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role_id    String
+  permission String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  roles      roles    @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model roles {
+  id               String             @id
+  description      String?
+  domain           String?
+  role_permissions role_permissions[]
+  user_roles       user_roles[]
+}
+
+model service_accounts {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  owner_user_id String?    @db.Uuid
+  metadata      Json?
+  created_at    DateTime?  @default(now()) @db.Timestamptz(6)
+  api_keys      api_keys[]
+  users         users?     @relation(fields: [owner_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model sessions {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id            String           @db.Uuid
+  session_token_hash String
+  created_at         DateTime?        @default(now()) @db.Timestamptz(6)
+  last_active_at     DateTime?        @db.Timestamptz(6)
+  expires_at         DateTime         @db.Timestamptz(6)
+  device_info        Json?
+  ip_address         String?
+  revoked_at         DateTime?        @db.Timestamptz(6)
+  refresh_tokens     refresh_tokens[]
+  users              users            @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model threads {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id       String     @db.Uuid
+  subject          String?
+  created_by       String?    @db.Uuid
+  is_resolved      Boolean    @default(false)
+  message_count    Int        @default(0)
+  last_activity_at DateTime?  @db.Timestamptz(6)
+  created_at       DateTime   @default(now()) @db.Timestamptz(6)
+  messages         messages[]
+  users            users?     @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects         projects   @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([project_id, last_activity_at(sort: Desc)], map: "ix_threads_project_last_activity")
+}
+
+model upsell_suggestions {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id  String   @db.Uuid
+  suggestions Json
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  projects    projects @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model user_profiles {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String   @db.Uuid
+  profile_type String
+  metadata     Json     @default("{}")
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+  users        users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([profile_type], map: "ix_user_profiles_type")
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model user_roles {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @db.Uuid
+  role_id    String
+  scope_type String
+  scope_id   String?  @db.Uuid
+  granted_by String?  @db.Uuid
+  granted_at DateTime @default(now()) @db.Timestamptz(6)
+  roles      roles    @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([role_id], map: "ix_user_roles_role")
+}
+
+model users {
+  id                                             String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                                          String                  @unique
+  password_hash                                  String?
+  primary_phone                                  String?
+  status                                         String                  @default("active")
+  created_at                                     DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at                                     DateTime                @default(now()) @db.Timestamptz(6)
+  deleted_at                                     DateTime?               @db.Timestamptz(6)
+  deleted_by                                     String?                 @db.Uuid
+  activity_log                                   activity_log[]
+  attachments                                    attachments[]
+  auth_tokens                                    auth_tokens[]
+  change_orders                                  change_orders[]
+  contracts_contracts_approved_by_user_idTousers contracts[]             @relation("contracts_approved_by_user_idTousers")
+  contracts_contracts_created_byTousers          contracts[]             @relation("contracts_created_byTousers")
+  crm_pipeline                                   crm_pipeline[]
+  events                                         events[]
+  message_mentions                               message_mentions[]
+  messages                                       messages[]
+  notifications                                  notifications[]
+  oauth_accounts                                 oauth_accounts[]
+  payment_requests                               payment_requests[]
+  payment_schedules                              payment_schedules[]
+  project_collaborators                          project_collaborators[]
+  project_pricing                                project_pricing[]
+  projects                                       projects[]
+  service_accounts                               service_accounts[]
+  sessions                                       sessions[]
+  threads                                        threads[]
+  user_profiles                                  user_profiles[]
+  user_roles                                     user_roles[]
+
+  @@index([status, created_at], map: "ix_users_status_created_at")
+}
+
+model webhook_events {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider           String
+  external_event_id  String
+  event_type         String?
+  payload            Json?
+  idempotency_hash   String?
+  received_at        DateTime       @default(now()) @db.Timestamptz(6)
+  processed_at       DateTime?      @db.Timestamptz(6)
+  status             webhook_status @default(pending)
+  attempt_count      Int            @default(0)
+  last_attempt_at    DateTime?      @db.Timestamptz(6)
+  next_attempt_at    DateTime?      @db.Timestamptz(6)
+  last_response_code Int?
+  last_response_body String?
+  error              String?
+
+  @@unique([provider, external_event_id], map: "ux_webhook_provider_event")
+  @@index([idempotency_hash], map: "ix_webhook_idempotency_hash")
+  @@index([status, next_attempt_at], map: "ix_webhook_status_next_attempt")
+}
+
+enum project_status {
+  draft
+  active
+  confirmed
+  completed
+  cancelled
+}
+
+enum payment_status {
+  pending
+  authorized
+  paid
+  failed
+  refunded
+  void
+}
+
+enum contract_status {
+  draft
+  sent
+  signed
+  cancelled
+  expired
+  superseded
+}
+
+enum webhook_status {
+  pending
+  processed
+  failed
+  duplicate
+}

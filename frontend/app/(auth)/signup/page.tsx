@@ -4,9 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { apiClient } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/store/auth-store";
 
 export default function SignUpPage() {
   const router = useRouter();
+  const setUser = useAuthStore((state) => state.setUser);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -16,8 +19,7 @@ export default function SignUpPage() {
     last_name: "",
     email: "",
     password: "",
-    phone_number: "",
-    company_name: "",
+    primary_phone: "",
   });
 
   // Password strength indicator
@@ -39,25 +41,11 @@ export default function SignUpPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:3001/api/auth/signup", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include", // Important for cookies
-        body: JSON.stringify(formData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to create account");
-      }
-
-      // Redirect to dashboard on success
+      const data: any = await apiClient.post("/auth/signup", formData);
+      setUser(data.user);
       router.push("/projects");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create account");
+    } catch (err: any) {
+      setError(err.message || "Failed to create account");
     } finally {
       setIsLoading(false);
     }
@@ -192,31 +180,16 @@ export default function SignUpPage() {
             )}
           </div>
 
-          {/* Optional fields */}
+          {/* Phone number */}
           <div>
-            <label htmlFor="company_name" className="block text-sm font-medium text-gray-700 mb-2">
-              Company name <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
-            <input
-              id="company_name"
-              type="text"
-              value={formData.company_name}
-              onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
-              className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
-              placeholder="Acme Catering Co."
-              disabled={isLoading}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="phone_number" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="primary_phone" className="block text-sm font-medium text-gray-700 mb-2">
               Phone number <span className="text-gray-400 font-normal">(optional)</span>
             </label>
             <input
-              id="phone_number"
+              id="primary_phone"
               type="tel"
-              value={formData.phone_number}
-              onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+              value={formData.primary_phone}
+              onChange={(e) => setFormData({ ...formData, primary_phone: e.target.value })}
               className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
               placeholder="+1 (555) 000-0000"
               disabled={isLoading}

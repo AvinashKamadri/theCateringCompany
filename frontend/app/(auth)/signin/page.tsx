@@ -4,9 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { apiClient } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/store/auth-store";
 
 export default function SignInPage() {
   const router = useRouter();
+  const setUser = useAuthStore((state) => state.setUser);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -22,25 +25,11 @@ export default function SignInPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:3001/api/auth/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include", // Important for cookies
-        body: JSON.stringify(formData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to sign in");
-      }
-
-      // Redirect to dashboard on success
+      const data: any = await apiClient.post("/auth/login", formData);
+      setUser(data.user);
       router.push("/projects");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to sign in");
+    } catch (err: any) {
+      setError(err.message || "Failed to sign in");
     } finally {
       setIsLoading(false);
     }

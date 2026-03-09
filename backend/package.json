@@ -11,7 +11,9 @@
     "test": "jest",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy"
+    "prisma:migrate": "prisma migrate deploy",
+    "seed:users": "ts-node src/scripts/seed-users.ts",
+    "seed:menu": "ts-node src/scripts/seed-menu.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

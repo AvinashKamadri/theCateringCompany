@@ -70,6 +70,16 @@ export class MessagesController {
   }
 
   /**
+   * GET /projects/:projectId/collaborators
+   * Get collaborators for mention autocomplete.
+   */
+  @Get('projects/:projectId/collaborators')
+  async getProjectCollaborators(@Param('projectId') projectId: string) {
+    const collaborators = await this.messagesService.getProjectCollaborators(projectId);
+    return { collaborators };
+  }
+
+  /**
    * POST /threads/:threadId/messages
    * Create a message in a thread. Emits socket event and optionally enqueues vector indexing.
    */
@@ -77,17 +87,33 @@ export class MessagesController {
   async createMessage(
     @Param('threadId') threadId: string,
     @CurrentUser() user: { userId: string },
-    @Body() body: { content: string; parentMessageId?: string },
+    @Body() body: { content: string; parentMessageId?: string; mentionedUserIds?: string[] },
   ) {
-    const { message, projectId } = await this.messagesService.createMessage(
+    const { message, projectId, mentionedUserIds } = await this.messagesService.createMessage(
       user.userId,
       threadId,
-      { content: body.content, parentMessageId: body.parentMessageId },
+      {
+        content: body.content,
+        parentMessageId: body.parentMessageId,
+        mentionedUserIds: body.mentionedUserIds,
+      },
     );
 
     // Emit socket event to thread and project rooms
     this.socketsGateway.emitToRoom(`thread:${threadId}`, 'message.created', message);
     this.socketsGateway.emitToRoom(`project:${projectId}`, 'message.created', message);
+
+    // Send mention notifications to mentioned users
+    if (mentionedUserIds && mentionedUserIds.length > 0) {
+      for (const mentionedUserId of mentionedUserIds) {
+        this.socketsGateway.emitToUser(mentionedUserId, 'message.mentioned', {
+          messageId: message.id,
+          threadId,
+          projectId,
+          authorId: user.userId,
+        });
+      }
+    }
 
     // Enqueue vector indexing if enabled
     if (process.env.VECTOR_ENABLED === 'true') {

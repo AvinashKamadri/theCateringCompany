@@ -23,10 +23,46 @@ export class ProjectsService {
           },
         ],
       },
+      include: {
+        venues: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        project_pricing: {
+          select: {
+            id: true,
+            project_id: true,
+          },
+          take: 1,
+        },
+        events: {
+          select: {
+            id: true,
+            event_type: true,
+          },
+          take: 1,
+        },
+      },
       orderBy: { created_at: 'desc' },
     });
 
-    return projects;
+    // Transform the response to flatten the structure
+    return projects.map((project: any) => ({
+      id: project.id,
+      name: project.title,
+      event_type: project.events?.[0]?.event_type || 'general',
+      event_date: project.event_date,
+      event_end_date: project.event_end_date,
+      guest_count: project.guest_count,
+      status: project.status,
+      total_price: null, // Will be populated when pricing is available
+      venue_name: project.venues?.name,
+      venue_id: project.venue_id,
+      created_at: project.created_at,
+      updated_at: project.updated_at,
+    }));
   }
 
   /**

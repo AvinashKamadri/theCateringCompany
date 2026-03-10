@@ -19,8 +19,13 @@ export class AuthService {
   async signup(
     email: string,
     password: string,
+    profile?: {
+      primary_phone?: string;
+      first_name?: string;
+      last_name?: string;
+    },
   ): Promise<{
-    user: { id: string; email: string };
+    user: any;
     accessToken: string;
     refreshToken: string;
   }> {
@@ -33,18 +38,79 @@ export class AuthService {
 
     const passwordHash = await argon2.hash(password);
 
-    const user = await this.prisma.users.create({
-      data: {
-        email,
-        password_hash: passwordHash,
-      },
+    // Determine role based on email domain
+    const isStaff =
+      email.endsWith('@flashbacklabs.com') ||
+      email.endsWith('@flashbacklabs.inc') ||
+      email.endsWith('@flashback.inc');
+    const roleId = isStaff ? 'staff' : 'host';
+    const profileType = isStaff ? 'staff' : 'client';
+
+    // Create user, profile, and assign role in a transaction
+    const user = await this.prisma.$transaction(async (tx) => {
+      console.log('=== TRANSACTION START ===');
+      console.log('Email:', email);
+      console.log('Role to assign:', roleId);
+      console.log('Profile type:', profileType);
+      console.log('Profile data:', profile);
+
+      try {
+        // 1. Create user
+        console.log('Step 1: Creating user...');
+        const newUser = await tx.users.create({
+          data: {
+            email,
+            password_hash: passwordHash,
+            primary_phone: profile?.primary_phone || null,
+            status: 'active',
+          },
+        });
+        console.log('User created with ID:', newUser.id);
+
+        // 2. Create user profile with metadata
+        if (profile?.first_name || profile?.last_name) {
+          console.log('Step 2: Creating user profile...');
+          const userProfile = await tx.user_profiles.create({
+            data: {
+              user_id: newUser.id,
+              profile_type: profileType,
+              metadata: {
+                first_name: profile?.first_name || '',
+                last_name: profile?.last_name || '',
+              },
+            },
+          });
+          console.log('User profile created with ID:', userProfile.id);
+        } else {
+          console.log('Step 2: Skipping user profile (no name provided)');
+        }
+
+        // 3. Assign role based on email domain
+        console.log('Step 3: Assigning role...');
+        const userRole = await tx.user_roles.create({
+          data: {
+            user_id: newUser.id,
+            role_id: roleId,
+            scope_type: 'global',
+            scope_id: null,
+          },
+        });
+        console.log('Role assigned with ID:', userRole.id);
+        console.log('=== TRANSACTION SUCCESS ===');
+
+        return newUser;
+      } catch (error) {
+        console.error('=== TRANSACTION ERROR ===');
+        console.error('Error details:', error);
+        throw error;
+      }
     });
 
     const { accessToken, refreshToken, sessionId } =
       await this.createSessionAndTokens(user.id, user.email);
 
     return {
-      user: { id: user.id, email: user.email },
+      user,
       accessToken,
       refreshToken,
     };
@@ -54,7 +120,7 @@ export class AuthService {
     email: string,
     password: string,
   ): Promise<{
-    user: { id: string; email: string };
+    user: any;
     accessToken: string;
     refreshToken: string;
   }> {
@@ -74,7 +140,7 @@ export class AuthService {
       await this.createSessionAndTokens(user.id, user.email);
 
     return {
-      user: { id: user.id, email: user.email },
+      user,
       accessToken,
       refreshToken,
     };

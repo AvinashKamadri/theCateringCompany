@@ -22,16 +22,39 @@ export class AuthController {
   @Public()
   @Post('signup')
   async signup(
-    @Body() body: { email: string; password: string },
+    @Body()
+    body: {
+      email: string;
+      password: string;
+      primary_phone?: string;
+      first_name?: string;
+      last_name?: string;
+    },
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { user, accessToken, refreshToken } =
-      await this.authService.signup(body.email, body.password);
+    const { user, accessToken, refreshToken } = await this.authService.signup(
+      body.email,
+      body.password,
+      {
+        primary_phone: body.primary_phone,
+        first_name: body.first_name,
+        last_name: body.last_name,
+      },
+    );
 
     this.setAccessTokenCookie(res, accessToken);
     this.setRefreshTokenCookie(res, refreshToken);
 
-    return { user: { id: user.id, email: user.email } };
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        primary_phone: user.primary_phone,
+        status: user.status,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+      },
+    };
   }
 
   @Public()
@@ -47,7 +70,16 @@ export class AuthController {
     this.setAccessTokenCookie(res, accessToken);
     this.setRefreshTokenCookie(res, refreshToken);
 
-    return { user: { id: user.id, email: user.email } };
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        primary_phone: user.primary_phone,
+        status: user.status,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+      },
+    };
   }
 
   @UseGuards(AuthGuard('jwt'))
@@ -99,6 +131,10 @@ export class AuthController {
       user: {
         id: dbUser.id,
         email: dbUser.email,
+        primary_phone: dbUser.primary_phone,
+        status: dbUser.status,
+        created_at: dbUser.created_at,
+        updated_at: dbUser.updated_at,
       },
     };
   }

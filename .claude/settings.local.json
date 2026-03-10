@@ -4,7 +4,17 @@
       "Bash(npm install:*)",
       "Bash(docker-compose up:*)",
       "Bash(docker compose:*)",
-      "Bash(npx prisma db push:*)"
+      "Bash(npx prisma db push:*)",
+      "Bash(psql:*)",
+      "Bash(PGPASSWORD=Avinash1617 psql:*)",
+      "Bash(npx prisma db pull:*)",
+      "Bash(PGPASSWORD='Avinash@1617' psql:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run start:dev:*)",
+      "Bash(npm run dev:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)"
     ]
   }
 }

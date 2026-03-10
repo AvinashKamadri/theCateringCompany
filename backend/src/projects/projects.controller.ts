@@ -9,6 +9,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { ProjectsService } from './projects.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('projects')
@@ -55,5 +56,39 @@ export class ProjectsController {
     },
   ) {
     return this.projectsService.create(user.userId, body);
+  }
+
+  /**
+   * POST /projects/ai-intake
+   * Create a new project from AI chat intake with full contract data.
+   * Public endpoint - no authentication required.
+   */
+  @Public()
+  @Post('ai-intake')
+  async createFromAiIntake(
+    @Body()
+    body: {
+      // Contract data from AI
+      client_name: string;
+      contact_email: string;
+      contact_phone: string;
+      event_type: string;
+      event_date: string;
+      guest_count: number;
+      service_type: string;
+      menu_items: string[];
+      dietary_restrictions: string[];
+      budget_range: string;
+      venue_name: string;
+      venue_address: string;
+      setup_time: string;
+      service_time: string;
+      addons: string[];
+      modifications: string[];
+      // Optional fields
+      thread_id?: string;
+    },
+  ) {
+    return this.projectsService.createFromAiIntake(body);
   }
 }

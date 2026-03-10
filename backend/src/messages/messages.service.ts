@@ -8,6 +8,7 @@ interface CreateThreadDto {
 interface CreateMessageDto {
   content: string;
   parentMessageId?: string;
+  mentionedUserIds?: string[];
 }
 
 @Injectable()
@@ -44,15 +45,29 @@ export class MessagesService {
         orderBy: { created_at: 'asc' },
         skip,
         take: limit,
+        include: {
+          message_mentions: {
+            select: {
+              mentioned_user_id: true,
+            },
+          },
+        },
       }),
       this.prisma.messages.count({
         where: { thread_id: threadId, is_deleted: false },
       }),
     ]);
 
+    // Transform messages to include mentioned_user_ids array
+    const transformedMessages = messages.map((msg) => ({
+      ...msg,
+      mentioned_user_ids: msg.message_mentions.map((m) => m.mentioned_user_id),
+      message_mentions: undefined,
+    }));
+
     return {
       thread,
-      messages,
+      messages: transformedMessages,
       pagination: {
         page,
         limit,
@@ -91,26 +106,86 @@ export class MessagesService {
 
     const projectId = thread.project_id;
 
-    const message = await this.prisma.messages.create({
-      data: {
-        thread_id: threadId,
-        project_id: projectId,
-        author_id: userId,
-        sender_type: 'user',
-        content: dto.content,
-        parent_message_id: dto.parentMessageId ?? null,
+    // Extract mentions from content if not provided
+    const mentionedUserIds = dto.mentionedUserIds || this.extractMentions(dto.content);
+
+    // Use transaction to create message and mentions atomically
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Create the message
+      const message = await tx.messages.create({
+        data: {
+          thread_id: threadId,
+          project_id: projectId,
+          author_id: userId,
+          sender_type: 'user',
+          content: dto.content,
+          parent_message_id: dto.parentMessageId ?? null,
+        },
+      });
+
+      // Create mention records if any
+      if (mentionedUserIds.length > 0) {
+        await tx.message_mentions.createMany({
+          data: mentionedUserIds.map((mentionedUserId) => ({
+            message_id: message.id,
+            mentioned_user_id: mentionedUserId,
+            mention_type: 'direct',
+          })),
+        });
+      }
+
+      // Update thread metadata: bump last_activity_at and increment message_count
+      await tx.threads.update({
+        where: { id: threadId },
+        data: {
+          last_activity_at: new Date(),
+          message_count: { increment: 1 },
+        },
+      });
+
+      return message;
+    });
+
+    return { message: result, projectId, mentionedUserIds };
+  }
+
+  /**
+   * Extract user IDs from @mentions in message content.
+   * Format: @[userId:displayName]
+   */
+  private extractMentions(content: string): string[] {
+    const mentionRegex = /@\[([a-f0-9-]+):[^\]]+\]/g;
+    const mentions: string[] = [];
+    let match;
+
+    while ((match = mentionRegex.exec(content)) !== null) {
+      mentions.push(match[1]);
+    }
+
+    return mentions;
+  }
+
+  /**
+   * Get project collaborators for mention autocomplete.
+   */
+  async getProjectCollaborators(projectId: string) {
+    const collaborators = await this.prisma.project_collaborators.findMany({
+      where: { project_id: projectId },
+      include: {
+        users: {
+          select: {
+            id: true,
+            email: true,
+            primary_phone: true,
+          },
+        },
       },
     });
 
-    // Update thread metadata: bump last_activity_at and increment message_count
-    await this.prisma.threads.update({
-      where: { id: threadId },
-      data: {
-        last_activity_at: new Date(),
-        message_count: { increment: 1 },
-      },
-    });
-
-    return { message, projectId };
+    return collaborators.map((c) => ({
+      id: c.users.id,
+      email: c.users.email,
+      role: c.role,
+    }));
   }
 }

@@ -23,10 +23,46 @@ export class ProjectsService {
           },
         ],
       },
+      include: {
+        venues: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        project_pricing: {
+          select: {
+            id: true,
+            project_id: true,
+          },
+          take: 1,
+        },
+        events: {
+          select: {
+            id: true,
+            event_type: true,
+          },
+          take: 1,
+        },
+      },
       orderBy: { created_at: 'desc' },
     });
 
-    return projects;
+    // Transform the response to flatten the structure
+    return projects.map((project: any) => ({
+      id: project.id,
+      name: project.title,
+      event_type: project.events?.[0]?.event_type || 'general',
+      event_date: project.event_date,
+      event_end_date: project.event_end_date,
+      guest_count: project.guest_count,
+      status: project.status,
+      total_price: null, // Will be populated when pricing is available
+      venue_name: project.venues?.name,
+      venue_id: project.venue_id,
+      created_at: project.created_at,
+      updated_at: project.updated_at,
+    }));
   }
 
   /**
@@ -98,6 +134,78 @@ export class ProjectsService {
       });
 
       return project;
+    });
+  }
+
+  /**
+   * Create a project from AI chat intake with full contract data.
+   * Creates:
+   * - Project record
+   * - AI conversation state record (if thread_id provided)
+   * - Stores contract data in ai_event_summary
+   */
+  async createFromAiIntake(dto: {
+    client_name: string;
+    contact_email: string;
+    contact_phone: string;
+    event_type: string;
+    event_date: string;
+    guest_count: number;
+    service_type: string;
+    menu_items: string[];
+    dietary_restrictions: string[];
+    budget_range: string;
+    venue_name: string;
+    venue_address: string;
+    setup_time: string;
+    service_time: string;
+    addons: string[];
+    modifications: string[];
+    thread_id?: string;
+  }) {
+    return this.prisma.$transaction(async (tx) => {
+      // Create project with full AI data
+      const project = await tx.projects.create({
+        data: {
+          // Use AI system user ID or create a placeholder
+          owner_user_id: 'AI_SYSTEM', // You may want to replace this with actual system user
+          title: `${dto.event_type} - ${dto.client_name}`,
+          event_date: new Date(dto.event_date),
+          guest_count: dto.guest_count,
+          status: 'draft',
+          created_via_ai_intake: true,
+          ai_event_summary: JSON.stringify(dto),
+        },
+      });
+
+      // Create venue if doesn't exist
+      let venue = await tx.venues.findFirst({
+        where: { name: dto.venue_name },
+      });
+
+      if (!venue) {
+        venue = await tx.venues.create({
+          data: {
+            name: dto.venue_name,
+            address: dto.venue_address,
+          },
+        });
+      }
+
+      // Link venue to project
+      await tx.projects.update({
+        where: { id: project.id },
+        data: { venue_id: venue.id },
+      });
+
+      // Note: All contract data is stored in ai_event_summary JSON field
+      // The events table is for audit logs, not catering event details
+
+      return {
+        project,
+        venue,
+        contract_data: dto,
+      };
     });
   }
 }

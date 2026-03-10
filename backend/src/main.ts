@@ -8,14 +8,21 @@ async function bootstrap() {
   });
 
   app.use(cookieParser());
+
+  // CORS Configuration - Allow all origins in development
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: true, // Allow all origins in development
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+    exposedHeaders: ['Set-Cookie'],
   });
+
   app.setGlobalPrefix('api');
 
   const port = process.env.BACKEND_PORT || 3001;
   await app.listen(port);
-  console.log(`Backend running on port ${port}`);
+  console.log(`🚀 Backend running on port ${port}`);
+  console.log(`✅ CORS enabled for all origins`);
 }
 bootstrap();

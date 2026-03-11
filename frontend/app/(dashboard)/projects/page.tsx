@@ -187,17 +187,19 @@ export default function ProjectsPage() {
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                       <Calendar className="h-4 w-4 text-gray-400" />
                       <span>
-                        {new Date(project.event_date).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
+                        {project.event_date
+                          ? new Date(project.event_date).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })
+                          : 'Date TBD'}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                       <Users className="h-4 w-4 text-gray-400" />
-                      <span>{project.guest_count} guests</span>
+                      <span>{project.guest_count != null ? `${project.guest_count} guests` : 'Guests TBD'}</span>
                     </div>
 
                     {project.venue_name && (

@@ -1,0 +1,332 @@
+// Prisma schema — 11 production tables for the AI catering agent
+// Maps to catering_company PostgreSQL database
+
+generator client {
+  provider                    = "prisma-client-py"
+  interface                   = "asyncio"
+  recursive_type_depth        = 5
+  enable_experimental_decimal = true
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── 1. Users (minimal, for FK references) ───
+
+model users {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String    @unique
+  password_hash String?
+  primary_phone String?
+  status        String    @default("active")
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @db.Timestamptz(6)
+  deleted_at    DateTime? @db.Timestamptz(6)
+  deleted_by    String?   @db.Uuid
+
+  projects_owned            projects[]         @relation("projects_owner")
+  projects_deleted          projects[]         @relation("projects_deleted_by")
+  threads_created           threads[]
+  messages_authored         messages[]
+  contracts_created         contracts[]        @relation("contracts_created_by")
+  contracts_approved        contracts[]        @relation("contracts_approved_by")
+  contracts_deleted         contracts[]        @relation("contracts_deleted_by")
+  ai_generations_triggered  ai_generations[]
+
+  @@index([email], map: "ix_users_email")
+}
+
+// ─── 2. Projects ───
+
+model projects {
+  id                       String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_user_id            String         @db.Uuid
+  title                    String
+  event_date               DateTime?      @db.Date
+  event_end_date           DateTime?      @db.Date
+  guest_count              Int?
+  status                   project_status @default(draft)
+  ai_event_summary         String?
+  created_via_ai_intake    Boolean        @default(false)
+  ai_conversation_state_id String?        @db.Uuid
+  signed_contract_id       String?        @db.Uuid
+  created_at               DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime       @default(now()) @db.Timestamptz(6)
+  deleted_at               DateTime?      @db.Timestamptz(6)
+  deleted_by               String?        @db.Uuid
+
+  owner                    users                    @relation("projects_owner", fields: [owner_user_id], references: [id])
+  deleted_by_user          users?                   @relation("projects_deleted_by", fields: [deleted_by], references: [id])
+  ai_conversation_state    ai_conversation_states?  @relation("project_ai_state", fields: [ai_conversation_state_id], references: [id], onUpdate: NoAction, map: "fk_projects_ai_conv_state")
+  signed_contract          contracts?               @relation("project_signed_contract", fields: [signed_contract_id], references: [id], onUpdate: NoAction, map: "fk_projects_signed_contract")
+  threads                  threads[]
+  ai_conversation_states   ai_conversation_states[] @relation("ai_conv_project")
+  messages                 messages[]
+  contracts                contracts[]              @relation("contracts_project")
+  ai_generations           ai_generations[]
+
+  @@index([status, event_date], map: "ix_projects_status_event")
+  @@index([owner_user_id], map: "ix_projects_owner")
+}
+
+// ─── 3. Threads ───
+
+model threads {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id       String    @db.Uuid
+  subject          String?
+  created_by       String?   @db.Uuid
+  is_resolved      Boolean   @default(false)
+  message_count    Int       @default(0)
+  last_activity_at DateTime? @db.Timestamptz(6)
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+
+  project                projects                @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  creator                users?                  @relation(fields: [created_by], references: [id])
+  ai_conversation_state  ai_conversation_states?
+  messages               messages[]
+
+  @@index([project_id, last_activity_at(sort: Desc)], map: "ix_threads_project_activity")
+}
+
+// ─── 4. AI Conversation States ───
+
+model ai_conversation_states {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  thread_id    String   @unique @db.Uuid
+  project_id   String?  @db.Uuid
+  current_node String   @default("start")
+  slots        Json     @default("{}")
+  is_completed Boolean  @default(false)
+  next_action  String?
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  thread                threads    @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+  project               projects?  @relation("ai_conv_project", fields: [project_id], references: [id])
+  projects_linked       projects[] @relation("project_ai_state")
+  messages              messages[]
+
+  @@index([project_id], map: "ix_ai_conv_states_project")
+}
+
+// ─── 5. Messages ───
+
+model messages {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  thread_id                String    @db.Uuid
+  parent_message_id        String?   @db.Uuid
+  project_id               String    @db.Uuid
+  author_id                String?   @db.Uuid
+  sender_type              String?
+  content                  String
+  attachments              Json?
+  ai_conversation_state_id String?   @db.Uuid
+  qdrant_vector_id         String?
+  vector_indexed_at        DateTime? @db.Timestamptz(6)
+  vector_status            String    @default("pending")
+  is_deleted               Boolean   @default(false)
+  created_at               DateTime  @default(now()) @db.Timestamptz(6)
+  last_edited_at           DateTime? @db.Timestamptz(6)
+
+  thread                 threads                 @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+  parent_message         messages?               @relation("message_replies", fields: [parent_message_id], references: [id])
+  child_messages         messages[]              @relation("message_replies")
+  project                projects                @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  author                 users?                  @relation(fields: [author_id], references: [id])
+  ai_conversation_state  ai_conversation_states? @relation(fields: [ai_conversation_state_id], references: [id])
+
+  @@index([thread_id, created_at(sort: Desc)], map: "ix_messages_thread_created")
+}
+
+// ─── 6. Contracts ───
+
+model contracts {
+  id                  String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contract_group_id   String          @db.Uuid
+  version_number      Int
+  previous_version_id String?         @db.Uuid
+  project_id          String          @db.Uuid
+  status              contract_status @default(draft)
+  title               String?
+  body                Json
+  pdf_path            String?
+  total_amount        Decimal?        @db.Decimal(12, 2)
+  change_reason       String?
+  metadata            Json?
+  is_active           Boolean         @default(true)
+  ai_generated        Boolean         @default(false)
+  esign_provider      esign_provider?
+  esign_envelope_id   String?
+  created_by          String          @db.Uuid
+  approved_by_user_id String?         @db.Uuid
+  seen_by_client_at   DateTime?       @db.Timestamptz(6)
+  sent_at             DateTime?       @db.Timestamptz(6)
+  client_signed_at    DateTime?       @db.Timestamptz(6)
+  expires_at          DateTime?       @db.Timestamptz(6)
+  created_at          DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime        @default(now()) @db.Timestamptz(6)
+  deleted_at          DateTime?       @db.Timestamptz(6)
+  deleted_by          String?         @db.Uuid
+
+  previous_version         contracts?         @relation("contract_versions", fields: [previous_version_id], references: [id])
+  newer_versions           contracts[]        @relation("contract_versions")
+  project                  projects           @relation("contracts_project", fields: [project_id], references: [id], onDelete: Cascade)
+  created_by_user          users              @relation("contracts_created_by", fields: [created_by], references: [id])
+  approved_by_user         users?             @relation("contracts_approved_by", fields: [approved_by_user_id], references: [id])
+  deleted_by_user          users?             @relation("contracts_deleted_by", fields: [deleted_by], references: [id])
+  projects_signed          projects[]         @relation("project_signed_contract")
+  contract_clauses         contract_clauses[]
+
+  @@unique([contract_group_id, version_number], map: "ux_contract_group_version")
+  @@index([status], map: "ix_contracts_status")
+}
+
+// ─── 7. Contract Clauses ───
+
+model contract_clauses {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contract_id        String   @db.Uuid
+  clause_template_id String?  @db.Uuid
+  content            String
+  sort_order         Int      @default(0)
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+
+  contract contracts @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+
+  @@index([contract_id], map: "ix_contract_clauses_contract")
+}
+
+// ─── 8. Menu Categories ───
+
+model menu_categories {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String       @unique
+  sort_order Int          @default(0)
+  active     Boolean      @default(true)
+  created_at DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at DateTime     @default(now()) @db.Timestamptz(6)
+
+  menu_items menu_items[]
+}
+
+// ─── 9. Menu Items ───
+
+model menu_items {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  category_id      String?         @db.Uuid
+  name             String
+  description      String?
+  unit_cost        Decimal?        @db.Decimal(10, 2)
+  unit_price       Decimal?        @db.Decimal(10, 2)
+  currency         String          @default("USD") @db.Char(3)
+  price_type       price_type?
+  minimum_quantity Int             @default(1)
+  allergens        String[]
+  tags             String[]
+  is_upsell        Boolean         @default(false)
+  active           Boolean         @default(true)
+  created_at       DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime        @default(now()) @db.Timestamptz(6)
+
+  menu_categories menu_categories? @relation(fields: [category_id], references: [id])
+
+  @@index([category_id], map: "ix_menu_items_category")
+  @@index([active], map: "ix_menu_items_active")
+  @@index([tags], map: "ix_menu_items_tags", type: Gin)
+}
+
+// ─── 10. Pricing Packages ───
+
+model pricing_packages {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  description String?
+  category    String?
+  base_price  Decimal?   @db.Decimal(12, 2)
+  currency    String     @default("USD") @db.Char(3)
+  price_type  price_type?
+  valid_from  DateTime?  @db.Date
+  valid_to    DateTime?  @db.Date
+  priority    Int        @default(0)
+  active      Boolean    @default(true)
+  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+
+  @@index([active, priority(sort: Desc)], map: "ix_pricing_packages_active")
+}
+
+// ─── 11. AI Generations (audit log) ───
+
+model ai_generations {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entity_type     ai_entity_type
+  entity_id       String?        @db.Uuid
+  project_id      String?        @db.Uuid
+  triggered_by    String?        @db.Uuid
+  model           String
+  prompt_version  String?
+  prompt_hash     String?
+  input_summary   Json?
+  output          String?
+  output_tokens   Int?
+  input_tokens    Int?
+  latency_ms      Int?
+  was_applied     Boolean        @default(false)
+  feedback_rating Int?
+  feedback_notes  String?
+  created_at      DateTime       @default(now()) @db.Timestamptz(6)
+
+  project      projects? @relation(fields: [project_id], references: [id])
+  triggered    users?    @relation(fields: [triggered_by], references: [id])
+
+  @@index([entity_type, entity_id], map: "ix_ai_generations_entity")
+  @@index([project_id], map: "ix_ai_generations_project")
+  @@index([model, created_at(sort: Desc)], map: "ix_ai_generations_model")
+}
+
+// ─── Enums ───
+
+enum project_status {
+  draft
+  active
+  confirmed
+  completed
+  cancelled
+}
+
+enum contract_status {
+  draft
+  sent
+  signed
+  cancelled
+  expired
+  superseded
+}
+
+enum ai_entity_type {
+  contract
+  proposal
+  clause
+  upsell
+  follow_up
+  staffing
+  portions
+  intake_parse
+  pricing
+  beo
+}
+
+enum price_type {
+  per_person
+  flat
+  per_unit
+  per_hour
+}
+
+enum esign_provider {
+  docusign
+  hellosign
+  internal
+}

@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: catering-agent
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: "./build.sh"
+    startCommand: "uvicorn api:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: catering-db
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+
+databases:
+  - name: catering-db
+    plan: free
+    region: oregon

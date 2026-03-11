@@ -5,6 +5,8 @@ import { Send, Loader2, CheckCircle2, Circle, Sparkles } from 'lucide-react';
 import { chatAiApi } from '@/lib/api/chat-ai';
 import type { ChatMessage, ChatState, ContractData } from '@/types/chat-ai.types';
 import { toast } from 'sonner';
+import { CommandDialog } from './command-dialog';
+import { ChatSidebar } from './chat-sidebar';
 
 interface AiChatProps {
   projectId?: string;
@@ -20,6 +22,10 @@ export function AiChat({ projectId, authorId, onComplete }: AiChatProps) {
     isComplete: false,
   });
   const [input, setInput] = useState('');
+  const [commandDialog, setCommandDialog] = useState<{ isOpen: boolean; command: 'menu' | 'events' | null }>({
+    isOpen: false,
+    command: null,
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to latest message
@@ -32,9 +38,37 @@ export function AiChat({ projectId, authorId, onComplete }: AiChatProps) {
     handleSendMessage('Hello! I need help planning my event.');
   }, []);
 
+  // Listen for help requests from sidebar
+  useEffect(() => {
+    const handleHelp = () => {
+      handleSendMessage('/help - I need assistance from your team');
+    };
+    window.addEventListener('chat:help', handleHelp);
+    return () => window.removeEventListener('chat:help', handleHelp);
+  }, []);
+
   const handleSendMessage = async (messageText?: string) => {
     const content = messageText || input.trim();
     if (!content || state.isLoading) return;
+
+    // Check for commands
+    if (content.startsWith('/')) {
+      const command = content.toLowerCase();
+      if (command.startsWith('/menu')) {
+        setCommandDialog({ isOpen: true, command: 'menu' });
+        setInput('');
+        return;
+      }
+      if (command.startsWith('/event')) {
+        setCommandDialog({ isOpen: true, command: 'events' });
+        setInput('');
+        return;
+      }
+      if (command.startsWith('/help')) {
+        // Send help request message
+        toast.success('Help request sent! Our team will assist you shortly.');
+      }
+    }
 
     // Clear input
     setInput('');
@@ -78,14 +112,21 @@ export function AiChat({ projectId, authorId, onComplete }: AiChatProps) {
           total: response.total_slots,
         },
         isComplete: response.is_complete,
-        contractData: response.contract_data,
         isLoading: false,
       }));
 
-      // Handle completion
-      if (response.is_complete && response.contract_data) {
-        toast.success('Event details collected! Review your information below.');
-        onComplete?.(response.contract_data);
+      // Handle completion — fetch full slot data from conversation endpoint
+      if (response.is_complete) {
+        toast.success('Event details collected! Saving your project...');
+        try {
+          const conversation = await chatAiApi.getConversation(response.thread_id);
+          const slots = { ...conversation.slots, thread_id: response.thread_id };
+          setState((prev) => ({ ...prev, contractData: slots }));
+          onComplete?.(slots);
+        } catch (err) {
+          console.error('Failed to fetch conversation slots:', err);
+          toast.error('Could not retrieve event details. Please try again.');
+        }
       }
     } catch (error: any) {
       console.error('Failed to send message:', error);
@@ -107,8 +148,25 @@ export function AiChat({ projectId, authorId, onComplete }: AiChatProps) {
 
   const progressPercentage = (state.progress.filled / state.progress.total) * 100;
 
+  const handleCommandSelect = (selectedOption: string) => {
+    // Send the selected option as a message
+    handleSendMessage(`I'm interested in ${selectedOption}`);
+  };
+
   return (
-    <div className="flex flex-col h-full bg-white">
+    <>
+      <CommandDialog
+        isOpen={commandDialog.isOpen}
+        command={commandDialog.command}
+        onClose={() => setCommandDialog({ isOpen: false, command: null })}
+        onSelect={handleCommandSelect}
+      />
+      <ChatSidebar
+        contractData={state.contractData}
+        slotsFilled={state.progress.filled}
+        totalSlots={state.progress.total}
+      />
+      <div className="flex flex-col h-full bg-white">
       {/* Header with Progress */}
       <div className="border-b border-gray-200 px-6 py-4 bg-gradient-to-r from-blue-50 to-purple-50">
         <div className="flex items-center gap-3 mb-3">
@@ -227,6 +285,28 @@ export function AiChat({ projectId, authorId, onComplete }: AiChatProps) {
       {/* Input */}
       {!state.isComplete && (
         <div className="border-t border-gray-200 px-6 py-4 bg-white">
+          {/* Show "Generate Contract Now" button if enough data collected */}
+          {state.progress.filled >= 8 && state.contractData && (
+            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-blue-900">
+                    Have enough details to generate contract
+                  </p>
+                  <p className="text-xs text-blue-600 mt-0.5">
+                    {state.progress.filled}/{state.progress.total} slots filled
+                  </p>
+                </div>
+                <button
+                  onClick={() => onComplete?.(state.contractData!)}
+                  className="ml-3 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-all whitespace-nowrap"
+                >
+                  Generate Contract
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-end gap-3">
             <textarea
               value={input}
@@ -249,9 +329,16 @@ export function AiChat({ projectId, authorId, onComplete }: AiChatProps) {
               )}
             </button>
           </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Press Enter to send, Shift+Enter for new line
-          </p>
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-xs text-gray-500">
+              Press Enter to send, Shift+Enter for new line
+            </p>
+            <p className="text-xs text-gray-400">
+              Try: <span className="text-blue-600 font-mono">/menu</span>{' '}
+              <span className="text-blue-600 font-mono">/events</span>{' '}
+              <span className="text-blue-600 font-mono">/help</span>
+            </p>
+          </div>
         </div>
       )}
 
@@ -267,5 +354,6 @@ export function AiChat({ projectId, authorId, onComplete }: AiChatProps) {
         </div>
       )}
     </div>
+    </>
   );
 }

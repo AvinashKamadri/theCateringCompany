@@ -5,7 +5,7 @@
  */
 
 import axios, { AxiosError } from 'axios';
-import type { ChatRequest, ChatResponse } from '@/types/chat-ai.types';
+import type { ChatRequest, ChatResponse, ConversationState } from '@/types/chat-ai.types';
 
 const ML_API_BASE_URL = process.env.NEXT_PUBLIC_ML_API_URL || 'http://localhost:8000';
 
@@ -17,7 +17,7 @@ export const chatAiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000, // 30 second timeout for AI responses
+  timeout: 90000, // 90 second timeout for AI responses (contract generation can take time)
 });
 
 // Response interceptor for error handling
@@ -123,17 +123,24 @@ export const chatAiApi = {
 
   /**
    * Continue an existing conversation
-   * @param threadId Existing thread ID
-   * @param message User's message
-   * @returns AI response
    */
   continueConversation: async (
     threadId: string,
     message: string
   ): Promise<ChatResponse> => {
-    return chatAiApi.sendMessage({
-      threadId,
-      message,
-    });
+    return chatAiApi.sendMessage({ threadId, message });
+  },
+
+  /**
+   * Fetch full conversation state including all filled slot values.
+   * Used after is_complete=true to get rich slot data from the Desktop agent.
+   */
+  getConversation: async (threadId: string): Promise<ConversationState> => {
+    try {
+      const response = await chatAiClient.get<ConversationState>(`/conversation/${threadId}`);
+      return response;
+    } catch (error) {
+      throw new Error('Failed to fetch conversation state');
+    }
   },
 };

@@ -6,9 +6,11 @@ import { AiChat } from '@/components/chat/ai-chat';
 import type { ContractData } from '@/types/chat-ai.types';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api/client';
+import { useAuthStore } from '@/lib/store/auth-store';
 
 export default function AiIntakePage() {
   const router = useRouter();
+  const { user } = useAuthStore();
   const [isSaving, setIsSaving] = useState(false);
 
   const handleComplete = async (contractData: ContractData) => {
@@ -17,34 +19,49 @@ export default function AiIntakePage() {
     try {
       console.log('💾 Saving AI-generated project...', contractData);
 
-      // Save contract data to backend using new AI intake endpoint
+      // Desktop TheCateringCompany slot format — field names match SLOT_NAMES in state.py
+      const s = contractData;
+
+      const addons = [
+        s.utensils && s.utensils !== 'no'  ? `Utensils: ${s.utensils}` : null,
+        s.desserts && s.desserts !== 'no'  ? `Desserts: ${s.desserts}` : null,
+        s.rentals  && s.rentals  !== 'no'  ? `Rentals: ${s.rentals}`   : null,
+        s.florals  && s.florals  !== 'no'  ? `Florals: ${s.florals}`   : null,
+      ].filter(Boolean) as string[];
+
       const response = await apiClient.post('/projects/ai-intake', {
-        client_name: contractData.client_name,
-        contact_email: contractData.contact_email,
-        contact_phone: contractData.contact_phone,
-        event_type: contractData.event_type,
-        event_date: contractData.event_date,
-        guest_count: contractData.guest_count,
-        service_type: contractData.service_type,
-        menu_items: contractData.menu_items,
-        dietary_restrictions: contractData.dietary_restrictions,
-        budget_range: contractData.budget_range,
-        venue_name: contractData.venue_name,
-        venue_address: contractData.venue_address,
-        setup_time: contractData.setup_time,
-        service_time: contractData.service_time,
-        addons: contractData.addons,
-        modifications: contractData.modifications,
+        client_name:          s.name,
+        event_type:           s.event_type,
+        event_date:           s.event_date,
+        guest_count:          s.guest_count ? Number(s.guest_count) : undefined,
+        service_type:         s.service_type,
+        venue_name:           s.venue,
+        venue_address:        s.venue,
+        menu_items:           Array.isArray(s.selected_dishes) ? s.selected_dishes : [],
+        dietary_restrictions: s.dietary_concerns ? [s.dietary_concerns] : [],
+        addons,
+        modifications:        s.special_requests && s.special_requests !== 'none'
+                                ? [s.special_requests] : [],
+        generate_contract:    true,
       });
 
       console.log('✅ Project created:', response);
-      toast.success('Project created successfully!');
 
-      // Redirect to the new project
-      if (response.project?.id) {
-        router.push(`/projects/${response.project.id}`);
+      const data = response as any;
+
+      if (data.contract) {
+        toast.success('Project & Contract created! Pending staff approval.');
+        console.log('📋 Contract ID:', data.contract.id);
+        console.log('📋 Contract Status:', data.contract.status);
       } else {
-        toast.success('Project saved! Redirecting to projects list...');
+        toast.success('Project created successfully!');
+      }
+
+      // Redirect to the specific project detail page
+      if (data.project?.id) {
+        console.log('🔗 Project ID:', data.project.id);
+        router.push(`/projects/${data.project.id}`);
+      } else {
         router.push('/projects');
       }
     } catch (error: any) {
@@ -62,7 +79,7 @@ export default function AiIntakePage() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
-              TCC Premium Catering
+              The Catering Company
             </h1>
             <p className="text-sm text-gray-600 mt-1">
               AI-powered event intake
@@ -81,7 +98,10 @@ export default function AiIntakePage() {
       <div className="flex-1 overflow-hidden">
         <div className="max-w-4xl mx-auto h-full py-6">
           <div className="bg-white rounded-2xl shadow-lg h-full overflow-hidden">
-            <AiChat onComplete={handleComplete} />
+            <AiChat
+              onComplete={handleComplete}
+              authorId={user?.id}
+            />
           </div>
         </div>
       </div>

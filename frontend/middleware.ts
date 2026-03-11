@@ -6,7 +6,7 @@ export function middleware(request: NextRequest) {
   const hasAuthCookie = request.cookies.has('app_jwt');
 
   // Protected routes that require authentication
-  const protectedRoutes = ['/dashboard', '/projects', '/crm', '/messages', '/contracts'];
+  const protectedRoutes = ['/dashboard', '/projects', '/crm', '/messages', '/contracts', '/chat', '/staff'];
   const isProtectedRoute = protectedRoutes.some((route) => pathname.startsWith(route));
 
   // Auth routes that should redirect if already authenticated
@@ -35,6 +35,8 @@ export const config = {
     '/crm/:path*',
     '/messages/:path*',
     '/contracts/:path*',
+    '/chat/:path*',
+    '/staff/:path*',
     '/signin',
     '/signup',
   ],

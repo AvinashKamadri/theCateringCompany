@@ -1145,6 +1145,9 @@ enum beo_status {
 
 enum contract_status {
   draft
+  pending_staff_approval
+  rejected
+  approved
   sent
   signed
   cancelled

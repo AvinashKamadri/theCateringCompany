@@ -3,12 +3,14 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma.service';
+import { OpenSignService } from '../opensign/opensign.service';
 
 @Injectable()
 export class ContractsService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue('pdf_generation') private readonly pdfQueue: Queue,
+    private readonly openSignService: OpenSignService,
   ) {}
 
   /**
@@ -76,5 +78,142 @@ export class ContractsService {
       contractId,
       userId,
     });
+  }
+
+  /**
+   * Send contract to SignWell for e-signature
+   */
+  // Renamed from sendToSignWell - now uses OpenSign
+  async sendToSignWell(
+    contractId: string,
+    recipients: Array<{ email: string; name: string; role?: 'signer' | 'cc' }>,
+    pdfUrl?: string,
+  ) {
+    // Get contract details
+    const contract = await this.prisma.contracts.findUnique({
+      where: { id: contractId },
+      include: {
+        projects_contracts_project_idToprojects: {
+          select: {
+            title: true,
+            ai_event_summary: true,
+          },
+        },
+      },
+    });
+
+    if (!contract) {
+      throw new Error(`Contract ${contractId} not found`);
+    }
+
+    // If pdfUrl is a local file path, convert to base64
+    let fileBase64: string | undefined;
+    if (pdfUrl && !pdfUrl.startsWith('http')) {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const filePath = path.join(process.cwd(), pdfUrl);
+      const fileBuffer = await fs.readFile(filePath);
+      fileBase64 = fileBuffer.toString('base64');
+      pdfUrl = undefined; // Clear pdfUrl since we're using base64
+    }
+
+    // Send to OpenSign
+    const openSignDoc = await this.openSignService.sendDocumentForSignature({
+      name: contract.title || `Contract ${contractId}`,
+      recipients,
+      file_url: pdfUrl,
+      file_base64: fileBase64,
+      message: `Please review and sign the contract for ${contract.projects_contracts_project_idToprojects?.title || 'your event'}.`,
+      redirect_url: `${process.env.CORS_ORIGIN}/contracts/${contractId}/signed`,
+    });
+
+    // Update contract with OpenSign document ID
+    await this.prisma.contracts.update({
+      where: { id: contractId },
+      data: {
+        status: 'sent',
+        metadata: {
+          opensign_document_id: openSignDoc.id,
+          opensign_status: openSignDoc.status,
+          opensign_signing_url: openSignDoc.signing_url,
+          sent_for_signature_at: new Date().toISOString(),
+        },
+      },
+    });
+
+    return openSignDoc;
+  }
+
+  /**
+   * Handle SignWell webhook events
+   */
+  async handleSignWellWebhook(event: any) {
+    const { document_id, event_type, document } = event;
+
+    // Find contract by SignWell document ID
+    const contract = await this.prisma.contracts.findFirst({
+      where: {
+        metadata: {
+          path: ['signwell_document_id'],
+          equals: document_id,
+        },
+      },
+    });
+
+    if (!contract) {
+      console.warn(`Contract not found for SignWell document ${document_id}`);
+      return;
+    }
+
+    // Update contract based on event type
+    switch (event_type) {
+      case 'document.completed':
+        const completedMetadata = contract.metadata as any || {};
+        await this.prisma.contracts.update({
+          where: { id: contract.id },
+          data: {
+            status: 'signed',
+            metadata: {
+              ...completedMetadata,
+              signwell_status: 'completed',
+              signed_at: document.completed_at,
+            },
+          },
+        });
+        break;
+
+      case 'document.declined':
+        const declinedMetadata = contract.metadata as any || {};
+        await this.prisma.contracts.update({
+          where: { id: contract.id },
+          data: {
+            status: 'rejected',
+            metadata: {
+              ...declinedMetadata,
+              signwell_status: 'declined',
+            },
+          },
+        });
+        break;
+
+      case 'recipient.signed':
+        // Update metadata with recipient signature info
+        const existingMetadata = contract.metadata as any || {};
+        const updatedMetadata = {
+          ...existingMetadata,
+          recipient_signatures: [
+            ...(existingMetadata.recipient_signatures || []),
+            {
+              email: event.recipient.email,
+              signed_at: event.signed_at,
+            },
+          ],
+        };
+        await this.prisma.contracts.update({
+          where: { id: contract.id },
+          data: { metadata: updatedMetadata },
+        });
+        break;
+    }
   }
 }

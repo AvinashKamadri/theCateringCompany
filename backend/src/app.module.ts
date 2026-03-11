@@ -16,6 +16,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SocketsModule } from './sockets/sockets.module';
 import { WorkersProducersModule } from './workers_producers/workers-producers.module';
+import { OpenSignModule } from './opensign/opensign.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { WorkersProducersModule } from './workers_producers/workers-producers.mo
     NotificationsModule,
     SocketsModule,
     WorkersProducersModule,
+    OpenSignModule,
   ],
   providers: [
     {

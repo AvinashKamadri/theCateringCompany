@@ -1,9 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { ContractsService } from '../contracts/contracts.service';
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => ContractsService))
+    private readonly contractsService: ContractsService,
+  ) {}
 
   /**
    * Find all projects accessible by a user.
@@ -144,59 +149,132 @@ export class ProjectsService {
    * - AI conversation state record (if thread_id provided)
    * - Stores contract data in ai_event_summary
    */
-  async createFromAiIntake(dto: {
-    client_name: string;
-    contact_email: string;
-    contact_phone: string;
-    event_type: string;
-    event_date: string;
-    guest_count: number;
-    service_type: string;
-    menu_items: string[];
-    dietary_restrictions: string[];
-    budget_range: string;
-    venue_name: string;
-    venue_address: string;
-    setup_time: string;
-    service_time: string;
-    addons: string[];
-    modifications: string[];
-    thread_id?: string;
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      // Create project with full AI data
+  async createFromAiIntake(
+    dto: {
+      client_name?: string;
+      contact_email?: string;
+      contact_phone?: string;
+      event_type?: string;
+      event_date?: string;
+      guest_count?: number;
+      service_type?: string;
+      menu_items?: string[];
+      dietary_restrictions?: string[];
+      budget_range?: string;
+      venue_name?: string;
+      venue_address?: string;
+      setup_time?: string;
+      service_time?: string;
+      addons?: string[];
+      modifications?: string[];
+      thread_id?: string;
+      generate_contract?: boolean;
+    },
+    userId: string,
+  ) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Create project with AI data (handle partial/missing fields)
       const project = await tx.projects.create({
         data: {
-          // Use AI system user ID or create a placeholder
-          owner_user_id: 'AI_SYSTEM', // You may want to replace this with actual system user
-          title: `${dto.event_type} - ${dto.client_name}`,
-          event_date: new Date(dto.event_date),
-          guest_count: dto.guest_count,
+          // Associate with authenticated user
+          owner_user_id: userId,
+          title: dto.event_type && dto.client_name
+            ? `${dto.event_type} - ${dto.client_name}`
+            : dto.client_name || dto.event_type || 'AI Generated Event',
+          event_date: dto.event_date ? new Date(dto.event_date) : null,
+          guest_count: dto.guest_count ?? null,
           status: 'draft',
           created_via_ai_intake: true,
           ai_event_summary: JSON.stringify(dto),
         },
       });
 
-      // Create venue if doesn't exist
-      let venue = await tx.venues.findFirst({
-        where: { name: dto.venue_name },
-      });
+      // Create venue if provided and doesn't exist
+      let venue = null;
+      if (dto.venue_name) {
+        venue = await tx.venues.findFirst({
+          where: { name: dto.venue_name },
+        });
 
-      if (!venue) {
-        venue = await tx.venues.create({
-          data: {
-            name: dto.venue_name,
-            address: dto.venue_address,
-          },
+        if (!venue) {
+          venue = await tx.venues.create({
+            data: {
+              name: dto.venue_name,
+              address: dto.venue_address || '',
+            },
+          });
+        }
+
+        // Link venue to project
+        await tx.projects.update({
+          where: { id: project.id },
+          data: { venue_id: venue.id },
         });
       }
 
-      // Link venue to project
-      await tx.projects.update({
-        where: { id: project.id },
-        data: { venue_id: venue.id },
+      // Add owner as collaborator
+      await tx.project_collaborators.create({
+        data: {
+          project_id: project.id,
+          user_id: userId,
+        },
       });
+
+      // Generate contract if requested
+      let contract = null;
+      if (dto.generate_contract) {
+        console.log(`📝 [Contract] Generating contract for project ${project.id}`);
+        console.log(`👤 [Contract] Client: ${dto.client_name} (${dto.contact_email})`);
+        console.log(`📅 [Contract] Event: ${dto.event_type} on ${dto.event_date}`);
+        console.log(`👥 [Contract] Guest count: ${dto.guest_count}`);
+
+        // Create contract with AI-generated data
+        // Status: pending_staff_approval - needs staff review before sending to client
+        contract = await tx.contracts.create({
+          data: {
+            project_id: project.id,
+            contract_group_id: project.id, // Use project ID as contract group ID (valid UUID)
+            version_number: 1,
+            status: 'pending_staff_approval', // ✅ Changed from 'draft'
+            title: `Contract - ${dto.event_type || 'Event'} for ${dto.client_name || 'Client'}`,
+            body: {
+              client_info: {
+                name: dto.client_name,
+                email: dto.contact_email,
+                phone: dto.contact_phone,
+              },
+              event_details: {
+                type: dto.event_type,
+                date: dto.event_date,
+                guest_count: dto.guest_count,
+                service_type: dto.service_type,
+                venue: {
+                  name: dto.venue_name,
+                  address: dto.venue_address,
+                },
+              },
+              menu: {
+                items: dto.menu_items || [],
+                dietary_restrictions: dto.dietary_restrictions || [],
+              },
+              logistics: {
+                setup_time: dto.setup_time,
+                service_time: dto.service_time,
+              },
+              additional: {
+                addons: dto.addons || [],
+                modifications: dto.modifications || [],
+                budget_range: dto.budget_range,
+              },
+            },
+            is_active: true,
+            created_by: userId,
+          },
+        });
+
+        console.log(`✅ [Contract] Contract created with ID: ${contract.id}`);
+        console.log(`📋 [Contract] Status: pending_staff_approval - Awaiting staff review`);
+      }
 
       // Note: All contract data is stored in ai_event_summary JSON field
       // The events table is for audit logs, not catering event details
@@ -204,8 +282,29 @@ export class ProjectsService {
       return {
         project,
         venue,
+        contract,
         contract_data: dto,
       };
     });
+
+    // Enqueue PDF generation if contract was created
+    // NOTE: Contract is NOT sent to SignWell yet - awaiting staff approval
+    if (result.contract) {
+      console.log(`📄 [Contract] Enqueuing PDF generation for contract ${result.contract.id}`);
+
+      await this.contractsService.enqueuePdfGeneration(
+        result.contract.id,
+        userId,
+      );
+
+      console.log(`✅ [Contract] Contract ${result.contract.id} created and queued for PDF generation`);
+      console.log(`⏳ [Contract] Status: ${result.contract.status} - Awaiting staff approval`);
+      console.log(`📧 [Contract] Client email: ${dto.contact_email}`);
+    }
+
+    console.log(`✅ [Project] Project ${result.project.id} created successfully`);
+    console.log(`📊 [Project] Event type: ${dto.event_type}, Guest count: ${dto.guest_count}`);
+
+    return result;
   }
 }

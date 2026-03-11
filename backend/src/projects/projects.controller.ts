@@ -60,35 +60,58 @@ export class ProjectsController {
 
   /**
    * POST /projects/ai-intake
-   * Create a new project from AI chat intake with full contract data.
-   * Public endpoint - no authentication required.
+   * Create a new project from AI chat intake with contract data.
+   * Requires authentication - associates project with authenticated user.
+   * Can handle partial data (not all fields required).
+   * If generate_contract=true, creates contract and PDF immediately.
    */
-  @Public()
   @Post('ai-intake')
   async createFromAiIntake(
+    @CurrentUser() user: { userId: string },
     @Body()
     body: {
-      // Contract data from AI
-      client_name: string;
-      contact_email: string;
-      contact_phone: string;
-      event_type: string;
-      event_date: string;
-      guest_count: number;
-      service_type: string;
-      menu_items: string[];
-      dietary_restrictions: string[];
-      budget_range: string;
-      venue_name: string;
-      venue_address: string;
-      setup_time: string;
-      service_time: string;
-      addons: string[];
-      modifications: string[];
-      // Optional fields
+      // Contract data from AI (all fields optional for partial intake)
+      client_name?: string;
+      contact_email?: string;
+      contact_phone?: string;
+      event_type?: string;
+      event_date?: string;
+      guest_count?: number;
+      service_type?: string;
+      menu_items?: string[];
+      dietary_restrictions?: string[];
+      budget_range?: string;
+      venue_name?: string;
+      venue_address?: string;
+      setup_time?: string;
+      service_time?: string;
+      addons?: string[];
+      modifications?: string[];
       thread_id?: string;
+      // Flag to generate contract immediately
+      generate_contract?: boolean;
     },
   ) {
-    return this.projectsService.createFromAiIntake(body);
+    try {
+      console.log('🎯 [API] Creating project from AI intake for user:', user.userId);
+      console.log('📦 [API] Request body:', JSON.stringify(body, null, 2));
+
+      const result = await this.projectsService.createFromAiIntake(body, user.userId);
+
+      console.log('✅ [API] Project created successfully:', result.project.id);
+      console.log('📋 [API] Contract created:', result.contract?.id || 'No contract');
+      console.log('📤 [API] Returning result:', JSON.stringify({
+        project: { id: result.project.id, title: result.project.title },
+        contract: result.contract ? { id: result.contract.id, status: result.contract.status } : null,
+        venue: result.venue ? { id: result.venue.id, name: result.venue.name } : null,
+      }, null, 2));
+
+      return result;
+    } catch (error) {
+      console.error('❌ [API] Error creating project from AI intake:', error);
+      console.error('❌ [API] Error stack:', error.stack);
+      console.error('❌ [API] Error message:', error.message);
+      throw error;
+    }
   }
 }

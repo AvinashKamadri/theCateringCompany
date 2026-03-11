@@ -1,0 +1,15 @@
+{
+  "client_name": "John & Sarah Smith",
+  "contact_email": "john.sarah@example.com",
+  "contact_phone": "+1-555-123-4567",
+  "event_type": "wedding",
+  "event_date": "2026-06-15",
+  "guest_count": 150,
+  "service_type": "on_site",
+  "venue_name": "Blue Hills House",
+  "venue_address": "123 Oak Street, San Francisco, CA 94102",
+  "venue_has_kitchen": true,
+  "special_requests": "Vegetarian options needed for 20 guests. Gluten-free desserts.",
+  "dietary_restrictions": ["vegetarian", "gluten-free"],
+  "generate_contract": true
+}

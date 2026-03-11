@@ -43,7 +43,8 @@ export default function SignUpPage() {
     try {
       const data: any = await apiClient.post("/auth/signup", formData);
       setUser(data.user);
-      router.push("/projects");
+      // Redirect new users directly to AI chat intake
+      router.push("/chat");
     } catch (err: any) {
       setError(err.message || "Failed to create account");
     } finally {

@@ -55,7 +55,19 @@
       "WebFetch(domain:github.com)",
       "Bash(npx prisma schema:*)",
       "Bash(/c/Windows/System32/tasklist.exe)",
-      "Read(//c/Users/avina/projects/flashback/cateringCo/**)"
+      "Read(//c/Users/avina/projects/flashback/cateringCo/**)",
+      "Bash(npx tsc:*)",
+      "Read(//c/Users/avina/projects/flashback/cateringCo/backend node -e \nconst { PrismaClient } = require\\('@prisma/**)",
+      "Bash(PGPASSWORD='Avinash@1617' psql -U avinash -d caterDB_prod -c \":*)",
+      "Bash(PGPASSWORD='Avinash@1617' psql -U postgres -d caterDB_prod -c \":*)",
+      "Bash(PGPASSWORD='Avinash@1617' psql -U postgres -d caterDB_prod -c \"SELECT unnest\\(enum_range\\(NULL::contract_status\\)\\) AS value;\")",
+      "Bash(PGPASSWORD='Avinash@1617' psql -U postgres -d caterDB_prod << 'SQL':*)",
+      "Bash(__NEW_LINE_475a179d17729e2f__ PGPASSWORD='Avinash@1617':*)",
+      "Bash(__NEW_LINE_475a179d17729e2f__ PGPASSWORD='Avinash@1617' psql -U postgres -d caterDB_prod -c \"SELECT unnest\\(enum_range\\(NULL::contract_status\\)\\) AS value;\")",
+      "Bash(/dev/null __NEW_LINE_f1615c8c4d18e507__ curl -s -b /tmp/client_cookies.txt http://localhost:3001/api/contracts/2fbb77fd-139b-49d8-8346-94d252b964d5)",
+      "Bash(/dev/null __NEW_LINE_f1615c8c4d18e507__ curl -s -b /tmp/staff_cookies.txt http://localhost:3001/api/staff/contracts/pending)",
+      "Read(//tmp/**)",
+      "Read(//c/Users/avina/.claude/projects/c--Users-avina-projects-flashback-cateringCo/memory/**)"
     ]
   }
 }

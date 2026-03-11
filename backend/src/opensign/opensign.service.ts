@@ -96,7 +96,7 @@ export class OpenSignService {
       this.logger.log('OpenSign API payload prepared');
       console.log('[DEBUG] OpenSign payload:', JSON.stringify({ ...payload, file: payload.file ? `[${payload.file.length} bytes]` : undefined }, null, 2));
 
-      const response = await this.client.post('/documents', payload);
+      const response = await this.client.post('/createdocument', payload);
 
       this.logger.log(
         `Document sent successfully. ID: ${response.data.id || response.data._id}`,

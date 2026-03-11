@@ -127,12 +127,18 @@ export class ContractsService {
       redirect_url: `${process.env.CORS_ORIGIN}/contracts/${contractId}/signed`,
     });
 
-    // Update contract with OpenSign document ID
+    // Update contract with OpenSign document ID — preserve existing metadata
+    const existing = await this.prisma.contracts.findUnique({
+      where: { id: contractId },
+      select: { metadata: true },
+    });
+    const existingMeta = (existing?.metadata as any) || {};
     await this.prisma.contracts.update({
       where: { id: contractId },
       data: {
         status: 'sent',
         metadata: {
+          ...existingMeta,
           opensign_document_id: openSignDoc.id,
           opensign_status: openSignDoc.status,
           opensign_signing_url: openSignDoc.signing_url,

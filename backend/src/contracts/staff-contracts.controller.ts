@@ -150,26 +150,34 @@ export class StaffContractsController {
     const contractBody = contract.body as any;
     console.log('[DEBUG] Step 4: Contract body:', JSON.stringify(contractBody, null, 2));
 
-    const aiEventData = contract.projects_contracts_project_idToprojects?.ai_event_summary
-      ? JSON.parse(contract.projects_contracts_project_idToprojects.ai_event_summary as string)
-      : {};
+    const rawSummary = contract.projects_contracts_project_idToprojects?.ai_event_summary;
+    const aiEventData = !rawSummary
+      ? {}
+      : typeof rawSummary === 'string'
+        ? JSON.parse(rawSummary)
+        : (rawSummary as any);
     console.log('[DEBUG] Step 5: AI event data:', JSON.stringify(aiEventData, null, 2));
 
+    // Extract email: try contract body, AI summary, then fall back to creator's account email
     const clientEmail =
       contractBody?.client_info?.email ||
-      aiEventData.contact_email;
+      contractBody?.slots?.email ||
+      aiEventData.contact_email ||
+      contract.users_contracts_created_byTousers?.email;
 
+    // Extract name: try contract body (both shapes), AI summary, then creator username
     const clientName =
       contractBody?.client_info?.name ||
+      contractBody?.slots?.name ||
       aiEventData.client_name ||
-      contract.users_contracts_created_byTousers?.email.split('@')[0] || // Use email username as fallback
+      contract.users_contracts_created_byTousers?.email?.split('@')[0] ||
       'Client';
 
     console.log('[DEBUG] Step 6: Extracted - Email:', clientEmail, 'Name:', clientName);
 
-    if (!clientEmail || !clientName) {
-      console.log('[DEBUG] Step 7: ERROR - Missing client email or name!');
-      throw new Error('Client email and name are required to send contract');
+    if (!clientEmail) {
+      console.log('[DEBUG] Step 7: ERROR - No email found anywhere for contract!');
+      throw new Error('Cannot determine client email — no email in contract body or creator account');
     }
 
     // Update contract status to sent (will be updated again after OpenSign call)

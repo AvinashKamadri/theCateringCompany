@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AiChat } from '@/components/chat/ai-chat';
 import type { ContractData } from '@/types/chat-ai.types';
@@ -8,18 +8,25 @@ import { toast } from 'sonner';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
 
+const STAFF_DOMAINS = ['@flashbacklabs.com', '@flashbacklabs.inc'];
+
 export default function AiIntakePage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const [isSaving, setIsSaving] = useState(false);
 
+  // Staff users belong on the contracts page, not the client intake chat
+  const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));
+  useEffect(() => {
+    if (isStaff) router.replace('/contracts');
+  }, [isStaff, router]);
+
   const handleComplete = async (contractData: ContractData) => {
     setIsSaving(true);
 
     try {
-      console.log('💾 Saving AI-generated project...', contractData);
+      console.log('Saving AI-generated project...', contractData);
 
-      // Desktop TheCateringCompany slot format — field names match SLOT_NAMES in state.py
       const s = contractData;
 
       const addons = [
@@ -45,45 +52,36 @@ export default function AiIntakePage() {
         generate_contract:    true,
       });
 
-      console.log('✅ Project created:', response);
-
       const data = response as any;
 
       if (data.contract) {
         toast.success('Project & Contract created! Pending staff approval.');
-        console.log('📋 Contract ID:', data.contract.id);
-        console.log('📋 Contract Status:', data.contract.status);
       } else {
         toast.success('Project created successfully!');
       }
 
-      // Redirect to the specific project detail page
       if (data.project?.id) {
-        console.log('🔗 Project ID:', data.project.id);
         router.push(`/projects/${data.project.id}`);
       } else {
         router.push('/projects');
       }
     } catch (error: any) {
-      console.error('❌ Failed to save project:', error);
+      console.error('Failed to save project:', error);
       toast.error(error.message || 'Failed to save project. Please try again.');
     } finally {
       setIsSaving(false);
     }
   };
 
+  if (isStaff) return null;
+
   return (
     <div className="h-screen flex flex-col bg-gray-50">
-      {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              The Catering Company
-            </h1>
-            <p className="text-sm text-gray-600 mt-1">
-              AI-powered event intake
-            </p>
+            <h1 className="text-2xl font-bold text-gray-900">The Catering Company</h1>
+            <p className="text-sm text-gray-600 mt-1">AI-powered event intake</p>
           </div>
           {isSaving && (
             <div className="flex items-center gap-2 text-blue-600">
@@ -93,15 +91,10 @@ export default function AiIntakePage() {
           )}
         </div>
       </header>
-
-      {/* Chat Container */}
       <div className="flex-1 overflow-hidden">
         <div className="max-w-4xl mx-auto h-full py-6">
           <div className="bg-white rounded-2xl shadow-lg h-full overflow-hidden">
-            <AiChat
-              onComplete={handleComplete}
-              authorId={user?.id}
-            />
+            <AiChat onComplete={handleComplete} authorId={user?.id} />
           </div>
         </div>
       </div>

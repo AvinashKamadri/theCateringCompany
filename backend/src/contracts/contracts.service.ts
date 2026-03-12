@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 
 @Injectable()
@@ -9,7 +10,7 @@ export class ContractsService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue('pdf_generation') private readonly pdfQueue: Queue,
-  ) {}
+  ) { }
 
   /**
    * Create a new contract version for a project.
@@ -35,7 +36,7 @@ export class ContractsService {
   ) {
     const contractGroupId = dto.contractGroupId ?? randomUUID();
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // Find the latest existing contract in this group
       const previousVersion = await tx.contracts.findFirst({
         where: { contract_group_id: contractGroupId },

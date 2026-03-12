@@ -1,232 +1,175 @@
+"use client";
+
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Users, FileText, CreditCard, MessageSquare } from "lucide-react";
+import Image from "next/image";
 
 export default function LandingPage() {
   return (
-    <div className="flex min-h-screen flex-col bg-gradient-to-b from-white to-gray-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600">
-              <span className="text-lg font-bold text-white">C</span>
-            </div>
-            <span className="text-xl font-bold text-gray-900">CateringCo</span>
+    <div style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif", background: "#fff", minHeight: "100vh" }}>
+
+      {/* ===== NAV ===== */}
+      <header style={{
+        position: "sticky", top: 0, zIndex: 50,
+        borderBottom: "1px solid #f0f0f0",
+        background: "rgba(255,255,255,0.95)",
+        backdropFilter: "blur(8px)",
+      }}>
+        <div style={{ maxWidth: 1160, margin: "0 auto", padding: "0 32px", height: 60, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {/* Logo */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 32, height: 32, background: "#111", borderRadius: 8,
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: "#fff",
+            }}>🍴</div>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "#111" }}>The Catering Company</span>
           </div>
-          <nav className="hidden md:flex items-center gap-6">
-            <Link href="#features" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
-              Features
-            </Link>
-            <Link href="#how-it-works" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
-              How It Works
-            </Link>
-            <Link href="#pricing" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
-              Pricing
-            </Link>
+
+          <nav style={{ display: "flex", alignItems: "center", gap: 28 }}>
+            {["Features", "Menus", "Pricing", "About"].map(n => (
+              <a key={n} href="#" style={{ fontSize: 14, color: "#6b7280", textDecoration: "none", fontWeight: 450 }}
+                onMouseOver={e => (e.currentTarget.style.color = "#111")}
+                onMouseOut={e => (e.currentTarget.style.color = "#6b7280")}>{n}</a>
+            ))}
           </nav>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/signin"
-              className="text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
-            >
-              Sign In
-            </Link>
-            <Link
-              href="/signup"
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-            >
-              Get Started
-            </Link>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Link href="/signin" style={{
+              fontSize: 14, fontWeight: 500, color: "#374151",
+              textDecoration: "none", padding: "8px 16px", borderRadius: 8,
+              border: "1px solid #e5e7eb", transition: "all 0.15s",
+            }}
+              onMouseOver={e => { e.currentTarget.style.background = "#f9fafb"; }}
+              onMouseOut={e => { e.currentTarget.style.background = "transparent"; }}
+            >Sign In</Link>
+            <Link href="/signup" style={{
+              fontSize: 14, fontWeight: 600, color: "#fff",
+              textDecoration: "none", padding: "8px 18px", borderRadius: 8,
+              background: "#111", transition: "all 0.15s",
+            }}
+              onMouseOver={e => (e.currentTarget.style.background = "#374151")}
+              onMouseOut={e => (e.currentTarget.style.background = "#111")}
+            >Get Started</Link>
           </div>
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="container mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-24 lg:pt-32 lg:pb-32">
-        <div className="mx-auto max-w-4xl text-center">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-            </span>
-            Now in Beta
+      {/* ===== HERO ===== */}
+      <section style={{ maxWidth: 1160, margin: "0 auto", padding: "80px 32px 60px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 60, alignItems: "center" }}>
+        <div>
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: 8,
+            background: "#f3f4f6", borderRadius: 999, padding: "5px 14px", marginBottom: 24,
+            fontSize: 12, fontWeight: 600, color: "#374151",
+          }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e" }} />
+            Now accepting 2026 bookings
           </div>
 
-          <h1 className="mb-6 text-5xl font-bold tracking-tight text-gray-900 sm:text-6xl lg:text-7xl">
-            Catering Management
-            <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"> Simplified</span>
+          <h1 style={{ fontSize: 48, fontWeight: 800, color: "#111", letterSpacing: "-0.03em", lineHeight: 1.1, marginBottom: 20 }}>
+            Catering excellence,<br />
+            <span style={{ color: "#6b7280", fontWeight: 600 }}>effortlessly managed.</span>
           </h1>
 
-          <p className="mb-10 text-lg text-gray-600 sm:text-xl lg:text-2xl max-w-3xl mx-auto leading-relaxed">
-            The all-in-one platform for catering professionals. Manage projects, collaborate with clients,
-            handle contracts, and process payments — all in one place.
+          <p style={{ fontSize: 16, color: "#6b7280", lineHeight: 1.7, marginBottom: 32, maxWidth: 440 }}>
+            The all-in-one platform for catering professionals. Plan events, design menus, collaborate with clients, and handle payments — all in one elegant workspace.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link
-              href="/signup"
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-blue-600 px-8 text-base font-semibold text-white hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/30 w-full sm:w-auto"
-            >
-              Start Free Trial
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-            <Link
-              href="#features"
-              className="inline-flex h-12 items-center justify-center rounded-lg border-2 border-gray-200 px-8 text-base font-semibold text-gray-700 hover:border-gray-300 hover:bg-gray-50 transition-colors w-full sm:w-auto"
-            >
-              Watch Demo
-            </Link>
+          <div style={{ display: "flex", gap: 12 }}>
+            <Link href="/signup" style={{
+              padding: "13px 28px", borderRadius: 10, background: "#111",
+              color: "#fff", fontWeight: 600, fontSize: 15, textDecoration: "none",
+              transition: "background 0.15s",
+            }}>Start free trial →</Link>
+            <Link href="/signin" style={{
+              padding: "13px 24px", borderRadius: 10, background: "#fff",
+              color: "#374151", fontWeight: 500, fontSize: 15, textDecoration: "none",
+              border: "1px solid #e5e7eb",
+            }}>Sign in</Link>
           </div>
 
-          <p className="mt-6 text-sm text-gray-500">
-            No credit card required • 14-day free trial • Cancel anytime
+          <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 14 }}>
+            No credit card required · 14-day free trial
           </p>
         </div>
 
-        {/* Hero Image / Dashboard Preview */}
-        <div className="mt-16 mx-auto max-w-6xl">
-          <div className="rounded-xl border border-gray-200 bg-white p-2 shadow-2xl">
-            <div className="aspect-video rounded-lg bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-              <div className="text-center space-y-4">
-                <div className="w-16 h-16 mx-auto rounded-full bg-blue-100 flex items-center justify-center">
-                  <FileText className="w-8 h-8 text-blue-600" />
-                </div>
-                <p className="text-gray-500 text-sm">Dashboard Preview Coming Soon</p>
-              </div>
-            </div>
-          </div>
+        {/* Hero image */}
+        <div style={{ borderRadius: 20, overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.12)", aspectRatio: "4/3", position: "relative", background: "#f3f4f6" }}>
+          <Image src="/food-signup.png" alt="Catering setup" fill style={{ objectFit: "cover" }} />
         </div>
       </section>
 
-      {/* Features Section */}
-      <section id="features" className="border-t bg-white py-24">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-2xl text-center mb-16">
-            <h2 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
-              Everything you need to run your catering business
-            </h2>
-            <p className="mt-4 text-lg text-gray-600">
-              Powerful features designed specifically for catering professionals
-            </p>
-          </div>
-
-          <div className="mx-auto max-w-6xl grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-            {/* Feature 1 */}
-            <div className="group rounded-xl border border-gray-200 bg-white p-8 hover:border-blue-300 hover:shadow-lg transition-all">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                <Users className="h-6 w-6" />
-              </div>
-              <h3 className="mb-2 text-xl font-semibold text-gray-900">Project Collaboration</h3>
-              <p className="text-gray-600">
-                Slack-like channels for each project. Keep all client communication, files, and updates in one place.
-              </p>
+      {/* ===== STATS ===== */}
+      <section style={{ borderTop: "1px solid #f0f0f0", borderBottom: "1px solid #f0f0f0", padding: "32px 0" }}>
+        <div style={{ maxWidth: 1160, margin: "0 auto", padding: "0 32px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 24, textAlign: "center" }}>
+          {[
+            { n: "2,400+", l: "Events managed" },
+            { n: "98%", l: "Client satisfaction" },
+            { n: "£12M+", l: "Payments processed" },
+            { n: "340+", l: "Catering companies" },
+          ].map(s => (
+            <div key={s.l}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#111", letterSpacing: "-0.02em" }}>{s.n}</div>
+              <div style={{ fontSize: 13, color: "#9ca3af", marginTop: 4 }}>{s.l}</div>
             </div>
-
-            {/* Feature 2 */}
-            <div className="group rounded-xl border border-gray-200 bg-white p-8 hover:border-blue-300 hover:shadow-lg transition-all">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                <FileText className="h-6 w-6" />
-              </div>
-              <h3 className="mb-2 text-xl font-semibold text-gray-900">Smart Contracts</h3>
-              <p className="text-gray-600">
-                Version-controlled contracts with e-signatures. Track changes and maintain a complete audit trail.
-              </p>
-            </div>
-
-            {/* Feature 3 */}
-            <div className="group rounded-xl border border-gray-200 bg-white p-8 hover:border-blue-300 hover:shadow-lg transition-all">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-green-100 text-green-600 group-hover:bg-green-600 group-hover:text-white transition-colors">
-                <CreditCard className="h-6 w-6" />
-              </div>
-              <h3 className="mb-2 text-xl font-semibold text-gray-900">Integrated Payments</h3>
-              <p className="text-gray-600">
-                Accept payments directly through Stripe. Automatic invoicing, deposits, and payment tracking.
-              </p>
-            </div>
-
-            {/* Feature 4 */}
-            <div className="group rounded-xl border border-gray-200 bg-white p-8 hover:border-blue-300 hover:shadow-lg transition-all">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-purple-100 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
-                <MessageSquare className="h-6 w-6" />
-              </div>
-              <h3 className="mb-2 text-xl font-semibold text-gray-900">Real-time Updates</h3>
-              <p className="text-gray-600">
-                Live notifications and typing indicators. Stay connected with your team and clients instantly.
-              </p>
-            </div>
-
-            {/* Feature 5 */}
-            <div className="group rounded-xl border border-gray-200 bg-white p-8 hover:border-blue-300 hover:shadow-lg transition-all">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100 text-orange-600 group-hover:bg-orange-600 group-hover:text-white transition-colors">
-                <CheckCircle2 className="h-6 w-6" />
-              </div>
-              <h3 className="mb-2 text-xl font-semibold text-gray-900">Task Management</h3>
-              <p className="text-gray-600">
-                Track deliverables, timelines, and milestones. Never miss a deadline with automated reminders.
-              </p>
-            </div>
-
-            {/* Feature 6 */}
-            <div className="group rounded-xl border border-gray-200 bg-white p-8 hover:border-blue-300 hover:shadow-lg transition-all">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-pink-100 text-pink-600 group-hover:bg-pink-600 group-hover:text-white transition-colors">
-                <FileText className="h-6 w-6" />
-              </div>
-              <h3 className="mb-2 text-xl font-semibold text-gray-900">Document Storage</h3>
-              <p className="text-gray-600">
-                Secure cloud storage for menus, invoices, and photos. Share files with clients seamlessly.
-              </p>
-            </div>
-          </div>
+          ))}
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="border-t bg-gradient-to-br from-blue-600 to-indigo-700 py-20">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-3xl text-center">
-            <h2 className="mb-6 text-4xl font-bold text-white sm:text-5xl">
-              Ready to transform your catering business?
-            </h2>
-            <p className="mb-8 text-xl text-blue-100">
-              Join hundreds of catering professionals who have simplified their workflow with CateringCo.
-            </p>
-            <Link
-              href="/signup"
-              className="inline-flex h-14 items-center justify-center gap-2 rounded-lg bg-white px-10 text-lg font-semibold text-blue-600 hover:bg-gray-50 transition-colors shadow-xl"
+      {/* ===== FEATURES ===== */}
+      <section style={{ maxWidth: 1160, margin: "0 auto", padding: "80px 32px" }}>
+        <div style={{ textAlign: "center", marginBottom: 48 }}>
+          <h2 style={{ fontSize: 34, fontWeight: 800, color: "#111", letterSpacing: "-0.02em", marginBottom: 12 }}>
+            Everything your catering team needs
+          </h2>
+          <p style={{ fontSize: 15, color: "#6b7280", maxWidth: 500, margin: "0 auto" }}>
+            Streamline every step from initial enquiry to event completion.
+          </p>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 24 }}>
+          {[
+            { icon: "🎉", title: "Event Management", desc: "Track every event — dates, venues, guest counts, and delivery status all in one view." },
+            { icon: "🍽️", title: "Menu Builder", desc: "Create and share custom menus with dietary filters. Get instant client approvals." },
+            { icon: "💳", title: "Payments", desc: "Send invoices, track deposits and balances. Automated reminders and payment status." },
+            { icon: "💬", title: "AI Catering Assistant", desc: "Real-time client chat powered by AI. Browse menus, assign staff, start bookings." },
+          ].map(f => (
+            <div key={f.title} style={{
+              padding: 28, borderRadius: 16, border: "1px solid #f0f0f0", background: "#fff",
+              transition: "all 0.2s",
+            }}
+              onMouseOver={e => { e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.boxShadow = "0 4px 20px rgba(0,0,0,0.06)"; }}
+              onMouseOut={e => { e.currentTarget.style.borderColor = "#f0f0f0"; e.currentTarget.style.boxShadow = "none"; }}
             >
-              Start Your Free Trial
-              <ArrowRight className="h-5 w-5" />
-            </Link>
-          </div>
+              <div style={{ fontSize: 28, marginBottom: 14 }}>{f.icon}</div>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#111", marginBottom: 8 }}>{f.title}</h3>
+              <p style={{ fontSize: 14, color: "#6b7280", lineHeight: 1.6 }}>{f.desc}</p>
+            </div>
+          ))}
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t bg-white py-12">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
-            <div className="flex items-center gap-2">
-              <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-blue-600 to-indigo-600">
-                <span className="text-sm font-bold text-white">C</span>
-              </div>
-              <span className="font-semibold text-gray-900">CateringCo</span>
-            </div>
-            <p className="text-sm text-gray-500">
-              © 2026 CateringCo. All rights reserved.
-            </p>
-            <div className="flex gap-6">
-              <Link href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
-                Privacy
-              </Link>
-              <Link href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
-                Terms
-              </Link>
-              <Link href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
-                Contact
-              </Link>
-            </div>
-          </div>
+      {/* ===== CTA ===== */}
+      <section style={{ background: "#111", padding: "64px 32px", textAlign: "center" }}>
+        <h2 style={{ fontSize: 32, fontWeight: 800, color: "#fff", letterSpacing: "-0.02em", marginBottom: 14 }}>
+          Ready to elevate your catering business?
+        </h2>
+        <p style={{ fontSize: 15, color: "#9ca3af", marginBottom: 28 }}>
+          Join hundreds of catering professionals already managing their business with TCC.
+        </p>
+        <Link href="/signup" style={{
+          display: "inline-flex", padding: "14px 32px", borderRadius: 10,
+          background: "#fff", color: "#111", fontWeight: 700, fontSize: 15,
+          textDecoration: "none",
+        }}>Create your free account →</Link>
+      </section>
+
+      {/* ===== FOOTER ===== */}
+      <footer style={{ borderTop: "1px solid #f0f0f0", padding: "28px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 24, height: 24, background: "#111", borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#fff" }}>🍴</div>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>The Catering Company</span>
         </div>
+        <p style={{ fontSize: 12, color: "#9ca3af" }}>© 2026 The Catering Company. All rights reserved.</p>
       </footer>
     </div>
   );

@@ -207,6 +207,9 @@ async def calculate_event_pricing(
                     names.append(cleaned)
 
         for name in names:
+            # Strip price annotations stored in slot values, e.g. "Cream Crisp ($4.00/pp)" → "Cream Crisp"
+            import re as _re
+            name = _re.sub(r'\s*\(\$[\d.,]+(?:/\w+)?\)\s*$', '', name).strip()
             name_lower = name.lower().strip()
 
             # 1. Try exact item name match

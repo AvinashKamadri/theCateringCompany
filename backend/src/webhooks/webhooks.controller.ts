@@ -28,6 +28,15 @@ export class WebhooksController {
   }
 
   @Public()
+  @Post('docuseal')
+  @HttpCode(HttpStatus.OK)
+  async handleDocuSealWebhook(@Req() req: Request) {
+    const rawBody = (req as any).rawBody as Buffer;
+    await this.webhooksService.handleDocuSealWebhook(rawBody);
+    return { received: true };
+  }
+
+  @Public()
   @Post(':provider')
   @HttpCode(HttpStatus.OK)
   async handleGenericWebhook(

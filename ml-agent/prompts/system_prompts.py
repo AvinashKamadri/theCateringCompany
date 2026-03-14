@@ -86,14 +86,12 @@ NODE_PROMPTS = {
 
     "select_dishes": (
         "The customer selected their main dishes. Confirm the selections with excitement. "
-        "Ask: Would you like to add desserts to your event?"
+        "Ask: Would you like to make any changes to the menu, or are these selections final?"
     ),
 
     "ask_appetizers": (
-        "The customer answered whether they want appetizers. "
-        "If YES: Present the appetizer items from the database (provided in context). "
-        "Ask them to select as many as they'd like. "
-        "If NO: Acknowledge and let them know you'll now show the main menu."
+        "The customer said YES to appetizers. Present the appetizer items from the database "
+        "(provided in context) as a numbered list. Tell them to select as many as they'd like."
     ),
 
     "select_appetizers": (
@@ -107,9 +105,7 @@ NODE_PROMPTS = {
     ),
 
     "ask_menu_changes": (
-        "The customer was asked about menu changes. "
-        "If YES: Ask what they'd like to change. "
-        "If NO: Confirm the menu is finalized. Ask: Would you like to add desserts to your event?"
+        "The customer said YES to menu changes. Ask what they'd like to change or add."
     ),
 
     "collect_menu_changes": (
@@ -118,10 +114,9 @@ NODE_PROMPTS = {
     ),
 
     "ask_utensils": (
-        "The customer answered about utensils. "
-        "If YES: Present utensil package options (e.g., Basic Set, Premium Set, Eco-Friendly). "
-        "If NO: Move on and ask: What type of service do you prefer? "
-        "Options: Drop-off, Full-Service Buffet, or Full-Service On-site."
+        "The customer said YES to utensils. Ask them what type of utensils they'd like — "
+        "for example: standard plastic, eco-friendly/biodegradable, or bamboo. "
+        "Keep it simple and let them describe what they prefer."
     ),
 
     "select_utensils": (
@@ -131,9 +126,8 @@ NODE_PROMPTS = {
     ),
 
     "ask_desserts": (
-        "The customer answered about desserts. "
-        "If YES: Present the dessert items from the database (provided in context). "
-        "If NO: Move on and ask: Would you like us to provide utensils for your event?"
+        "The customer said YES to desserts. Present the dessert items from the database "
+        "(provided in context as a numbered list). Ask them to select as many as they'd like."
     ),
 
     "select_desserts": (
@@ -142,9 +136,8 @@ NODE_PROMPTS = {
     ),
 
     "ask_more_desserts": (
-        "The customer was asked if they want more desserts. "
-        "If YES: Present additional dessert options. "
-        "If NO: Move on and ask: Would you like us to provide utensils for your event?"
+        "The customer said YES to more desserts. Present the remaining dessert options "
+        "from the database (provided in context). Ask them to pick additional items."
     ),
 
     "ask_rentals": (
@@ -176,9 +169,8 @@ NODE_PROMPTS = {
     ),
 
     "ask_anything_else": (
-        "The customer was asked if they need anything else. "
-        "If YES: Ask them what else they need. "
-        "If NO: Tell them that's everything and you're generating their contract now."
+        "The customer said YES to needing something else. Ask them what additional "
+        "items or services they need."
     ),
 
     "collect_anything_else": (
@@ -210,8 +202,12 @@ EXTRACTION_PROMPTS = {
         "Return ONLY the date in YYYY-MM-DD format. If you can't find a date, return NONE."
     ),
     "service_type": (
-        "Determine if the customer wants 'drop-off' or 'on-site' service. "
-        "Return ONLY 'drop-off' or 'on-site'. If unclear, return NONE."
+        "Determine the service type from the customer's message. "
+        "Valid options: 'Drop-off', 'Full-Service Buffet', 'Full-Service On-site'. "
+        "Map loosely: 'drop off'/'drop-off'/'delivery' → 'Drop-off'; "
+        "'buffet'/'full service buffet'/'full-service buffet' → 'Full-Service Buffet'; "
+        "'on-site'/'on site'/'full service'/'full-service on-site'/'plated'/'family style' → 'Full-Service On-site'. "
+        "Return ONLY the matched option exactly as written above. If truly unclear, return NONE."
     ),
     "event_type": (
         "Determine the event type. Must be one of: Wedding, Corporate, Birthday, Social, Custom. "

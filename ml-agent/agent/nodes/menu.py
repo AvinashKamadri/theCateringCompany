@@ -498,7 +498,13 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_affirmative(user_msg):
+    # "yes these are final" / "yes looks good" / "yes we're done" = NO changes
+    finalize_keywords = ["final", "done", "good", "perfect", "that's all", "thats all",
+                         "no changes", "looks good", "all set", "we're set", "we are set"]
+    user_lower = user_msg.lower()
+    wants_changes = is_affirmative(user_msg) and not any(kw in user_lower for kw in finalize_keywords)
+
+    if wants_changes:
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nThe customer wants to make changes to the menu. "
             "Ask them what they'd like to change.",

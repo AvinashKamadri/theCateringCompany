@@ -112,9 +112,15 @@ export class ContractsService {
       const fs = await import('fs/promises');
       const path = await import('path');
       const filePath = path.join(process.cwd(), pdfUrl);
+      console.log(`[DocuSeal] Reading PDF from: ${filePath}`);
       const fileBuffer = await fs.readFile(filePath);
       fileBase64 = fileBuffer.toString('base64');
+      console.log(`[DocuSeal] PDF loaded: ${Math.round(fileBuffer.length / 1024)}KB → base64 ${Math.round(fileBase64.length / 1024)}KB`);
       pdfUrl = undefined; // Clear pdfUrl since we're using base64
+    }
+
+    if (!fileBase64 && !pdfUrl) {
+      throw new Error('Cannot send contract to DocuSeal: no PDF available. Generate the PDF first.');
     }
 
     // Send to OpenSign
@@ -123,7 +129,7 @@ export class ContractsService {
       recipients,
       file_url: pdfUrl,
       file_base64: fileBase64,
-      message: `Hi ${recipients[0]?.name || 'there'},\n\nThank you for choosing The Catering Company! Your catering contract for ${contract.projects_contracts_project_idToprojects?.title || 'your event'} is ready for your review and signature.\n\nPlease open the attached document, review all the details carefully, and sign at your earliest convenience. If you have any questions or would like to make changes, reply to this email or call us at 540-868-8410.\n\nWe look forward to making your event a success!\n\n— The Catering Company Team`,
+      message: `Hi {{submitter.name}},\n\nThank you for choosing The Catering Company! Your catering contract for ${contract.projects_contracts_project_idToprojects?.title || 'your event'} is ready for your review and signature.\n\nClick the link below to review and sign your contract:\n{{submitter.link}}\n\nIf you have any questions or would like to make changes before signing, reply to this email or call us at 540-868-8410.\n\nWe look forward to making your event a success!\n\n— The Catering Company Team`,
       redirect_url: `${process.env.CORS_ORIGIN}/contracts/${contractId}/signed`,
     });
 

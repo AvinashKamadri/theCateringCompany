@@ -262,10 +262,16 @@ export default function ContractDetailPage() {
     if (Array.isArray(v)) return v.filter(Boolean);
     return String(v).split(',').map((s: string) => s.trim()).filter(Boolean);
   };
-  const appetizers: string[] = parseCommaSep(slots.appetizers);
-  const mainDishes: string[] = menu.items?.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
-    || parseCommaSep(slots.selected_dishes);
-  const desserts: string[] = parseCommaSep(slots.desserts);
+  const appetizers: string[] = menu.appetizers?.length
+    ? menu.appetizers.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
+    : parseCommaSep(slots.appetizers);
+  const mainDishes: string[] = menu.main_dishes?.length
+    ? menu.main_dishes.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
+    : (menu.items?.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
+        || parseCommaSep(slots.selected_dishes));
+  const desserts: string[] = menu.desserts?.length
+    ? menu.desserts.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
+    : parseCommaSep(slots.desserts);
   const utensils: string = slots.utensils && slots.utensils !== 'no' ? String(slots.utensils) : '';
   const rentals: string = slots.rentals && slots.rentals !== 'no' ? String(slots.rentals) : '';
   const florals: string = slots.florals && slots.florals !== 'no' ? String(slots.florals) : '';

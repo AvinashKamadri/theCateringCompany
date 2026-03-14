@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface OpenSignRecipient {
   email: string;
@@ -87,11 +88,11 @@ export class OpenSignService {
 
       if (options.file_base64) {
         templatePayload.documents = [
-          { name: `${options.name}.pdf`, file: options.file_base64 },
+          { name: `${options.name}.pdf`, file: options.file_base64, extract_fields: false },
         ];
       } else if (options.file_url) {
         templatePayload.documents = [
-          { name: `${options.name}.pdf`, url: options.file_url },
+          { name: `${options.name}.pdf`, url: options.file_url, extract_fields: false },
         ];
       }
 
@@ -100,56 +101,80 @@ export class OpenSignService {
       const templateId = template.id;
       this.logger.log(`Template created: ID ${templateId}`);
 
-      // Step 2: Add signature field if template has none
-      const hasSignatureField = (template.fields || []).some(
-        (f: any) => f.type === 'signature',
-      );
+      // Step 2: Always replace all fields with only our Signature + Date fields.
+      // We must do this even if DocuSeal detected fields from the PDF; auto-detected
+      // fields often have no name/key which causes values[undefined] on submission.
+      const firstSubmitterUuid = template.submitters?.[0]?.uuid;
+      const firstDocUuid = template.schema?.[0]?.attachment_uuid;
 
-      if (!hasSignatureField) {
-        const firstSubmitterUuid = template.submitters?.[0]?.uuid;
-        const firstDocUuid = template.schema?.[0]?.attachment_uuid;
+      this.logger.log(`Template id=${templateId} submitters=${JSON.stringify(template.submitters)}`);
+      this.logger.log(`Template schema=${JSON.stringify(template.schema)}`);
+      this.logger.log(`Template auto-detected fields=${JSON.stringify(template.fields?.map((f: any) => ({ name: f.name, type: f.type, uuid: f.uuid })))}`);
 
-        if (firstSubmitterUuid && firstDocUuid) {
-          this.logger.log('Adding signature field to template...');
-          await this.client.put(`/templates/${templateId}`, {
-            fields: [
+      if (!firstSubmitterUuid || !firstDocUuid) {
+        this.logger.error(`Cannot set signature field: submitterUuid=${firstSubmitterUuid}, docUuid=${firstDocUuid}`);
+        throw new Error('DocuSeal template is missing submitter or document UUID — cannot add signature field');
+      }
+
+      // Step 2a: Clear ALL auto-detected fields first (DocuSeal PUT is additive unless cleared)
+      this.logger.log('Clearing all auto-detected template fields...');
+      await this.client.put(`/templates/${templateId}`, { fields: [] });
+      this.logger.log('Fields cleared');
+
+      // Step 2b: Re-fetch template to get fresh submitter/doc UUIDs after field clear
+      const refreshed = await this.client.get(`/templates/${templateId}`);
+      const submitterUuid = refreshed.data.submitters?.[0]?.uuid ?? firstSubmitterUuid;
+      const docUuid = refreshed.data.schema?.[0]?.attachment_uuid ?? firstDocUuid;
+      this.logger.log(`After clear: submitterUuid=${submitterUuid}, docUuid=${docUuid}`);
+
+      // Find the last page index (0-based) for signature placement
+      const pageCount: number = refreshed.data.schema?.[0]?.page_count ?? 1;
+      const lastPage = Math.max(0, pageCount - 1);
+
+      // Step 2c: Add only our Signature + Date fields — include explicit UUIDs so
+      // DocuSeal renders name="values[{uuid}]" instead of name="values[undefined]"
+      const signatureFieldUuid = uuidv4();
+      const dateFieldUuid = uuidv4();
+      this.logger.log(`Adding Signature (${signatureFieldUuid}) + Date (${dateFieldUuid}) fields on page ${lastPage}...`);
+      await this.client.put(`/templates/${templateId}`, {
+        fields: [
+          {
+            uuid: signatureFieldUuid,
+            name: 'Signature',
+            type: 'signature',
+            required: true,
+            submitter_uuid: submitterUuid,
+            areas: [
               {
-                name: 'Signature',
-                type: 'signature',
-                required: true,
-                submitter_uuid: firstSubmitterUuid,
-                areas: [
-                  {
-                    x: 0.08,
-                    y: 0.88,
-                    w: 0.35,
-                    h: 0.07,
-                    attachment_uuid: firstDocUuid,
-                    page: 0,
-                  },
-                ],
-              },
-              {
-                name: 'Date',
-                type: 'date',
-                required: false,
-                submitter_uuid: firstSubmitterUuid,
-                areas: [
-                  {
-                    x: 0.55,
-                    y: 0.88,
-                    w: 0.25,
-                    h: 0.05,
-                    attachment_uuid: firstDocUuid,
-                    page: 0,
-                  },
-                ],
+                x: 0.08,
+                y: 0.88,
+                w: 0.35,
+                h: 0.07,
+                attachment_uuid: docUuid,
+                page: lastPage,
               },
             ],
-          });
-          this.logger.log('Signature field added');
-        }
-      }
+          },
+          {
+            uuid: dateFieldUuid,
+            name: 'Date',
+            type: 'date',
+            required: false,
+            submitter_uuid: submitterUuid,
+            areas: [
+              {
+                x: 0.55,
+                y: 0.88,
+                w: 0.25,
+                h: 0.05,
+                attachment_uuid: docUuid,
+                page: lastPage,
+              },
+            ],
+          },
+        ],
+      });
+      this.logger.log('Template fields set: Signature + Date');
 
       // Step 3: Create submission (sends signing email to recipient)
       const submissionPayload: any = {

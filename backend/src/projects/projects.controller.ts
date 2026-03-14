@@ -79,6 +79,9 @@ export class ProjectsController {
       guest_count?: number;
       service_type?: string;
       menu_items?: string[];
+      main_dishes?: string[];
+      appetizers?: string[];
+      desserts?: string[];
       menu_notes?: string;
       dietary_restrictions?: string[];
       budget_range?: string;

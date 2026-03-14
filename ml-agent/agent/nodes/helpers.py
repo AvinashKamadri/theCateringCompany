@@ -3,6 +3,7 @@ Shared helper utilities for conversation nodes.
 Includes AI generation audit logging on every LLM call.
 """
 
+import os
 import re
 import time
 import logging

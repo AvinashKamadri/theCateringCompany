@@ -58,11 +58,17 @@ export class ContractPdfService {
       if (Array.isArray(v)) return v.filter(Boolean);
       return String(v).split(',').map((s: string) => s.trim()).filter(Boolean);
     };
-    const appetizers: string[] = parseCommaSep(slots.appetizers);
-    const mainDishes: string[] = menuData.items?.length
-      ? menuData.items.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
-      : parseCommaSep(slots.selected_dishes);
-    const desserts: string[] = parseCommaSep(slots.desserts);
+    const appetizers: string[] = menuData.appetizers?.length
+      ? menuData.appetizers.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
+      : parseCommaSep(slots.appetizers);
+    const mainDishes: string[] = menuData.main_dishes?.length
+      ? menuData.main_dishes.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
+      : (menuData.items?.length
+          ? menuData.items.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
+          : parseCommaSep(slots.selected_dishes));
+    const desserts: string[] = menuData.desserts?.length
+      ? menuData.desserts.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
+      : parseCommaSep(slots.desserts);
     const utensils: string = (slots.utensils && slots.utensils !== 'no') ? String(slots.utensils) : '';
     const rentals: string = (slots.rentals && slots.rentals !== 'no') ? String(slots.rentals) : '';
     const florals: string = (slots.florals && slots.florals !== 'no') ? String(slots.florals) : '';

@@ -353,9 +353,16 @@ export class StaffContractsController {
     const eventType = eventDetails.type || slots.event_type || '';
     const serviceType = eventDetails.service_type || slots.service_type || '';
 
-    const menuItems: string[] = menuData.items?.map((i: any) =>
-      typeof i === 'string' ? i : i.name || i,
-    ).filter(Boolean) || [];
+    const mapItems = (arr: any[]): string[] =>
+      arr.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean);
+
+    // Prefer categorized arrays (new contracts); fall back to flat items (old contracts)
+    const menuItems: string[] = [
+      ...mapItems(menuData.main_dishes || []),
+      ...mapItems(menuData.appetizers || []),
+      ...mapItems(menuData.desserts || []),
+      ...(menuData.main_dishes ? [] : mapItems(menuData.items || [])),
+    ];
 
     const addons: string[] = additional.addons || [];
 

@@ -159,6 +159,9 @@ export class ProjectsService {
       guest_count?: number;
       service_type?: string;
       menu_items?: string[];
+      main_dishes?: string[];
+      appetizers?: string[];
+      desserts?: string[];
       menu_notes?: string;
       dietary_restrictions?: string[];
       budget_range?: string;
@@ -174,29 +177,29 @@ export class ProjectsService {
     userId: string,
   ) {
     // Validate menu items against DB — only keep items that exist
-    let validatedMenuItems = dto.menu_items || [];
-    if (validatedMenuItems.length > 0) {
-      const dbItems = await this.prisma.menu_items.findMany({
-        where: { active: true },
-        select: { name: true },
-      });
-      const dbNameSet = new Set(dbItems.map((i) => i.name.toLowerCase()));
-      const filtered = validatedMenuItems.filter((item) => {
+    const dbItems = await this.prisma.menu_items.findMany({
+      where: { active: true },
+      select: { name: true },
+    });
+    const dbNameSet = new Set(dbItems.map((i) => i.name.toLowerCase()));
+    const validateItems = (items: string[]): string[] => {
+      if (!items.length) return [];
+      return items.filter((item) => {
         const nameLower = item.toLowerCase().replace(/\s*\(.*?\)/g, '').trim();
         return (
           dbNameSet.has(nameLower) ||
-          [...dbNameSet].some(
-            (db) => db.includes(nameLower) || nameLower.includes(db),
-          )
+          [...dbNameSet].some((db) => db.includes(nameLower) || nameLower.includes(db))
         );
       });
-      if (filtered.length !== validatedMenuItems.length) {
-        console.warn(
-          `[AI Intake] Filtered out non-DB menu items. Before: ${validatedMenuItems.join(', ')} | After: ${filtered.join(', ')}`,
-        );
-      }
-      validatedMenuItems = filtered;
-    }
+    };
+
+    const validatedMainDishes = validateItems(dto.main_dishes || []);
+    const validatedAppetizers = validateItems(dto.appetizers || []);
+    const validatedDesserts    = validateItems(dto.desserts || []);
+    // Legacy flat array support (menu_items without categorization)
+    const validatedMenuItems = dto.main_dishes
+      ? [...validatedMainDishes, ...validatedAppetizers, ...validatedDesserts]
+      : validateItems(dto.menu_items || []);
 
     const result = await this.prisma.$transaction(async (tx) => {
       // Create project with AI data (handle partial/missing fields)
@@ -281,6 +284,9 @@ export class ProjectsService {
               },
               menu: {
                 items: validatedMenuItems,
+                main_dishes: validatedMainDishes,
+                appetizers: validatedAppetizers,
+                desserts: validatedDesserts,
                 dietary_restrictions: dto.dietary_restrictions || [],
                 notes: dto.menu_notes || undefined,
               },

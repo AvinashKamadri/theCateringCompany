@@ -102,4 +102,73 @@ export class WebhooksService {
       `Generic webhook event ${webhookEvent.id} persisted and enqueued (provider: ${provider})`,
     );
   }
+
+  /**
+   * Handle DocuSeal webhook — called directly (not via queue) for low-latency status updates.
+   * DocuSeal fires submission.completed when all signers have signed.
+   */
+  async handleDocuSealWebhook(rawBody: Buffer): Promise<void> {
+    let payload: any;
+    try {
+      payload = JSON.parse(rawBody.toString());
+    } catch {
+      this.logger.warn('DocuSeal webhook: could not parse body');
+      return;
+    }
+
+    this.logger.log(`DocuSeal webhook received: ${JSON.stringify(payload?.event_type ?? payload?.event)}`);
+
+    const eventType: string = payload?.event_type ?? payload?.event ?? '';
+    // submission.completed fires when every signer has signed
+    if (eventType !== 'submission.completed' && eventType !== 'form.completed') {
+      this.logger.log(`DocuSeal webhook: ignoring event type "${eventType}"`);
+      return;
+    }
+
+    // DocuSeal sends submission id as payload.submission.id or payload.data.id
+    const submissionId = String(
+      payload?.submission?.id ?? payload?.data?.submission_id ?? payload?.data?.id ?? '',
+    );
+
+    if (!submissionId) {
+      this.logger.warn('DocuSeal webhook: no submission id found in payload');
+      return;
+    }
+
+    this.logger.log(`DocuSeal webhook: submission ${submissionId} completed — looking up contract`);
+
+    // Find the contract whose metadata contains this opensign_document_id
+    const contracts = await this.prisma.contracts.findMany({
+      where: {
+        deleted_at: null,
+        status: { not: 'signed' },
+      },
+      select: { id: true, metadata: true },
+    });
+
+    const contract = contracts.find((c) => {
+      const meta = c.metadata as any;
+      return String(meta?.opensign_document_id) === submissionId;
+    });
+
+    if (!contract) {
+      this.logger.warn(`DocuSeal webhook: no contract found for submission ${submissionId}`);
+      return;
+    }
+
+    const existingMeta = (contract.metadata as any) ?? {};
+    await this.prisma.contracts.update({
+      where: { id: contract.id },
+      data: {
+        status: 'signed',
+        metadata: {
+          ...existingMeta,
+          signed_at: new Date().toISOString(),
+          docuseal_completed_event: eventType,
+        },
+      },
+    });
+
+    this.logger.log(`✅ Contract ${contract.id} marked as signed via DocuSeal webhook`);
+  }
 }

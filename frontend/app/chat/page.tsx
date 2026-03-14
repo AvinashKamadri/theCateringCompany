@@ -38,13 +38,12 @@ export default function AiIntakePage() {
 
       const mainDishes = parseCommaSeparated(s.selected_dishes);
       const appetizers = parseCommaSeparated(s.appetizers);
-      const menuItems = [...mainDishes, ...appetizers];
+      const desserts   = parseCommaSeparated(s.desserts);
 
       const addons = [
-        s.utensils && s.utensils !== 'no'  ? `Utensils: ${s.utensils}` : null,
-        s.desserts && s.desserts !== 'no'  ? `Desserts: ${s.desserts}` : null,
-        s.rentals  && s.rentals  !== 'no'  ? `Rentals: ${s.rentals}`   : null,
-        s.florals  && s.florals  !== 'no'  ? `Florals: ${s.florals}`   : null,
+        s.utensils && s.utensils !== 'no' ? `Utensils: ${s.utensils}` : null,
+        s.rentals  && s.rentals  !== 'no' ? `Rentals: ${s.rentals}`   : null,
+        s.florals  && s.florals  !== 'no' ? `Florals: ${s.florals}`   : null,
       ].filter(Boolean) as string[];
 
       const response = await apiClient.post('/projects/ai-intake', {
@@ -55,7 +54,9 @@ export default function AiIntakePage() {
         service_type:         s.service_type,
         venue_name:           s.venue,
         venue_address:        s.venue,
-        menu_items:           menuItems,
+        main_dishes:          mainDishes,
+        appetizers,
+        desserts,
         menu_notes:           s.menu_notes || undefined,
         dietary_restrictions: s.dietary_concerns ? [s.dietary_concerns] : [],
         addons,

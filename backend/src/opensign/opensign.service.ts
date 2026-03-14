@@ -39,171 +39,243 @@ export class OpenSignService {
   private readonly logger = new Logger(OpenSignService.name);
   private readonly client: AxiosInstance;
   private readonly enabled: boolean;
-  private readonly testMode: boolean;
+  private readonly signingBaseUrl: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.enabled = this.configService.get('OPENSIGN_ENABLED') === 'true';
-    this.testMode = this.configService.get('OPENSIGN_TEST_MODE') === 'true';
+    this.enabled =
+      this.configService.get('DOCUSEAL_ENABLED') === 'true' ||
+      this.configService.get('OPENSIGN_ENABLED') === 'true';
 
-    const apiKey = this.configService.get('OPENSIGN_API_KEY');
+    const apiKey =
+      this.configService.get('DOCUSEAL_API_KEY') ||
+      this.configService.get('OPENSIGN_API_KEY');
     const apiUrl =
-      this.configService.get('OPENSIGN_API_URL') ||
-      'https://app.opensignlabs.com/api/v1';
+      this.configService.get('DOCUSEAL_API_URL') || 'https://api.docuseal.co';
+    this.signingBaseUrl =
+      this.configService.get('DOCUSEAL_SIGNING_URL') || 'https://docuseal.co';
 
     this.client = axios.create({
       baseURL: apiUrl,
       headers: {
-        'x-api-token': apiKey,
+        'X-Auth-Token': apiKey,
         'Content-Type': 'application/json',
       },
-      timeout: 30000,
+      timeout: 60000,
     });
 
     this.logger.log(
-      `OpenSign service initialized (enabled: ${this.enabled}, test mode: ${this.testMode})`,
+      `DocuSeal service initialized (enabled: ${this.enabled}, api: ${apiUrl})`,
     );
   }
 
   /**
-   * Send a document for e-signature via OpenSign
+   * Send a document for e-signature via DocuSeal
    */
   async sendDocumentForSignature(
     options: OpenSignDocumentOptions,
   ): Promise<OpenSignDocument> {
     if (!this.enabled) {
-      this.logger.warn('OpenSign is disabled, returning mock response');
+      this.logger.warn('DocuSeal is disabled, returning mock response');
       return this.mockDocumentResponse(options);
     }
 
     try {
-      this.logger.log(`Sending document to OpenSign: ${options.name}`);
+      this.logger.log(`Creating DocuSeal template: ${options.name}`);
 
-      const payload = {
-        name: options.name,
-        signers: options.recipients.map((r, index) => ({
-          email: r.email,
-          name: r.name,
-          role: r.role || 'signer',
-          order: r.order ?? index + 1,
-        })),
-        ...(options.file_base64 && { file: options.file_base64 }),
-        ...(options.file_url && { fileUrl: options.file_url }),
-        ...(options.redirect_url && { redirectUrl: options.redirect_url }),
-        ...(options.message && { message: options.message }),
-        ...(this.testMode && { testMode: true }),
-      };
+      // Step 1: Create template from PDF
+      const templatePayload: any = { name: options.name };
 
-      this.logger.log('OpenSign API payload prepared');
-      console.log('[DEBUG] OpenSign payload:', JSON.stringify({ ...payload, file: payload.file ? `[${payload.file.length} bytes]` : undefined }, null, 2));
+      if (options.file_base64) {
+        templatePayload.documents = [
+          { name: `${options.name}.pdf`, file: options.file_base64 },
+        ];
+      } else if (options.file_url) {
+        templatePayload.documents = [
+          { name: `${options.name}.pdf`, url: options.file_url },
+        ];
+      }
 
-      const response = await this.client.post('/createdocument', payload);
+      const templateResponse = await this.client.post('/templates/pdf', templatePayload);
+      const template = templateResponse.data;
+      const templateId = template.id;
+      this.logger.log(`Template created: ID ${templateId}`);
 
-      this.logger.log(
-        `Document sent successfully. ID: ${response.data.id || response.data._id}`,
+      // Step 2: Add signature field if template has none
+      const hasSignatureField = (template.fields || []).some(
+        (f: any) => f.type === 'signature',
       );
 
-      // Map OpenSign response to our standard format
+      if (!hasSignatureField) {
+        const firstSubmitterUuid = template.submitters?.[0]?.uuid;
+        const firstDocUuid = template.schema?.[0]?.attachment_uuid;
+
+        if (firstSubmitterUuid && firstDocUuid) {
+          this.logger.log('Adding signature field to template...');
+          await this.client.put(`/templates/${templateId}`, {
+            fields: [
+              {
+                name: 'Signature',
+                type: 'signature',
+                required: true,
+                submitter_uuid: firstSubmitterUuid,
+                areas: [
+                  {
+                    x: 0.08,
+                    y: 0.88,
+                    w: 0.35,
+                    h: 0.07,
+                    attachment_uuid: firstDocUuid,
+                    page: 0,
+                  },
+                ],
+              },
+              {
+                name: 'Date',
+                type: 'date',
+                required: false,
+                submitter_uuid: firstSubmitterUuid,
+                areas: [
+                  {
+                    x: 0.55,
+                    y: 0.88,
+                    w: 0.25,
+                    h: 0.05,
+                    attachment_uuid: firstDocUuid,
+                    page: 0,
+                  },
+                ],
+              },
+            ],
+          });
+          this.logger.log('Signature field added');
+        }
+      }
+
+      // Step 3: Create submission (sends signing email to recipient)
+      const submissionPayload: any = {
+        template_id: templateId,
+        send_email: true,
+        submitters: options.recipients.map((r) => ({
+          email: r.email,
+          name: r.name,
+          role: 'First Submitter',
+        })),
+      };
+
+      if (options.message) {
+        submissionPayload.message = {
+          subject: `Please sign: ${options.name}`,
+          body: options.message,
+        };
+      }
+
+      this.logger.log(
+        `Creating submission for: ${options.recipients.map((r) => r.email).join(', ')}`,
+      );
+      console.log(
+        '[DEBUG] DocuSeal submission payload:',
+        JSON.stringify(submissionPayload, null, 2),
+      );
+
+      const submissionResponse = await this.client.post('/submissions', submissionPayload);
+      const submitters: any[] = Array.isArray(submissionResponse.data)
+        ? submissionResponse.data
+        : [submissionResponse.data];
+
+      const firstSubmitter = submitters[0];
+      const submissionId = String(firstSubmitter.submission_id || firstSubmitter.id);
+
+      this.logger.log(`Submission created: ID ${submissionId}, slug: ${firstSubmitter.slug}`);
+      this.logger.log(
+        `Signing link: ${this.signingBaseUrl}/s/${firstSubmitter.slug}`,
+      );
+
       return {
-        id: response.data.id || response.data._id,
-        name: response.data.name,
-        status: response.data.status || 'pending',
-        created_at: response.data.createdAt || new Date().toISOString(),
-        signing_url: response.data.signingUrl || response.data.signing_url,
-        recipients: (response.data.signers || []).map((signer: any) => ({
-          id: signer.id || signer._id,
-          email: signer.email,
-          name: signer.name,
-          status: signer.status || 'pending',
-          signing_url: signer.signingUrl || signer.signing_url,
+        id: submissionId,
+        name: options.name,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        signing_url: `${this.signingBaseUrl}/s/${firstSubmitter.slug}`,
+        recipients: submitters.map((s: any) => ({
+          id: String(s.id),
+          email: s.email,
+          name: s.name,
+          status: s.status || 'awaiting',
+          signing_url: `${this.signingBaseUrl}/s/${s.slug}`,
         })),
       };
     } catch (error: any) {
-      this.logger.error('Failed to send document to OpenSign', error.response?.data || error.message);
-      console.log('[DEBUG] OpenSign API error:', error.response?.data || error.message);
-      console.log('[DEBUG] OpenSign error details:', {
+      this.logger.error(
+        'Failed to send document via DocuSeal',
+        error.response?.data || error.message,
+      );
+      console.log('[DEBUG] DocuSeal API error:', error.response?.data || error.message);
+      console.log('[DEBUG] DocuSeal error details:', {
         status: error.response?.status,
-        statusText: error.response?.statusText,
         data: error.response?.data,
       });
       throw new Error(
-        `OpenSign API error: ${error.response?.data?.message || error.message}`,
+        `DocuSeal API error: ${JSON.stringify(error.response?.data) || error.message}`,
       );
     }
   }
 
   /**
-   * Get document status from OpenSign
+   * Get submission status from DocuSeal
    */
   async getDocumentStatus(documentId: string): Promise<OpenSignDocument> {
     if (!this.enabled) {
-      this.logger.warn('OpenSign is disabled, returning mock status');
       return this.mockDocumentResponse({ name: 'Mock Document', recipients: [] });
     }
 
     try {
-      const response = await this.client.get(`/documents/${documentId}`);
+      const response = await this.client.get(`/submissions/${documentId}`);
+      const data = response.data;
 
       return {
-        id: response.data.id || response.data._id,
-        name: response.data.name,
-        status: response.data.status || 'pending',
-        created_at: response.data.createdAt || new Date().toISOString(),
-        completed_at: response.data.completedAt,
-        signing_url: response.data.signingUrl || response.data.signing_url,
-        recipients: (response.data.signers || []).map((signer: any) => ({
-          id: signer.id || signer._id,
-          email: signer.email,
-          name: signer.name,
-          status: signer.status || 'pending',
-          signing_url: signer.signingUrl || signer.signing_url,
+        id: String(data.id),
+        name: data.template?.name || 'Contract',
+        status: this.mapStatus(data.status),
+        created_at: data.created_at || new Date().toISOString(),
+        completed_at: data.completed_at,
+        recipients: (data.submitters || []).map((s: any) => ({
+          id: String(s.id),
+          email: s.email,
+          name: s.name,
+          status: s.status || 'awaiting',
+          signing_url: `${this.signingBaseUrl}/s/${s.slug}`,
         })),
       };
     } catch (error: any) {
-      this.logger.error('Failed to get document status', error.response?.data || error.message);
       throw new Error(
-        `OpenSign API error: ${error.response?.data?.message || error.message}`,
+        `DocuSeal API error: ${error.response?.data?.message || error.message}`,
       );
     }
   }
 
   /**
-   * Cancel a document in OpenSign
+   * Cancel a submission in DocuSeal
    */
   async cancelDocument(documentId: string): Promise<void> {
-    if (!this.enabled) {
-      this.logger.warn('OpenSign is disabled, skipping cancel');
-      return;
-    }
+    if (!this.enabled) return;
 
     try {
-      await this.client.delete(`/documents/${documentId}`);
-      this.logger.log(`Document cancelled: ${documentId}`);
+      await this.client.delete(`/submissions/${documentId}`);
+      this.logger.log(`Submission cancelled: ${documentId}`);
     } catch (error: any) {
-      this.logger.error('Failed to cancel document', error.response?.data || error.message);
       throw new Error(
-        `OpenSign API error: ${error.response?.data?.message || error.message}`,
+        `DocuSeal API error: ${error.response?.data?.message || error.message}`,
       );
     }
   }
 
   /**
-   * Resend signature request to recipient
+   * Resend (not natively supported by DocuSeal)
    */
   async resendSignatureRequest(documentId: string, recipientId: string): Promise<void> {
-    if (!this.enabled) {
-      this.logger.warn('OpenSign is disabled, skipping resend');
-      return;
-    }
-
-    try {
-      await this.client.post(`/documents/${documentId}/signers/${recipientId}/resend`);
-      this.logger.log(`Signature request resent to recipient: ${recipientId}`);
-    } catch (error: any) {
-      this.logger.error('Failed to resend signature request', error.response?.data || error.message);
-      throw new Error(
-        `OpenSign API error: ${error.response?.data?.message || error.message}`,
-      );
-    }
+    this.logger.warn(
+      `Resend not supported by DocuSeal (submission: ${documentId}, submitter: ${recipientId})`,
+    );
   }
 
   /**
@@ -211,40 +283,45 @@ export class OpenSignService {
    */
   async downloadSignedDocument(documentId: string): Promise<Buffer> {
     if (!this.enabled) {
-      this.logger.warn('OpenSign is disabled, returning mock PDF');
       return Buffer.from('Mock PDF content');
     }
 
     try {
-      const response = await this.client.get(`/documents/${documentId}/download`, {
-        responseType: 'arraybuffer',
-      });
+      const response = await this.client.get(
+        `/submissions/${documentId}/download`,
+        { responseType: 'arraybuffer' },
+      );
       return Buffer.from(response.data);
     } catch (error: any) {
-      this.logger.error('Failed to download signed document', error.response?.data || error.message);
       throw new Error(
-        `OpenSign API error: ${error.response?.data?.message || error.message}`,
+        `DocuSeal API error: ${error.response?.data?.message || error.message}`,
       );
     }
   }
 
-  /**
-   * Mock response for testing when OpenSign is disabled
-   */
+  private mapStatus(status: string): 'pending' | 'completed' | 'declined' | 'expired' {
+    switch (status) {
+      case 'completed': return 'completed';
+      case 'declined': return 'declined';
+      case 'expired': return 'expired';
+      default: return 'pending';
+    }
+  }
+
   private mockDocumentResponse(options: OpenSignDocumentOptions): OpenSignDocument {
-    const docId = `opensign_mock_${Date.now()}`;
+    const docId = `docuseal_mock_${Date.now()}`;
     return {
       id: docId,
       name: options.name,
       status: 'pending',
       created_at: new Date().toISOString(),
-      signing_url: `https://app.opensignlabs.com/sign/${docId}`,
+      signing_url: `https://docuseal.co/s/${docId}`,
       recipients: options.recipients.map((r, index) => ({
         id: `recipient_${index}`,
         email: r.email,
         name: r.name,
-        status: 'pending',
-        signing_url: `https://app.opensignlabs.com/sign/${docId}/${index}`,
+        status: 'awaiting',
+        signing_url: `https://docuseal.co/s/${docId}_${index}`,
       })),
     };
   }

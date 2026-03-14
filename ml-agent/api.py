@@ -2,7 +2,7 @@
 FastAPI server wrapping the catering intake agent.
 """
 # Code version — bump this to verify server is running latest code
-_CODE_VERSION = "v5-2026-03-10"
+_CODE_VERSION = "v6-2026-03-14"
 
 import uuid
 from contextlib import asynccontextmanager

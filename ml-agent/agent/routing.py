@@ -35,7 +35,7 @@ def route_message(state: ConversationState) -> str:
     valid_nodes = {
         "start", "collect_name", "collect_event_date", "select_service_type",
         "select_event_type", "wedding_message", "collect_venue",
-        "collect_guest_count", "select_service_style",
+        "collect_guest_count", "present_menu", "select_service_style",
         "select_dishes", "ask_appetizers", "select_appetizers",
         "menu_design", "ask_menu_changes", "collect_menu_changes",
         "ask_utensils", "select_utensils",

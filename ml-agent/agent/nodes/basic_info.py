@@ -78,15 +78,15 @@ async def _extract_and_respond(state, slot_name, next_node, node_key):
 
 
 async def collect_name_node(state: ConversationState) -> ConversationState:
-    return await _extract_and_respond(state, "name", "collect_event_date", "collect_name")
+    return await _extract_and_respond(state, "name", "select_event_type", "collect_name")
 
 
 async def collect_event_date_node(state: ConversationState) -> ConversationState:
-    return await _extract_and_respond(state, "event_date", "select_service_type", "collect_event_date")
+    return await _extract_and_respond(state, "event_date", "collect_venue", "collect_event_date")
 
 
 async def select_service_type_node(state: ConversationState) -> ConversationState:
-    return await _extract_and_respond(state, "service_type", "select_event_type", "select_service_type")
+    return await _extract_and_respond(state, "service_type", "ask_rentals", "select_service_type")
 
 
 async def select_event_type_node(state: ConversationState) -> ConversationState:
@@ -99,14 +99,8 @@ async def select_event_type_node(state: ConversationState) -> ConversationState:
     if extracted and extracted.upper() != "NONE":
         fill_slot(state["slots"], "event_type", extracted)
 
-    # If wedding, go to wedding_message; otherwise go to collect_venue
-    event_type = get_slot_value(state["slots"], "event_type")
-    is_wedding = event_type and "wedding" in str(event_type).lower()
-
-    if is_wedding:
-        next_node = "wedding_message"
-    else:
-        next_node = "collect_venue"
+    # Always collect event date next regardless of event type
+    next_node = "collect_event_date"
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
     context = (
@@ -175,62 +169,68 @@ async def collect_venue_node(state: ConversationState) -> ConversationState:
 
 
 async def collect_guest_count_node(state: ConversationState) -> ConversationState:
-    """Collect guest count and route based on event type."""
+    """Collect guest count only. Route to present_menu (non-wedding) or select_service_style (wedding)."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # Extract guest count
     extracted = await llm_extract(EXTRACTION_PROMPTS["guest_count"], user_msg)
     extracted = extracted.strip()
 
     if extracted and extracted.upper() != "NONE":
-        # Normalize guest_count to int
         try:
             extracted = int("".join(c for c in extracted if c.isdigit()))
         except ValueError:
             pass
         fill_slot(state["slots"], "guest_count", extracted)
 
-    # Check event type to determine next node
     event_type = get_slot_value(state["slots"], "event_type")
     is_wedding = event_type and "wedding" in str(event_type).lower()
+    next_node = "select_service_style" if is_wedding else "ask_appetizers"
 
-    # For weddings, ask about service style (Cocktail Hour, Reception, Both)
-    # For other events, skip service style and go directly to menu selection
-    next_node = "select_service_style" if is_wedding else "select_dishes"
-
-    # Build context for response — include real menu data for non-wedding events
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
-
-    if not is_wedding:
-        # Non-wedding: present real menu items from DB
-        menu_context = await get_main_dishes_context(state)
-        context = (
-            f"Customer said: {user_msg}\nExtracted guest_count: {extracted}\n"
-            f"Event type: {event_type}\nCURRENT slot values: {slots_summary}\n\n"
-            f"{menu_context}"
-        )
-        prompt = (
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_guest_count']}\n\n"
-            "IMPORTANT: Present the EXACT menu items from the database below. "
-            "Do NOT invent or hallucinate menu items. Use the real items provided."
-        )
-    else:
-        context = (
-            f"Customer said: {user_msg}\nExtracted guest_count: {extracted}\n"
-            f"Event type: {event_type}\nCURRENT slot values: {slots_summary}"
-        )
-        prompt = f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_guest_count']}"
-
-    response = await llm_respond(prompt, context)
+    context = (
+        f"Customer said: {user_msg}\nExtracted guest_count: {extracted}\n"
+        f"Event type: {event_type}\nCURRENT slot values: {slots_summary}"
+    )
+    response = await llm_respond(
+        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_guest_count']}",
+        context,
+    )
 
     state["current_node"] = next_node
     state["messages"] = add_ai_message(state, response)
     return state
 
 
+async def present_menu_node(state: ConversationState) -> ConversationState:
+    """Fetch DB menu items and present them. Route to select_dishes."""
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+
+    menu_context = await get_main_dishes_context(state)
+    slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+
+    context = (
+        f"Customer said: {user_msg}\n"
+        f"CURRENT slot values: {slots_summary}\n\n"
+        f"{menu_context}"
+    )
+    response = await llm_respond(
+        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['present_menu']}\n\n"
+        "CRITICAL INSTRUCTION: The database menu is listed above in the context. "
+        "You MUST present ONLY those exact items — numbered exactly as they appear. "
+        "DO NOT add, rename, substitute, or invent any item not in that list. "
+        "Copy the item names verbatim from the database list.",
+        context,
+    )
+
+    state["current_node"] = "select_dishes"
+    state["messages"] = add_ai_message(state, response)
+    return state
+
+
 async def select_service_style_node(state: ConversationState) -> ConversationState:
-    """Extract service style and present real menu items from DB."""
+    """Extract service style (wedding only). Route to present_menu."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
@@ -240,21 +240,16 @@ async def select_service_style_node(state: ConversationState) -> ConversationSta
     if extracted and extracted.upper() != "NONE":
         fill_slot(state["slots"], "service_style", extracted)
 
-    # Fetch real menu items from DB
-    menu_context = await get_main_dishes_context(state)
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
-
     context = (
         f"Customer said: {user_msg}\nExtracted service_style: {extracted}\n"
-        f"CURRENT slot values: {slots_summary}\n\n{menu_context}"
+        f"CURRENT slot values: {slots_summary}"
     )
     response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_service_style']}\n\n"
-        "IMPORTANT: Present the EXACT menu items from the database below. "
-        "Do NOT invent or hallucinate menu items. Use the real items provided.",
+        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_service_style']}",
         context,
     )
 
-    state["current_node"] = "select_dishes"
+    state["current_node"] = "ask_appetizers"
     state["messages"] = add_ai_message(state, response)
     return state

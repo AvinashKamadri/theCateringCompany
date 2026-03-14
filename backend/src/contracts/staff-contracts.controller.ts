@@ -5,6 +5,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ContractsService } from './contracts.service';
 import { ContractPdfService } from './contract-pdf.service';
 import { PrismaService } from '../prisma.service';
+import { PricingService } from '../pricing/pricing.service';
 
 @UseGuards(AuthGuard('jwt'), StaffGuard)
 @Controller('staff/contracts')
@@ -15,7 +16,35 @@ export class StaffContractsController {
     private readonly contractsService: ContractsService,
     private readonly contractPdfService: ContractPdfService,
     private readonly prisma: PrismaService,
+    private readonly pricingService: PricingService,
   ) {}
+
+  /**
+   * GET /staff/contracts
+   * Get all contracts (any status)
+   */
+  @Get()
+  async getAllContracts(@CurrentUser() user: { userId: string; email: string }) {
+    this.logger.log(`📋 [Staff] ${user.email} fetching all contracts`);
+
+    const contracts = await this.prisma.contracts.findMany({
+      where: { deleted_at: null },
+      include: {
+        projects_contracts_project_idToprojects: {
+          select: {
+            id: true,
+            title: true,
+            event_date: true,
+            guest_count: true,
+            status: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    return contracts;
+  }
 
   /**
    * GET /staff/contracts/pending
@@ -180,20 +209,18 @@ export class StaffContractsController {
       throw new Error('Cannot determine client email — no email in contract body or creator account');
     }
 
-    // Update contract status to sent (will be updated again after OpenSign call)
+    // Mark as approved (intermediate state); status becomes 'sent' only after OpenSign succeeds
     const existingMetadata = contract.metadata as any || {};
+    const approvalMetadata = {
+      ...existingMetadata,
+      approved_by: user.email,
+      approved_at: new Date().toISOString(),
+      approval_message: body.message,
+      adjustments: body.adjustments,
+    };
     await this.prisma.contracts.update({
       where: { id: contractId },
-      data: {
-        status: 'sent',
-        metadata: {
-          ...existingMetadata,
-          approved_by: user.email,
-          approved_at: new Date().toISOString(),
-          approval_message: body.message,
-          adjustments: body.adjustments,
-        },
-      },
+      data: { status: 'approved', metadata: approvalMetadata },
     });
 
     this.logger.log(`✅ [Staff] Contract ${contractId} approved by ${user.email}`);
@@ -201,16 +228,9 @@ export class StaffContractsController {
 
     console.log('[DEBUG] Step 8: Contract updated to approved status');
 
-    // Check if PDF exists, if not, generate it now
-    let pdfPath = contract.pdf_path;
-    console.log('[DEBUG] Step 9: Checking PDF - current path:', pdfPath);
-    if (!pdfPath) {
-      this.logger.warn(`⚠️ [Staff] No PDF found for contract ${contractId}, generating now...`);
-      console.log('[DEBUG] Step 10: Generating PDF...');
-      pdfPath = await this.contractPdfService.generateSimpleContract(contractId);
-      this.logger.log(`✅ [Staff] PDF generated at ${pdfPath}`);
-      console.log('[DEBUG] Step 11: PDF generated successfully at:', pdfPath);
-    }
+    // Always regenerate PDF at approve time so it reflects saved pricing
+    this.logger.log(`📄 [Staff] Regenerating PDF with latest pricing for contract ${contractId}`);
+    const pdfPath = await this.contractPdfService.generateSimpleContract(contractId);
 
     // Send to OpenSign for e-signature
     console.log('[DEBUG] Step 12: Sending to OpenSign...');
@@ -242,6 +262,11 @@ export class StaffContractsController {
       console.log('[DEBUG] ERROR in OpenSign call:', error);
       this.logger.error(`❌ [Staff] Failed to send contract ${contractId} to OpenSign`, error.message);
       this.logger.error(`❌ [Staff] Error stack:`, error.stack);
+      // Roll back status so staff can retry
+      await this.prisma.contracts.update({
+        where: { id: contractId },
+        data: { status: 'pending_staff_approval' },
+      });
       throw new Error(`Failed to send to OpenSign: ${error.message}`);
     }
     } catch (error: any) {
@@ -293,6 +318,63 @@ export class StaffContractsController {
   }
 
   /**
+   * POST /staff/contracts/:id/calculate-pricing
+   * Server-side pricing calculation — fast, deterministic, no AI needed.
+   * Returns a full breakdown (line items, tax, gratuity, deposit) for staff to review.
+   */
+  @Post(':id/calculate-pricing')
+  async calculatePricing(
+    @Param('id') contractId: string,
+    @CurrentUser() user: { userId: string; email: string },
+  ) {
+    this.logger.log(`💰 [Staff] ${user.email} calculating pricing for contract ${contractId}`);
+
+    const contract = await this.prisma.contracts.findUnique({
+      where: { id: contractId },
+      include: {
+        projects_contracts_project_idToprojects: {
+          select: { guest_count: true },
+        },
+      },
+    });
+
+    if (!contract) throw new Error('Contract not found');
+
+    const body = (contract.body as any) || {};
+    const eventDetails = body.event_details || {};
+    const menuData = body.menu || {};
+    const additional = body.additional || {};
+    const slots = body.slots || {};
+
+    const guestCount = Number(
+      eventDetails.guest_count || slots.guest_count ||
+      contract.projects_contracts_project_idToprojects?.guest_count || 50,
+    );
+    const eventType = eventDetails.type || slots.event_type || '';
+    const serviceType = eventDetails.service_type || slots.service_type || '';
+
+    const menuItems: string[] = menuData.items?.map((i: any) =>
+      typeof i === 'string' ? i : i.name || i,
+    ).filter(Boolean) || [];
+
+    const addons: string[] = additional.addons || [];
+
+    const breakdown = await this.pricingService.calculateEventPricing({
+      guestCount,
+      eventType,
+      serviceType,
+      menuItems,
+      addons,
+    });
+
+    this.logger.log(
+      `✅ [Staff] Pricing calculated: ${breakdown.lineItems.length} line items, grand total $${breakdown.grandTotal}`,
+    );
+
+    return breakdown;
+  }
+
+  /**
    * PATCH /staff/contracts/:id/pricing
    * Update contract pricing before approval
    */
@@ -324,7 +406,8 @@ export class StaffContractsController {
       where: { id: contractId },
       data: {
         body: updatedBody,
-        total_amount: body.pricing.total || contract.total_amount,
+        // total is the grand total (includes tax + gratuity); subtotal is line items sum
+        total_amount: body.pricing.total ?? body.pricing.subtotal ?? contract.total_amount,
         metadata: {
           ...existingMetadata,
           pricing_updated_by: user.email,

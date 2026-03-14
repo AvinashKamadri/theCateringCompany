@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Calendar, Users, MapPin, FileText,
   Clock, CheckCircle2, AlertCircle, Loader2, Building2,
-  ThumbsUp, ThumbsDown, X, Plus, Trash2, DollarSign,
+  ThumbsUp, ThumbsDown, X, Plus, Trash2, DollarSign, Calculator,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
@@ -43,7 +43,7 @@ const STATUS_CONFIG: Record<string, { label: string; icon: any; style: string }>
     style: 'bg-yellow-50 text-yellow-800 border-yellow-200',
   },
   approved: {
-    label: 'Approved',
+    label: 'Approved — Sending to Client',
     icon: CheckCircle2,
     style: 'bg-blue-50 text-blue-800 border-blue-200',
   },
@@ -86,20 +86,25 @@ export default function ContractDetailPage() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [savingPricing, setSavingPricing] = useState(false);
+  const [calculatingPricing, setCalculatingPricing] = useState(false);
+  const [pricingBreakdown, setPricingBreakdown] = useState<any>(null);
   const [lineItems, setLineItems] = useState<Array<{ description: string; quantity: number; unitPrice: number }>>([]);
 
   useEffect(() => {
-    apiClient.get(`/contracts/${contractId}`)
+    const controller = new AbortController();
+    apiClient.get(`/contracts/${contractId}`, { signal: controller.signal })
       .then((data: any) => {
         setContract(data);
         const existing = (data.body as any)?.pricing?.lineItems;
         if (Array.isArray(existing) && existing.length > 0) setLineItems(existing);
       })
       .catch((err: any) => {
+        if (controller.signal.aborted) return;
         setError(err.message || 'Failed to load contract');
         toast.error('Failed to load contract');
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [contractId]);
 
   const handlePreviewPdf = async () => {
@@ -153,11 +158,43 @@ export default function ContractDetailPage() {
 
   const pricingTotal = lineItems.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
 
+  const handleAutoCalculate = async () => {
+    setCalculatingPricing(true);
+    try {
+      const result: any = await apiClient.post(`/staff/contracts/${contractId}/calculate-pricing`, {});
+      setPricingBreakdown(result);
+      // Pre-fill line items from server calculation — staff can adjust before saving
+      if (Array.isArray(result.lineItems) && result.lineItems.length > 0) {
+        const items = result.lineItems.map((li: any) => ({
+          description: li.description,
+          quantity: li.quantity,
+          unitPrice: li.unitPrice,
+        }));
+        // Add service surcharge as a line item if on-site labor applies
+        if (result.serviceSurcharge > 0) {
+          items.push({ description: 'On-site Service & Labor', quantity: 1, unitPrice: result.serviceSurcharge });
+        }
+        setLineItems(items);
+        toast.success(`Calculated: $${Number(result.grandTotal).toLocaleString()} total — review and save`);
+      } else {
+        toast.info('No menu items matched in pricing database. Add items manually.');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to calculate pricing');
+    } finally {
+      setCalculatingPricing(false);
+    }
+  };
+
   const handleSavePricing = async () => {
     setSavingPricing(true);
     try {
+      // Use grand total from breakdown if available (includes tax + gratuity)
+      // Otherwise compute: subtotal * (1 + 0.094 + 0.20)
+      const grandTotal = pricingBreakdown?.grandTotal
+        ?? Math.round(pricingTotal * (1 + 0.094 + 0.20));
       await apiClient.patch(`/staff/contracts/${contractId}/pricing`, {
-        pricing: { lineItems, total: pricingTotal },
+        pricing: { lineItems, subtotal: pricingTotal, total: grandTotal },
       });
       toast.success('Pricing saved');
       const updated: any = await apiClient.get(`/contracts/${contractId}`);
@@ -219,12 +256,15 @@ export default function ContractDetailPage() {
   const serviceType = eventDetails.service_type || slots.service_type;
   const venueName = eventDetails.venue?.name || slots.venue || project?.venues?.name;
   const venueAddress = eventDetails.venue?.address || project?.venues?.address;
-  const menuItems: string[] = menu.items?.map((i: any) => i.name || i) || [];
-  const dietaryRestrictions: string[] = menu.dietary_restrictions || [];
+  const menuItems: string[] =
+    menu.items?.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean) ||
+    (Array.isArray(slots.selected_dishes) ? slots.selected_dishes.filter(Boolean) : []);
+  const dietaryRestrictions: string[] = menu.dietary_restrictions || (slots.dietary_concerns ? [slots.dietary_concerns] : []);
   const addons: string[] = body.additional?.addons || [];
   const specialRequests: string[] = body.additional?.modifications || [];
 
   const isPending = contract.status === 'pending_staff_approval';
+  const hasPricingSaved = !!(contract.total_amount && Number(contract.total_amount) > 0);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -319,9 +359,56 @@ export default function ContractDetailPage() {
                 </p>
                 {/* Pricing Editor */}
                 <div className="mb-4">
-                  <p className="text-xs font-semibold text-yellow-900 mb-2 flex items-center gap-1">
-                    <DollarSign className="h-3.5 w-3.5" /> Pricing (optional — add before generating PDF)
-                  </p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-yellow-900 flex items-center gap-1">
+                      <DollarSign className="h-3.5 w-3.5" /> Pricing
+                    </p>
+                    <button
+                      onClick={handleAutoCalculate}
+                      disabled={calculatingPricing}
+                      className="flex items-center gap-1.5 px-2.5 py-1 bg-yellow-900 text-yellow-50 rounded-md hover:bg-yellow-950 disabled:opacity-50 text-xs font-medium"
+                    >
+                      {calculatingPricing
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <Calculator className="h-3 w-3" />}
+                      {calculatingPricing ? 'Calculating...' : 'Auto-Calculate'}
+                    </button>
+                  </div>
+
+                  {/* Breakdown summary (tax, gratuity, deposit) shown after calculation */}
+                  {pricingBreakdown && (
+                    <div className="bg-white border border-yellow-200 rounded-lg p-3 mb-2 text-xs text-yellow-900 space-y-1">
+                      {pricingBreakdown.packageName && (
+                        <div className="flex justify-between">
+                          <span className="text-yellow-700">Package</span>
+                          <span>{pricingBreakdown.packageName} (${pricingBreakdown.packagePerPersonRate}/pp)</span>
+                        </div>
+                      )}
+                      {pricingBreakdown.serviceSurcharge > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-yellow-700">On-site labor</span>
+                          <span>${Number(pricingBreakdown.serviceSurcharge).toLocaleString()}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span className="text-yellow-700">Tax (9.4%)</span>
+                        <span>${Number(pricingBreakdown.tax).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-yellow-700">Gratuity (20%)</span>
+                        <span>${Number(pricingBreakdown.gratuity).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold border-t border-yellow-200 pt-1 mt-1">
+                        <span>Grand Total</span>
+                        <span>${Number(pricingBreakdown.grandTotal).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-yellow-700">
+                        <span>50% Deposit Due</span>
+                        <span>${Number(pricingBreakdown.deposit).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     {lineItems.map((item, idx) => (
                       <div key={idx} className="flex gap-2 items-center">
@@ -394,11 +481,17 @@ export default function ContractDetailPage() {
                   {previewing ? 'Generating PDF...' : contract.pdf_path ? 'Regenerate & View PDF' : 'Preview PDF'}
                 </button>
                 {/* Approve / Reject */}
+                {!hasPricingSaved && (
+                  <p className="text-xs text-yellow-700 font-medium mb-2 flex items-center gap-1">
+                    <AlertCircle className="h-3.5 w-3.5" /> Save pricing above before approving.
+                  </p>
+                )}
                 <div className="flex gap-3">
                   <button
                     onClick={handleApprove}
-                    disabled={approving}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
+                    disabled={approving || !hasPricingSaved}
+                    title={!hasPricingSaved ? 'Save pricing first' : undefined}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
                   >
                     {approving
                       ? <Loader2 className="h-4 w-4 animate-spin" />
@@ -470,9 +563,9 @@ export default function ContractDetailPage() {
             </div>
 
             {/* Menu */}
-            {menuItems.length > 0 && (
-              <div className="bg-white rounded-xl shadow-sm p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-3">Menu</h2>
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-3">Menu</h2>
+              {menuItems.length > 0 ? (
                 <ul className="space-y-1">
                   {menuItems.map((item, i) => (
                     <li key={i} className="flex items-center gap-2 text-gray-700 text-sm">
@@ -481,14 +574,16 @@ export default function ContractDetailPage() {
                     </li>
                   ))}
                 </ul>
-                {dietaryRestrictions.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-gray-100">
-                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Dietary</p>
-                    <p className="text-sm text-gray-700">{dietaryRestrictions.join(', ')}</p>
-                  </div>
-                )}
-              </div>
-            )}
+              ) : (
+                <p className="text-sm text-gray-400 italic">No menu items specified</p>
+              )}
+              {dietaryRestrictions.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Dietary</p>
+                  <p className="text-sm text-gray-700">{dietaryRestrictions.join(', ')}</p>
+                </div>
+              )}
+            </div>
 
             {/* Add-ons / Special Requests */}
             {(addons.length > 0 || specialRequests.length > 0) && (

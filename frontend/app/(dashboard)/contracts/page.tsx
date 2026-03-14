@@ -46,11 +46,14 @@ export default function ContractsPage() {
   useEffect(() => {
     if (!isAuthenticated) { router.push('/signin'); return; }
 
-    apiClient.get('/contracts')
+    const controller = new AbortController();
+    const endpoint = isStaff ? '/staff/contracts' : '/contracts';
+    apiClient.get(endpoint, { signal: controller.signal })
       .then((data: any) => setContracts(data))
-      .catch(() => toast.error('Failed to load contracts'))
-      .finally(() => setIsLoading(false));
-  }, [isAuthenticated, router]);
+      .catch((err: any) => { if (!controller.signal.aborted) toast.error('Failed to load contracts'); })
+      .finally(() => { if (!controller.signal.aborted) setIsLoading(false); });
+    return () => controller.abort();
+  }, [isAuthenticated, router, isStaff]);
 
   if (isLoading) {
     return (

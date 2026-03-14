@@ -29,6 +29,17 @@ export default function AiIntakePage() {
 
       const s = contractData;
 
+      // ML agent returns selected_dishes and appetizers as comma-separated strings
+      const parseCommaSeparated = (val: any): string[] => {
+        if (!val || val === 'none' || val === 'no') return [];
+        if (Array.isArray(val)) return val.filter(Boolean);
+        return String(val).split(',').map((v: string) => v.trim()).filter(Boolean);
+      };
+
+      const mainDishes = parseCommaSeparated(s.selected_dishes);
+      const appetizers = parseCommaSeparated(s.appetizers);
+      const menuItems = [...mainDishes, ...appetizers];
+
       const addons = [
         s.utensils && s.utensils !== 'no'  ? `Utensils: ${s.utensils}` : null,
         s.desserts && s.desserts !== 'no'  ? `Desserts: ${s.desserts}` : null,
@@ -44,7 +55,8 @@ export default function AiIntakePage() {
         service_type:         s.service_type,
         venue_name:           s.venue,
         venue_address:        s.venue,
-        menu_items:           Array.isArray(s.selected_dishes) ? s.selected_dishes : [],
+        menu_items:           menuItems,
+        menu_notes:           s.menu_notes || undefined,
         dietary_restrictions: s.dietary_concerns ? [s.dietary_concerns] : [],
         addons,
         modifications:        s.special_requests && s.special_requests !== 'none'

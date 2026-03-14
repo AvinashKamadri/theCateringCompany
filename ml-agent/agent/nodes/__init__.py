@@ -11,6 +11,7 @@ from agent.nodes.basic_info import (
     wedding_message_node,
     collect_venue_node,
     collect_guest_count_node,
+    present_menu_node,
     select_service_style_node,
 )
 from agent.nodes.menu import (
@@ -50,6 +51,7 @@ NODE_MAP = {
     "wedding_message": wedding_message_node,
     "collect_venue": collect_venue_node,
     "collect_guest_count": collect_guest_count_node,
+    "present_menu": present_menu_node,
     "select_service_style": select_service_style_node,
     "select_dishes": select_dishes_node,
     "ask_appetizers": ask_appetizers_node,

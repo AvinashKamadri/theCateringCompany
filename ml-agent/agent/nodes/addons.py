@@ -32,10 +32,11 @@ async def ask_utensils_node(state: ConversationState) -> ConversationState:
         context = f"Customer doesn't need utensils.\nSlots: {_slots_context(state)}"
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer doesn't need utensils. Acknowledge. "
-            "Ask: Would you like to add desserts to your event?",
+            "Ask: What type of service do you prefer? "
+            "Options: Drop-off, Full-Service Buffet, or Full-Service On-site.",
             context
         )
-        state["current_node"] = "ask_desserts"
+        state["current_node"] = "select_service_type"
 
     state["messages"] = add_ai_message(state, response)
     return state
@@ -57,7 +58,7 @@ async def select_utensils_node(state: ConversationState) -> ConversationState:
         f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_utensils']}", context
     )
 
-    state["current_node"] = "ask_desserts"
+    state["current_node"] = "select_service_type"
     state["messages"] = add_ai_message(state, response)
     return state
 
@@ -72,8 +73,8 @@ async def ask_desserts_node(state: ConversationState) -> ConversationState:
         dessert_ctx = await get_dessert_context(state)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_desserts']}\n\n"
-            "IMPORTANT: Present the EXACT dessert items from the database below. "
-            "Do NOT invent or hallucinate dessert items.",
+            "CRITICAL: Present ONLY the dessert items listed in the database context above. "
+            "Copy item names verbatim. DO NOT add, rename, or invent any items.",
             dessert_ctx
         )
         state["current_node"] = "select_desserts"
@@ -82,11 +83,10 @@ async def ask_desserts_node(state: ConversationState) -> ConversationState:
         context = f"No desserts. Slots: {_slots_context(state)}"
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer doesn't want desserts. Acknowledge. "
-            "Ask about rentals: Do you need any rentals? We offer linens, tables, and chairs. "
-            "You can select multiple or none.",
+            "Ask: Would you like us to provide utensils for your event?",
             context
         )
-        state["current_node"] = "ask_rentals"
+        state["current_node"] = "ask_utensils"
 
     state["messages"] = add_ai_message(state, response)
     return state
@@ -103,16 +103,28 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
         f"Customer message: {user_msg}"
     )
 
-    # Resolve to DB items with prices
+    # Resolve to DB items with prices — only store matched items
     matched_items, resolved_text = await _resolve_to_db_items(extraction)
+
+    if not matched_items:
+        # Nothing matched — re-present dessert menu
+        dessert_ctx = await get_dessert_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer mentioned desserts that are not on our menu. "
+            "Politely let them know and re-present the dessert list. "
+            "CRITICAL: Copy item names verbatim from the list below. No additions.",
+            dessert_ctx
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
 
     # Append to existing desserts if any
     existing = get_slot_value(state["slots"], "desserts")
-    value_to_store = resolved_text if matched_items else extraction.strip()
     if existing and existing != "no":
-        new_val = f"{existing}, {value_to_store}"
+        new_val = f"{existing}, {resolved_text}"
     else:
-        new_val = value_to_store
+        new_val = resolved_text
     fill_slot(state["slots"], "desserts", new_val)
 
     context = f"Desserts selected: {new_val}\nSlots: {_slots_context(state)}"
@@ -134,8 +146,8 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
         dessert_ctx = await get_dessert_context(state)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_more_desserts']}\n\n"
-            "IMPORTANT: Present the EXACT dessert items from the database below. "
-            "Do NOT invent items. Customer already has: "
+            "CRITICAL: Present ONLY the dessert items listed in the database context above. "
+            "Copy item names verbatim. DO NOT add or invent. Customer already has: "
             f"{get_slot_value(state['slots'], 'desserts')}",
             dessert_ctx
         )
@@ -144,10 +156,10 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
         context = f"Desserts finalized. Slots: {_slots_context(state)}"
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nDessert selections are finalized. "
-            "Ask about rentals: Do you need any rentals? We offer linens, tables, and chairs.",
+            "Ask: Would you like us to provide utensils for your event?",
             context
         )
-        state["current_node"] = "ask_rentals"
+        state["current_node"] = "ask_utensils"
 
     state["messages"] = add_ai_message(state, response)
     return state

@@ -159,6 +159,7 @@ export class ProjectsService {
       guest_count?: number;
       service_type?: string;
       menu_items?: string[];
+      menu_notes?: string;
       dietary_restrictions?: string[];
       budget_range?: string;
       venue_name?: string;
@@ -172,6 +173,31 @@ export class ProjectsService {
     },
     userId: string,
   ) {
+    // Validate menu items against DB — only keep items that exist
+    let validatedMenuItems = dto.menu_items || [];
+    if (validatedMenuItems.length > 0) {
+      const dbItems = await this.prisma.menu_items.findMany({
+        where: { active: true },
+        select: { name: true },
+      });
+      const dbNameSet = new Set(dbItems.map((i) => i.name.toLowerCase()));
+      const filtered = validatedMenuItems.filter((item) => {
+        const nameLower = item.toLowerCase().replace(/\s*\(.*?\)/g, '').trim();
+        return (
+          dbNameSet.has(nameLower) ||
+          [...dbNameSet].some(
+            (db) => db.includes(nameLower) || nameLower.includes(db),
+          )
+        );
+      });
+      if (filtered.length !== validatedMenuItems.length) {
+        console.warn(
+          `[AI Intake] Filtered out non-DB menu items. Before: ${validatedMenuItems.join(', ')} | After: ${filtered.join(', ')}`,
+        );
+      }
+      validatedMenuItems = filtered;
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
       // Create project with AI data (handle partial/missing fields)
       const project = await tx.projects.create({
@@ -254,8 +280,9 @@ export class ProjectsService {
                 },
               },
               menu: {
-                items: dto.menu_items || [],
+                items: validatedMenuItems,
                 dietary_restrictions: dto.dietary_restrictions || [],
+                notes: dto.menu_notes || undefined,
               },
               logistics: {
                 setup_time: dto.setup_time,

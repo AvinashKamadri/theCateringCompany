@@ -18,7 +18,7 @@ export function AiChat({ projectId, authorId, onComplete }: AiChatProps) {
   const [state, setState] = useState<ChatState>({
     messages: [],
     isLoading: false,
-    progress: { filled: 0, total: 16 },
+    progress: { filled: 0, total: 20 },
     isComplete: false,
   });
   const [input, setInput] = useState('');

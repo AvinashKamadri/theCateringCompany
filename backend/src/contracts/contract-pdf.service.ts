@@ -53,19 +53,33 @@ export class ContractPdfService {
     const serviceType = eventDetails.service_type || slots.service_type || '';
     const venueName = eventDetails.venue?.name || slots.venue || project?.venues?.name || '';
     const venueAddress = eventDetails.venue?.address || project?.venues?.address || '';
-    const menuItems: string[] = menuData.items?.map((i: any) => (typeof i === 'string' ? i : i.name || i)) || (Array.isArray(slots.selected_dishes) ? slots.selected_dishes : []);
+    const parseCommaSep = (v: any): string[] => {
+      if (!v || v === 'none' || v === 'no') return [];
+      if (Array.isArray(v)) return v.filter(Boolean);
+      return String(v).split(',').map((s: string) => s.trim()).filter(Boolean);
+    };
+    const menuItems: string[] = menuData.items?.length
+      ? menuData.items.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
+      : [...parseCommaSep(slots.selected_dishes), ...parseCommaSep(slots.appetizers)];
     const dietaryRestrictions: string[] = menuData.dietary_restrictions || (slots.dietary_concerns ? [slots.dietary_concerns] : []);
     const addons: string[] = additional.addons || [];
     const modifications: string[] = additional.modifications || [];
     const pricing = body.pricing || {};
     const lineItems: Array<{ description: string; quantity: number; unitPrice: number }> =
       Array.isArray(pricing.lineItems) ? pricing.lineItems : [];
-    const totalAmount = contract.total_amount
-      ? `$${Number(contract.total_amount).toLocaleString()}`
-      : lineItems.length > 0
-        ? `$${lineItems.reduce((s, i) => s + i.quantity * i.unitPrice, 0).toLocaleString()}`
-        : 'TBD';
+    const lineSubtotal = lineItems.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+    // subtotal = pre-fee sum of line items; total_amount = grand total (includes tax + gratuity)
+    // Use pricing.subtotal if present (saved by new flow), else compute from line items
+    const subtotal = pricing.subtotal > 0 ? pricing.subtotal : (lineItems.length > 0 ? lineSubtotal : 0);
+    const tax = subtotal > 0 ? subtotal * 0.094 : 0;
+    const gratuity = subtotal > 0 ? subtotal * 0.20 : 0;
+    // Grand total: prefer stored total_amount (authoritative), else compute
+    const grandTotal = contract.total_amount ? Number(contract.total_amount)
+      : (subtotal > 0 ? subtotal + tax + gratuity : 0);
+    const totalAmount = grandTotal > 0 ? `$${Math.round(grandTotal).toLocaleString()}` : 'TBD';
     const contractSummary = body.contract_text || body.summary || '';
+
+    const depositAmount = grandTotal > 0 ? `$${Math.round(grandTotal / 2).toLocaleString()}` : 'TBD';
 
     const html = buildContractHtml({
       contractId,
@@ -83,6 +97,9 @@ export class ContractPdfService {
       addons,
       modifications,
       lineItems,
+      tax: Math.round(tax),
+      gratuity: Math.round(gratuity),
+      deposit: depositAmount,
       totalAmount,
       contractSummary,
       createdAt: new Date(contract.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
@@ -154,6 +171,9 @@ interface TemplateData {
   addons: string[];
   modifications: string[];
   lineItems: LineItem[];
+  tax: number;
+  gratuity: number;
+  deposit: string;
   totalAmount: string;
   contractSummary: string;
   createdAt: string;
@@ -300,9 +320,19 @@ ${d.contractSummary ? `
       <span>${item.description}${item.quantity > 1 ? ` &times; ${item.quantity}` : ''}</span>
       <span>$${(item.quantity * item.unitPrice).toLocaleString()}</span>
     </div>`).join('') : ''}
+    ${d.tax > 0 ? `
+    <div class="billing-row" style="color:#555">
+      <span>Tax (9.4%)</span>
+      <span>$${d.tax.toLocaleString()}</span>
+    </div>` : ''}
+    ${d.gratuity > 0 ? `
+    <div class="billing-row" style="color:#555">
+      <span>Service &amp; Gratuity (20%)</span>
+      <span>$${d.gratuity.toLocaleString()}</span>
+    </div>` : ''}
     <div class="billing-row">
       <span>Deposit Due at Time of Signing (50%)</span>
-      <span>${d.totalAmount !== 'TBD' ? `$${(Number(d.totalAmount.replace(/[$,]/g, '')) / 2).toLocaleString()}` : 'TBD'}</span>
+      <span>${d.deposit !== 'TBD' ? d.deposit : 'TBD'}</span>
     </div>
     <div class="billing-row">
       <span>Final Guest Count &amp; Remainder Due</span>

@@ -38,8 +38,8 @@ export interface ContractData {
   venue: string;
   guest_count: number | string;
   service_style?: string;    // cocktail hour | reception | both
-  // Menu
-  selected_dishes?: string[];
+  // Menu — ML agent returns these as comma-separated strings (e.g. "Chicken Tikka, Pasta")
+  selected_dishes?: string | string[];
   appetizers?: string | string[];
   menu_notes?: string;
   // Add-ons

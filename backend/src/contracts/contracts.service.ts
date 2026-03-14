@@ -156,11 +156,11 @@ export class ContractsService {
   async handleSignWellWebhook(event: any) {
     const { document_id, event_type, document } = event;
 
-    // Find contract by SignWell document ID
+    // Find contract by OpenSign document ID
     const contract = await this.prisma.contracts.findFirst({
       where: {
         metadata: {
-          path: ['signwell_document_id'],
+          path: ['opensign_document_id'],
           equals: document_id,
         },
       },

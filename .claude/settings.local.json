@@ -67,7 +67,13 @@
       "Bash(/dev/null __NEW_LINE_f1615c8c4d18e507__ curl -s -b /tmp/client_cookies.txt http://localhost:3001/api/contracts/2fbb77fd-139b-49d8-8346-94d252b964d5)",
       "Bash(/dev/null __NEW_LINE_f1615c8c4d18e507__ curl -s -b /tmp/staff_cookies.txt http://localhost:3001/api/staff/contracts/pending)",
       "Read(//tmp/**)",
-      "Read(//c/Users/avina/.claude/projects/c--Users-avina-projects-flashback-cateringCo/memory/**)"
+      "Read(//c/Users/avina/.claude/projects/c--Users-avina-projects-flashback-cateringCo/memory/**)",
+      "Read(//c/Users/avina/projects/flashback/TheCateringCompanyAgent/**)",
+      "Read(//c/Users/avina/OneDrive/Desktop/TheCateringCompany/**)",
+      "Bash(find C:UsersavinaOneDriveDesktopTheCateringCompanyagentnodes -type f -name *.py)",
+      "Bash(find C:UsersavinaprojectsflashbackTheCateringCompanyAgentagentnodes -type f -name *.py)",
+      "Bash(xargs basename:*)",
+      "Bash(find C:UsersavinaOneDriveDesktopTheCateringCompanydatabase -name *.py)"
     ]
   }
 }

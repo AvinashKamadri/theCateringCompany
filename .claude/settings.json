@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Get-Content /tmp/backend.log -Tail 80\")",
+      "Bash(node -e \":*)",
+      "Read(//c/Users/avina/AppData/Local/Temp/**)",
+      "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\avina\\\\AppData\\\\Local\\\\Temp\\\\backend-new.log'' -Tail 60\")",
+      "Bash(powershell -Command \"Stop-Process -Id \\(Get-NetTCPConnection -LocalPort 3001 -State Listen\\).OwningProcess -Force -ErrorAction SilentlyContinue; Start-Sleep 3; Write-Host ''killed''\")",
+      "Bash(powershell -Command \"Get-Process node | Stop-Process -Force; Start-Sleep 3; Write-Host ''all node killed''\")",
+      "Bash(cp -f dist_new/contracts/staff-contracts.controller.js dist/contracts/staff-contracts.controller.js)",
+      "Bash(cp -f dist_new/contracts/contracts.service.js dist/contracts/contracts.service.js)",
+      "Bash(cp -f dist_new/opensign/opensign.service.js dist/opensign/opensign.service.js)",
+      "Bash(cp -f dist_new/contracts/contract-pdf.service.js dist/contracts/contract-pdf.service.js)",
+      "Bash(powershell -Command \"Get-ChildItem ''C:\\\\Users\\\\avina\\\\projects\\\\flashback\\\\cateringCo\\\\backend\\\\dist'' | Select Name\")",
+      "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\avina\\\\AppData\\\\Local\\\\Temp\\\\backend3.log'' -Tail 30\")",
+      "Bash(__NEW_LINE_e5078497dee87ba1__ echo:*)",
+      "Bash(__NEW_LINE_1074a959de21030a__ echo:*)",
+      "Bash(__NEW_LINE_5cc89743dac6e2eb__ echo:*)",
+      "Bash(powershell -Command \"Stop-Process -Id 8772 -Force -ErrorAction SilentlyContinue; Stop-Process -Id 22620 -Force -ErrorAction SilentlyContinue; Write-Host ''done''\")",
+      "Bash(powershell -Command \"Stop-Process -Id 19648 -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Write-Host ''killed''\")",
+      "Bash(powershell -Command \"Start-Sleep -Seconds 7; Write-Host ''waited''\")",
+      "Bash(1 curl:*)",
+      "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\avina\\\\AppData\\\\Local\\\\Temp\\\\backend.log'' -Tail 8\")",
+      "Bash(powershell -Command \"netstat -ano | Select-String '':3001'' | Select-Object -First 5\")",
+      "Bash(powershell -Command \"Stop-Process -Id 23328 -Force; Start-Sleep -Seconds 2; Write-Host ''killed''\")",
+      "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\avina\\\\AppData\\\\Local\\\\Temp\\\\backend2.log'' -Tail 5\")",
+      "Bash(powershell -Command \"Get-Process node | Stop-Process -Force; Write-Host ''All node processes killed''\")",
+      "Bash(powershell -Command \"Remove-Item -Path ''C:\\\\Users\\\\avina\\\\projects\\\\flashback\\\\cateringCo\\\\backend\\\\dist'' -Recurse -Force -ErrorAction SilentlyContinue; Write-Host ''dist deleted''\")"
+    ]
+  }
+}

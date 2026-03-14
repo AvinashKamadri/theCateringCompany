@@ -5,14 +5,15 @@ WORKDIR /app
 # Install Chromium for Puppeteer
 RUN apt-get update && apt-get install -y chromium --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
-COPY package*.json ./
+# Build context is repo root (set in docker-compose)
+COPY workers/package*.json ./
 RUN npm ci
 
-# Copy Prisma schema from backend
-COPY ../backend/prisma/schema.prisma ./prisma/
+# Copy Prisma schema from backend (relative to repo root context)
+COPY backend/prisma/schema.prisma ./prisma/
 RUN npx prisma generate
 
-COPY . .
+COPY workers/ .
 RUN npm run build
 
 FROM node:20-slim AS runner

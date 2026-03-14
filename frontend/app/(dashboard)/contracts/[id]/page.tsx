@@ -157,6 +157,10 @@ export default function ContractDetailPage() {
   };
 
   const pricingTotal = lineItems.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+  const pricingTax = Math.round(pricingTotal * 0.094);
+  const pricingGratuity = Math.round(pricingTotal * 0.20);
+  const pricingGrandTotal = pricingTotal + pricingTax + pricingGratuity;
+  const pricingDeposit = Math.round(pricingGrandTotal * 0.50);
 
   const handleAutoCalculate = async () => {
     setCalculatingPricing(true);
@@ -189,10 +193,7 @@ export default function ContractDetailPage() {
   const handleSavePricing = async () => {
     setSavingPricing(true);
     try {
-      // Use grand total from breakdown if available (includes tax + gratuity)
-      // Otherwise compute: subtotal * (1 + 0.094 + 0.20)
-      const grandTotal = pricingBreakdown?.grandTotal
-        ?? Math.round(pricingTotal * (1 + 0.094 + 0.20));
+      const grandTotal = pricingGrandTotal;
       await apiClient.patch(`/staff/contracts/${contractId}/pricing`, {
         pricing: { lineItems, subtotal: pricingTotal, total: grandTotal },
       });
@@ -256,9 +257,18 @@ export default function ContractDetailPage() {
   const serviceType = eventDetails.service_type || slots.service_type;
   const venueName = eventDetails.venue?.name || slots.venue || project?.venues?.name;
   const venueAddress = eventDetails.venue?.address || project?.venues?.address;
-  const menuItems: string[] =
-    menu.items?.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean) ||
-    (Array.isArray(slots.selected_dishes) ? slots.selected_dishes.filter(Boolean) : []);
+  const parseCommaSep = (v: any): string[] => {
+    if (!v || v === 'none' || v === 'no') return [];
+    if (Array.isArray(v)) return v.filter(Boolean);
+    return String(v).split(',').map((s: string) => s.trim()).filter(Boolean);
+  };
+  const appetizers: string[] = parseCommaSep(slots.appetizers);
+  const mainDishes: string[] = menu.items?.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
+    || parseCommaSep(slots.selected_dishes);
+  const desserts: string[] = parseCommaSep(slots.desserts);
+  const utensils: string = slots.utensils && slots.utensils !== 'no' ? String(slots.utensils) : '';
+  const rentals: string = slots.rentals && slots.rentals !== 'no' ? String(slots.rentals) : '';
+  const florals: string = slots.florals && slots.florals !== 'no' ? String(slots.florals) : '';
   const dietaryRestrictions: string[] = menu.dietary_restrictions || (slots.dietary_concerns ? [slots.dietary_concerns] : []);
   const addons: string[] = body.additional?.addons || [];
   const specialRequests: string[] = body.additional?.modifications || [];
@@ -392,19 +402,19 @@ export default function ContractDetailPage() {
                       )}
                       <div className="flex justify-between">
                         <span className="text-yellow-700">Tax (9.4%)</span>
-                        <span>${Number(pricingBreakdown.tax).toLocaleString()}</span>
+                        <span>${pricingTax.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-yellow-700">Gratuity (20%)</span>
-                        <span>${Number(pricingBreakdown.gratuity).toLocaleString()}</span>
+                        <span>${pricingGratuity.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between font-semibold border-t border-yellow-200 pt-1 mt-1">
                         <span>Grand Total</span>
-                        <span>${Number(pricingBreakdown.grandTotal).toLocaleString()}</span>
+                        <span>${pricingGrandTotal.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between text-yellow-700">
                         <span>50% Deposit Due</span>
-                        <span>${Number(pricingBreakdown.deposit).toLocaleString()}</span>
+                        <span>${pricingDeposit.toLocaleString()}</span>
                       </div>
                     </div>
                   )}
@@ -564,18 +574,52 @@ export default function ContractDetailPage() {
 
             {/* Menu */}
             <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-3">Menu</h2>
-              {menuItems.length > 0 ? (
-                <ul className="space-y-1">
-                  {menuItems.map((item, i) => (
-                    <li key={i} className="flex items-center gap-2 text-gray-700 text-sm">
-                      <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Menu &amp; Services</h2>
+              {appetizers.length === 0 && mainDishes.length === 0 && desserts.length === 0 && !utensils && !rentals && !florals && (
                 <p className="text-sm text-gray-400 italic">No menu items specified</p>
+              )}
+              {appetizers.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Appetizers / Hors d&apos;Oeuvres</p>
+                  <ul className="space-y-1">
+                    {appetizers.map((item, i) => (
+                      <li key={i} className="flex items-center gap-2 text-gray-700 text-sm">
+                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />{item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {mainDishes.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Main Dishes</p>
+                  <ul className="space-y-1">
+                    {mainDishes.map((item, i) => (
+                      <li key={i} className="flex items-center gap-2 text-gray-700 text-sm">
+                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />{item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {desserts.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Desserts</p>
+                  <ul className="space-y-1">
+                    {desserts.map((item, i) => (
+                      <li key={i} className="flex items-center gap-2 text-gray-700 text-sm">
+                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />{item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {(utensils || rentals || florals) && (
+                <div className="space-y-1 text-sm text-gray-700 border-t border-gray-100 pt-3 mt-1">
+                  {utensils && <p><span className="font-medium text-gray-500">Utensils:</span> {utensils}</p>}
+                  {rentals && <p><span className="font-medium text-gray-500">Rentals:</span> {rentals}</p>}
+                  {florals && <p><span className="font-medium text-gray-500">Florals:</span> {florals}</p>}
+                </div>
               )}
               {dietaryRestrictions.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-gray-100">
@@ -676,7 +720,7 @@ export default function ContractDetailPage() {
             {/* Actions */}
             <div className="bg-white rounded-xl shadow-sm p-5 space-y-2">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Actions</h3>
-              {contract.pdf_path && (
+              {isStaff && contract.pdf_path && (
                 <a
                   href={`/api/contracts/${contract.id}/pdf`}
                   target="_blank"

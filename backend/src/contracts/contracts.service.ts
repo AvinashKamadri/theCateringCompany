@@ -123,7 +123,7 @@ export class ContractsService {
       recipients,
       file_url: pdfUrl,
       file_base64: fileBase64,
-      message: `Please review and sign the contract for ${contract.projects_contracts_project_idToprojects?.title || 'your event'}.`,
+      message: `Hi ${recipients[0]?.name || 'there'},\n\nThank you for choosing The Catering Company! Your catering contract for ${contract.projects_contracts_project_idToprojects?.title || 'your event'} is ready for your review and signature.\n\nPlease open the attached document, review all the details carefully, and sign at your earliest convenience. If you have any questions or would like to make changes, reply to this email or call us at 540-868-8410.\n\nWe look forward to making your event a success!\n\n— The Catering Company Team`,
       redirect_url: `${process.env.CORS_ORIGIN}/contracts/${contractId}/signed`,
     });
 

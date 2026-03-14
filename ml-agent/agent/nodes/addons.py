@@ -4,7 +4,7 @@ Add-on nodes: utensils, desserts, rentals, florals.
 
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
-    get_last_human_message, add_ai_message, llm_respond,
+    get_last_human_message, add_ai_message, llm_respond, llm_extract,
     is_affirmative, is_negative,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
@@ -47,11 +47,14 @@ async def select_utensils_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extraction = await llm_respond(
-        "Extract the utensil selection from this message. Return what they chose.",
-        f"Customer message: {user_msg}"
+    extraction = await llm_extract(
+        "Extract the utensil type from the customer's message. "
+        "Return ONLY the utensil type (e.g. 'eco-friendly', 'plastic', 'standard', 'biodegradable', 'bamboo'). "
+        "Return NONE if no clear selection is made.",
+        user_msg
     )
-    fill_slot(state["slots"], "utensils", extraction.strip())
+    utensil_value = extraction.strip() if extraction.strip().upper() != "NONE" else user_msg.strip()
+    fill_slot(state["slots"], "utensils", utensil_value)
 
     context = f"Utensils selected: {extraction}\nSlots: {_slots_context(state)}"
     response = await llm_respond(
@@ -173,10 +176,11 @@ async def ask_rentals_node(state: ConversationState) -> ConversationState:
     if is_negative(user_msg):
         fill_slot(state["slots"], "rentals", "no")
     else:
-        extraction = await llm_respond(
-            "Extract rental items from this message. Options: linens, tables, chairs. "
-            "Return what they chose as a comma-separated list.",
-            f"Customer message: {user_msg}"
+        extraction = await llm_extract(
+            "Extract rental items from the customer's message. Options: linens, tables, chairs. "
+            "Return ONLY a comma-separated list of what they chose (e.g. 'linens, tables'). "
+            "Return NONE if none selected.",
+            user_msg
         )
         fill_slot(state["slots"], "rentals", extraction.strip())
 

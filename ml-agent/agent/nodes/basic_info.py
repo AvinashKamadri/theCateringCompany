@@ -205,14 +205,16 @@ async def collect_guest_count_node(state: ConversationState) -> ConversationStat
 async def present_menu_node(state: ConversationState) -> ConversationState:
     """Fetch DB menu items and present them. Route to select_dishes."""
     state = dict(state)
-    user_msg = get_last_human_message(state["messages"])
 
     menu_context = await get_main_dishes_context(state)
-    slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+    # Only pass event context (NOT user message or appetizers slot) to avoid LLM confusion
+    event_slots = {
+        k: v["value"] for k, v in state["slots"].items()
+        if v.get("filled") and k in ("name", "event_type", "event_date", "guest_count", "venue")
+    }
 
     context = (
-        f"Customer said: {user_msg}\n"
-        f"CURRENT slot values: {slots_summary}\n\n"
+        f"Event details: {event_slots}\n\n"
         f"{menu_context}"
     )
     response = await llm_respond(
@@ -220,6 +222,7 @@ async def present_menu_node(state: ConversationState) -> ConversationState:
         "CRITICAL INSTRUCTION: The database menu is listed above in the context. "
         "You MUST present ONLY those exact items — numbered exactly as they appear. "
         "DO NOT add, rename, substitute, or invent any item not in that list. "
+        "DO NOT show appetizers — those have already been selected. "
         "Copy the item names verbatim from the database list.",
         context,
     )

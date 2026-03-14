@@ -58,9 +58,14 @@ export class ContractPdfService {
       if (Array.isArray(v)) return v.filter(Boolean);
       return String(v).split(',').map((s: string) => s.trim()).filter(Boolean);
     };
-    const menuItems: string[] = menuData.items?.length
+    const appetizers: string[] = parseCommaSep(slots.appetizers);
+    const mainDishes: string[] = menuData.items?.length
       ? menuData.items.map((i: any) => (typeof i === 'string' ? i : i.name || i)).filter(Boolean)
-      : [...parseCommaSep(slots.selected_dishes), ...parseCommaSep(slots.appetizers)];
+      : parseCommaSep(slots.selected_dishes);
+    const desserts: string[] = parseCommaSep(slots.desserts);
+    const utensils: string = (slots.utensils && slots.utensils !== 'no') ? String(slots.utensils) : '';
+    const rentals: string = (slots.rentals && slots.rentals !== 'no') ? String(slots.rentals) : '';
+    const florals: string = (slots.florals && slots.florals !== 'no') ? String(slots.florals) : '';
     const dietaryRestrictions: string[] = menuData.dietary_restrictions || (slots.dietary_concerns ? [slots.dietary_concerns] : []);
     const addons: string[] = additional.addons || [];
     const modifications: string[] = additional.modifications || [];
@@ -92,7 +97,12 @@ export class ContractPdfService {
       serviceType,
       venueName,
       venueAddress,
-      menuItems,
+      appetizers,
+      mainDishes,
+      desserts,
+      utensils,
+      rentals,
+      florals,
       dietaryRestrictions,
       addons,
       modifications,
@@ -166,7 +176,12 @@ interface TemplateData {
   serviceType: string;
   venueName: string;
   venueAddress: string;
-  menuItems: string[];
+  appetizers: string[];
+  mainDishes: string[];
+  desserts: string[];
+  utensils: string;
+  rentals: string;
+  florals: string;
   dietaryRestrictions: string[];
   addons: string[];
   modifications: string[];
@@ -285,10 +300,30 @@ function buildContractHtml(d: TemplateData): string {
 </div>
 
 <!-- ═══════════════ MENU ═══════════════ -->
-${d.menuItems.length > 0 ? `
+${(d.appetizers.length > 0 || d.mainDishes.length > 0 || d.desserts.length > 0 || d.utensils || d.rentals || d.florals) ? `
 <div class="section">
-  <div class="section-title">Menu</div>
-  ${bulletList(d.menuItems)}
+  <div class="section-title">Menu &amp; Services</div>
+  ${d.appetizers.length > 0 ? `
+  <div style="margin-bottom:10px">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#555;margin-bottom:4px">Appetizers / Hors d'Oeuvres</div>
+    ${bulletList(d.appetizers)}
+  </div>` : ''}
+  ${d.mainDishes.length > 0 ? `
+  <div style="margin-bottom:10px">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#555;margin-bottom:4px">Main Dishes</div>
+    ${bulletList(d.mainDishes)}
+  </div>` : ''}
+  ${d.desserts.length > 0 ? `
+  <div style="margin-bottom:10px">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#555;margin-bottom:4px">Desserts</div>
+    ${bulletList(d.desserts)}
+  </div>` : ''}
+  ${(d.utensils || d.rentals || d.florals) ? `
+  <table class="info" style="margin-top:4px">
+    ${d.utensils ? row('Utensils', d.utensils) : ''}
+    ${d.rentals ? row('Rentals', d.rentals) : ''}
+    ${d.florals ? row('Florals', d.florals) : ''}
+  </table>` : ''}
   ${d.dietaryRestrictions.length > 0 ? `
   <div style="margin-top:8px">
     <strong style="font-size:11px;text-transform:uppercase;color:#555">Dietary Restrictions / Allergies:</strong>

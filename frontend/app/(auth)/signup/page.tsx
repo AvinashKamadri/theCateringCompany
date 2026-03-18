@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Eye, EyeOff, Loader2, CheckCircle2, XCircle, KeyRound } from "lucide-react";
 import { apiClient } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/store/auth-store";
 
@@ -20,7 +20,9 @@ export default function SignUpPage() {
     email: "",
     password: "",
     primary_phone: "",
+    project_code: "",
   });
+  const [showProjectCode, setShowProjectCode] = useState(false);
 
   // Password strength indicator
   const getPasswordStrength = (password: string) => {
@@ -41,10 +43,16 @@ export default function SignUpPage() {
     setIsLoading(true);
 
     try {
-      const data: any = await apiClient.post("/auth/signup", formData);
+      const payload: any = { ...formData };
+      if (!payload.project_code) delete payload.project_code;
+      const data: any = await apiClient.post("/auth/signup", payload);
       setUser(data.user);
-      // Redirect new users directly to AI chat intake
-      router.push("/chat");
+      // If they joined a project via code, send them straight to that project
+      if (data.joined_project?.id) {
+        router.push(`/projects/${data.joined_project.id}`);
+      } else {
+        router.push("/chat");
+      }
     } catch (err: any) {
       setError(err.message || "Failed to create account");
     } finally {
@@ -195,6 +203,39 @@ export default function SignUpPage() {
               placeholder="+1 (555) 000-0000"
               disabled={isLoading}
             />
+          </div>
+
+          {/* Project code (optional) */}
+          <div className="border border-dashed border-gray-300 rounded-lg p-4">
+            <button
+              type="button"
+              onClick={() => setShowProjectCode(!showProjectCode)}
+              className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 w-full"
+              disabled={isLoading}
+            >
+              <KeyRound className="h-4 w-4 text-gray-500" />
+              {showProjectCode ? "Hide" : "Join an existing project?"}{" "}
+              <span className="text-gray-400 font-normal ml-1">(optional)</span>
+            </button>
+            {showProjectCode && (
+              <div className="mt-3">
+                <label htmlFor="project_code" className="block text-sm text-gray-600 mb-1">
+                  Project join code
+                </label>
+                <input
+                  id="project_code"
+                  type="text"
+                  value={formData.project_code}
+                  onChange={(e) => setFormData({ ...formData, project_code: e.target.value.trim() })}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition text-sm font-mono"
+                  placeholder="e.g. johns-wedding-24985b6e"
+                  disabled={isLoading}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Ask the project owner for the join code — you&apos;ll be added as a collaborator.
+                </p>
+              </div>
+            )}
           </div>
 
           <button

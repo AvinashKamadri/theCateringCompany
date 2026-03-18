@@ -1,6 +1,21 @@
-import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  ConflictException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { ContractsService } from '../contracts/contracts.service';
+
+export const COLLABORATOR_ROLES = ['owner', 'manager', 'collaborator', 'viewer'] as const;
+export type CollaboratorRole = typeof COLLABORATOR_ROLES[number];
+
+// Roles that can manage (add/remove/update) other collaborators
+const MANAGE_ROLES: CollaboratorRole[] = ['owner', 'manager'];
+// Role hierarchy for permission checks (higher index = higher level)
+const ROLE_RANK: Record<CollaboratorRole, number> = { owner: 4, manager: 3, collaborator: 2, viewer: 1 };
 
 @Injectable()
 export class ProjectsService {
@@ -135,11 +150,218 @@ export class ProjectsService {
         data: {
           project_id: project.id,
           user_id: userId,
+          role: 'owner',
         },
       });
 
       return project;
     });
+  }
+
+  // ─── Join Code Helpers ─────────────────────────────────────────────────────
+
+  /** Derives a human-readable join code from project title + first 8 hex chars of the UUID. */
+  generateJoinCode(project: { title: string; id: string }): string {
+    const slug = project.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 30);
+    const hexId = project.id.replace(/-/g, '').slice(0, 8);
+    return slug ? `${slug}-${hexId}` : hexId;
+  }
+
+  /** Look up a project by its join code. The last 8 chars of the code are the hex prefix. */
+  async findByJoinCode(code: string): Promise<{ id: string; title: string; status: string } | null> {
+    if (!code || code.length < 8) return null;
+    const shortHex = code.slice(-8).toLowerCase();
+    // Only accept valid hex chars (no hyphens in shortHex)
+    if (!/^[0-9a-f]{8}$/.test(shortHex)) return null;
+
+    const rows = await this.prisma.$queryRaw<{ id: string; title: string; status: string }[]>`
+      SELECT id, title, status
+      FROM projects
+      WHERE deleted_at IS NULL
+        AND replace(id::text, '-', '') LIKE ${shortHex + '%'}
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+
+  // ─── Collaborator CRUD ──────────────────────────────────────────────────────
+
+  /** List all collaborators for a project with their user details. */
+  async listCollaborators(projectId: string) {
+    const rows = await this.prisma.project_collaborators.findMany({
+      where: { project_id: projectId },
+      include: {
+        users: {
+          select: {
+            id: true,
+            email: true,
+            primary_phone: true,
+            user_profiles: {
+              select: { metadata: true },
+              take: 1,
+            },
+          },
+        },
+      },
+      orderBy: { added_at: 'asc' },
+    });
+
+    return rows.map((c) => {
+      const meta = (c.users.user_profiles?.[0]?.metadata ?? {}) as Record<string, string>;
+      return {
+        user_id: c.user_id,
+        email: c.users.email,
+        primary_phone: c.users.primary_phone,
+        first_name: meta.first_name ?? null,
+        last_name: meta.last_name ?? null,
+        role: (c.role ?? 'collaborator') as CollaboratorRole,
+        added_at: c.added_at,
+      };
+    });
+  }
+
+  /** Throw if the requesting user doesn't have a manage-level role on the project. */
+  private async assertCanManage(requestingUserId: string, projectId: string) {
+    const membership = await this.prisma.project_collaborators.findUnique({
+      where: { project_id_user_id: { project_id: projectId, user_id: requestingUserId } },
+    });
+    const role = (membership?.role ?? null) as CollaboratorRole | null;
+    if (!role || !MANAGE_ROLES.includes(role)) {
+      throw new ForbiddenException('Only owners and managers can manage collaborators');
+    }
+    return role;
+  }
+
+  /**
+   * Add a collaborator by email. Looks up user, then inserts them.
+   * Only owners/managers may call this. Defaults to 'collaborator' role.
+   */
+  async addCollaborator(
+    requestingUserId: string,
+    projectId: string,
+    email: string,
+    role: CollaboratorRole = 'collaborator',
+  ) {
+    await this.assertCanManage(requestingUserId, projectId);
+
+    // Verify project exists
+    const project = await this.prisma.projects.findFirst({ where: { id: projectId, deleted_at: null } });
+    if (!project) throw new NotFoundException('Project not found');
+
+    // Owners cannot be added via this endpoint (only set on creation)
+    if (role === 'owner') throw new ForbiddenException('Cannot assign owner role via this endpoint');
+
+    const target = await this.prisma.users.findUnique({ where: { email } });
+    if (!target) throw new NotFoundException(`No user found with email ${email}`);
+
+    // Check if already a member
+    const existing = await this.prisma.project_collaborators.findUnique({
+      where: { project_id_user_id: { project_id: projectId, user_id: target.id } },
+    });
+    if (existing) throw new ConflictException('User is already a collaborator on this project');
+
+    await this.prisma.project_collaborators.create({
+      data: { project_id: projectId, user_id: target.id, role },
+    });
+
+    return { user_id: target.id, email: target.email, role };
+  }
+
+  /**
+   * Update a collaborator's role. Owners may not have their role changed.
+   * The requesting user must be owner/manager, and the new role cannot be 'owner'.
+   */
+  async updateCollaboratorRole(
+    requestingUserId: string,
+    projectId: string,
+    targetUserId: string,
+    newRole: CollaboratorRole,
+  ) {
+    const requesterRole = await this.assertCanManage(requestingUserId, projectId);
+
+    if (newRole === 'owner') throw new ForbiddenException('Cannot assign owner role');
+
+    const target = await this.prisma.project_collaborators.findUnique({
+      where: { project_id_user_id: { project_id: projectId, user_id: targetUserId } },
+    });
+    if (!target) throw new NotFoundException('Collaborator not found');
+    if (target.role === 'owner') throw new ForbiddenException('Cannot change the owner\'s role');
+
+    // Managers cannot promote other users to manager (only owners can)
+    if (newRole === 'manager' && requesterRole !== 'owner') {
+      throw new ForbiddenException('Only the owner can assign manager role');
+    }
+
+    await this.prisma.project_collaborators.update({
+      where: { project_id_user_id: { project_id: projectId, user_id: targetUserId } },
+      data: { role: newRole },
+    });
+
+    return { user_id: targetUserId, role: newRole };
+  }
+
+  /**
+   * Remove a collaborator. Owners cannot be removed. Managers can remove
+   * collaborators/viewers, but only owners can remove managers.
+   */
+  async removeCollaborator(requestingUserId: string, projectId: string, targetUserId: string) {
+    const requesterRole = await this.assertCanManage(requestingUserId, projectId);
+
+    if (requestingUserId === targetUserId) {
+      throw new ForbiddenException('You cannot remove yourself; transfer ownership first');
+    }
+
+    const target = await this.prisma.project_collaborators.findUnique({
+      where: { project_id_user_id: { project_id: projectId, user_id: targetUserId } },
+    });
+    if (!target) throw new NotFoundException('Collaborator not found');
+    if (target.role === 'owner') throw new ForbiddenException('Cannot remove the project owner');
+    if (target.role === 'manager' && requesterRole !== 'owner') {
+      throw new ForbiddenException('Only the owner can remove a manager');
+    }
+
+    await this.prisma.project_collaborators.delete({
+      where: { project_id_user_id: { project_id: projectId, user_id: targetUserId } },
+    });
+
+    return { removed: true, user_id: targetUserId };
+  }
+
+  /**
+   * Join a project using its join code. Adds the user as a 'collaborator'.
+   * Idempotent — if already a member, returns their existing record.
+   */
+  async joinProject(userId: string, code: string) {
+    const project = await this.findByJoinCode(code);
+    if (!project) throw new NotFoundException('No project found for that code');
+
+    const existing = await this.prisma.project_collaborators.findUnique({
+      where: { project_id_user_id: { project_id: project.id, user_id: userId } },
+    });
+    if (existing) {
+      return { project, role: existing.role ?? 'collaborator', already_member: true };
+    }
+
+    await this.prisma.project_collaborators.create({
+      data: { project_id: project.id, user_id: userId, role: 'collaborator' },
+    });
+
+    return { project, role: 'collaborator', already_member: false };
+  }
+
+  /**
+   * Get a collaborator's role for the given project (used by other services).
+   * Returns null if the user is not a member.
+   */
+  async getCollaboratorRole(userId: string, projectId: string): Promise<CollaboratorRole | null> {
+    const row = await this.prisma.project_collaborators.findUnique({
+      where: { project_id_user_id: { project_id: projectId, user_id: userId } },
+    });
+    return row ? ((row.role ?? 'collaborator') as CollaboratorRole) : null;
   }
 
   /**
@@ -246,6 +468,7 @@ export class ProjectsService {
         data: {
           project_id: project.id,
           user_id: userId,
+          role: 'owner',
         },
       });
 

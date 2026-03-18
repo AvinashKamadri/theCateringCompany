@@ -89,7 +89,7 @@ export class MessagesController {
     @CurrentUser() user: { userId: string },
     @Body() body: { content: string; parentMessageId?: string; mentionedUserIds?: string[] },
   ) {
-    const { message, projectId, mentionedUserIds } = await this.messagesService.createMessage(
+    const { message, projectId, mentionedUserIds, rateLimit } = await this.messagesService.createMessage(
       user.userId,
       threadId,
       {
@@ -131,6 +131,12 @@ export class MessagesController {
       }
     }
 
-    return { message };
+    return {
+      message,
+      // Include remaining quota so the frontend can show a counter for collaborators
+      rate_limit: rateLimit.remaining !== null
+        ? { remaining: rateLimit.remaining, reset_at: rateLimit.resetAt }
+        : null,
+    };
   }
 }

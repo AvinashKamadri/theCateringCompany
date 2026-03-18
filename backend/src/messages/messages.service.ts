@@ -1,5 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, TooManyRequestsException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+
+// Roles that may NOT send messages at all
+const SILENT_ROLES = ['viewer'];
+// Roles that are rate-limited (messages per hour)
+const RATE_LIMITED_ROLES = ['collaborator'];
+const RATE_LIMIT_MAX = 20;           // max messages
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
 interface CreateThreadDto {
   subject?: string;
@@ -14,6 +21,71 @@ interface CreateMessageDto {
 @Injectable()
 export class MessagesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  // ─── In-memory rate limiter ──────────────────────────────────────────────────
+  // key: `${projectId}:${userId}` → { count, windowStart }
+  private readonly rlStore = new Map<string, { count: number; windowStart: number }>();
+
+  /**
+   * Returns { allowed, remaining, resetAt } for the given key.
+   * Automatically opens a new window if the old one expired.
+   */
+  private checkRateLimit(key: string): { allowed: boolean; remaining: number; resetAt: number } {
+    const now = Date.now();
+    const entry = this.rlStore.get(key);
+
+    if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
+      this.rlStore.set(key, { count: 1, windowStart: now });
+      return { allowed: true, remaining: RATE_LIMIT_MAX - 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    }
+
+    if (entry.count >= RATE_LIMIT_MAX) {
+      return { allowed: false, remaining: 0, resetAt: entry.windowStart + RATE_LIMIT_WINDOW_MS };
+    }
+
+    entry.count += 1;
+    return {
+      allowed: true,
+      remaining: RATE_LIMIT_MAX - entry.count,
+      resetAt: entry.windowStart + RATE_LIMIT_WINDOW_MS,
+    };
+  }
+
+  /**
+   * Enforces role-based send permission and rate limiting.
+   * Returns rate-limit metadata to attach to the response.
+   */
+  private async enforceMessagePolicy(
+    userId: string,
+    projectId: string,
+  ): Promise<{ role: string; remaining: number | null; resetAt: number | null }> {
+    const membership = await this.prisma.project_collaborators.findUnique({
+      where: { project_id_user_id: { project_id: projectId, user_id: userId } },
+    });
+
+    // Non-members still allowed (AI bot, staff, etc.) — no restriction
+    if (!membership) return { role: 'none', remaining: null, resetAt: null };
+
+    const role = membership.role ?? 'collaborator';
+
+    if (SILENT_ROLES.includes(role)) {
+      throw new ForbiddenException('Viewers cannot send messages');
+    }
+
+    if (RATE_LIMITED_ROLES.includes(role)) {
+      const rlKey = `${projectId}:${userId}`;
+      const rl = this.checkRateLimit(rlKey);
+      if (!rl.allowed) {
+        throw new TooManyRequestsException(
+          `Message limit reached. Resets at ${new Date(rl.resetAt).toISOString()}`,
+        );
+      }
+      return { role, remaining: rl.remaining, resetAt: rl.resetAt };
+    }
+
+    // owner / manager — unlimited
+    return { role, remaining: null, resetAt: null };
+  }
 
   /**
    * List all threads for a project, ordered by last_activity_at DESC.
@@ -93,7 +165,8 @@ export class MessagesService {
 
   /**
    * Create a new message in a thread.
-   * Returns the created message along with the project_id from the parent thread.
+   * Enforces role permissions and rate limiting for collaborators.
+   * Returns the created message, project_id, and rate-limit metadata.
    */
   async createMessage(userId: string, threadId: string, dto: CreateMessageDto) {
     const thread = await this.prisma.threads.findUnique({
@@ -105,6 +178,11 @@ export class MessagesService {
     }
 
     const projectId = thread.project_id;
+
+    // Enforce message send policy (role check + rate limit)
+    const rateInfo = projectId
+      ? await this.enforceMessagePolicy(userId, projectId)
+      : { role: 'none', remaining: null, resetAt: null };
 
     // Extract mentions from content if not provided
     const mentionedUserIds = dto.mentionedUserIds || this.extractMentions(dto.content);
@@ -146,7 +224,7 @@ export class MessagesService {
       return message;
     });
 
-    return { message: result, projectId, mentionedUserIds };
+    return { message: result, projectId, mentionedUserIds, rateLimit: rateInfo };
   }
 
   /**

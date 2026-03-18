@@ -29,18 +29,22 @@ export class AuthController {
       primary_phone?: string;
       first_name?: string;
       last_name?: string;
+      /** Optional join code to auto-add to an existing project on signup */
+      project_code?: string;
     },
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { user, accessToken, refreshToken } = await this.authService.signup(
-      body.email,
-      body.password,
-      {
-        primary_phone: body.primary_phone,
-        first_name: body.first_name,
-        last_name: body.last_name,
-      },
-    );
+    const { user, accessToken, refreshToken, joinedProject } =
+      await this.authService.signup(
+        body.email,
+        body.password,
+        {
+          primary_phone: body.primary_phone,
+          first_name: body.first_name,
+          last_name: body.last_name,
+        },
+        body.project_code,
+      );
 
     this.setAccessTokenCookie(res, accessToken);
     this.setRefreshTokenCookie(res, refreshToken);
@@ -54,6 +58,7 @@ export class AuthController {
         created_at: user.created_at,
         updated_at: user.updated_at,
       },
+      joined_project: joinedProject ?? null,
     };
   }
 

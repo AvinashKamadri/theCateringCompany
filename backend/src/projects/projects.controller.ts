@@ -2,14 +2,17 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
+  Delete,
   Param,
   Body,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { ProjectsService } from './projects.service';
+import { ProjectsService, CollaboratorRole } from './projects.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Public } from '../common/decorators/public.decorator';
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('projects')
@@ -18,18 +21,53 @@ export class ProjectsController {
 
   /**
    * GET /projects
-   * List all projects accessible by the current user
-   * (where user is owner_user_id OR in project_collaborators).
+   * List all projects accessible by the current user.
    */
   @Get()
   async findAll(@CurrentUser() user: { userId: string }) {
     return this.projectsService.findAllForUser(user.userId);
   }
 
+  // ─── Literal routes must come BEFORE :id to avoid param collision ───────────
+
+  /**
+   * GET /projects/by-code/:code
+   * Preview a project's name/status from a join code (no join yet).
+   */
+  @Get('by-code/:code')
+  async lookupByCode(@Param('code') code: string) {
+    const project = await this.projectsService.findByJoinCode(code);
+    if (!project) {
+      return { found: false };
+    }
+    return {
+      found: true,
+      project: {
+        id: project.id,
+        title: project.title,
+        status: project.status,
+      },
+    };
+  }
+
+  /**
+   * POST /projects/join
+   * Join an existing project using its join code.
+   * Adds the authenticated user as a 'collaborator'.
+   */
+  @Post('join')
+  async joinByCode(
+    @CurrentUser() user: { userId: string },
+    @Body() body: { code: string },
+  ) {
+    return this.projectsService.joinProject(user.userId, body.code);
+  }
+
+  // ─── :id routes ─────────────────────────────────────────────────────────────
+
   /**
    * GET /projects/:id
-   * Get a single project by ID, including signed_contract_id
-   * and the latest active contract metadata.
+   * Get a single project by ID, including the latest active contract.
    */
   @Get(':id')
   async findOne(
@@ -37,6 +75,87 @@ export class ProjectsController {
     @CurrentUser() user: { userId: string },
   ) {
     return this.projectsService.findById(id);
+  }
+
+  /**
+   * GET /projects/:id/collaborators
+   * List all collaborators on a project with their roles.
+   */
+  @Get(':id/collaborators')
+  async listCollaborators(@Param('id') projectId: string) {
+    const collaborators = await this.projectsService.listCollaborators(projectId);
+    return { collaborators };
+  }
+
+  /**
+   * POST /projects/:id/collaborators
+   * Add a collaborator by email. Role defaults to 'collaborator'.
+   * Only owners/managers may call this.
+   */
+  @Post(':id/collaborators')
+  async addCollaborator(
+    @Param('id') projectId: string,
+    @CurrentUser() user: { userId: string },
+    @Body() body: { email: string; role?: CollaboratorRole },
+  ) {
+    return this.projectsService.addCollaborator(
+      user.userId,
+      projectId,
+      body.email,
+      body.role,
+    );
+  }
+
+  /**
+   * PATCH /projects/:id/collaborators/:userId
+   * Update a collaborator's role. Only owners/managers may call this.
+   */
+  @Patch(':id/collaborators/:userId')
+  async updateCollaboratorRole(
+    @Param('id') projectId: string,
+    @Param('userId') targetUserId: string,
+    @CurrentUser() user: { userId: string },
+    @Body() body: { role: CollaboratorRole },
+  ) {
+    return this.projectsService.updateCollaboratorRole(
+      user.userId,
+      projectId,
+      targetUserId,
+      body.role,
+    );
+  }
+
+  /**
+   * DELETE /projects/:id/collaborators/:userId
+   * Remove a collaborator. Only owners/managers may call this.
+   */
+  @Delete(':id/collaborators/:userId')
+  @HttpCode(HttpStatus.OK)
+  async removeCollaborator(
+    @Param('id') projectId: string,
+    @Param('userId') targetUserId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.projectsService.removeCollaborator(user.userId, projectId, targetUserId);
+  }
+
+  /**
+   * GET /projects/:id/join-code
+   * Get the join code for a project. Only accessible by members.
+   */
+  @Get(':id/join-code')
+  async getJoinCode(
+    @Param('id') projectId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    const project = await this.projectsService.findById(projectId);
+    const role = await this.projectsService.getCollaboratorRole(user.userId, projectId);
+    if (!role) {
+      return { error: 'Not a member of this project' };
+    }
+    return {
+      join_code: this.projectsService.generateJoinCode({ id: projectId, title: project.title }),
+    };
   }
 
   /**

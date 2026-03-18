@@ -24,10 +24,12 @@ export class AuthService {
       first_name?: string;
       last_name?: string;
     },
+    projectCode?: string,
   ): Promise<{
     user: any;
     accessToken: string;
     refreshToken: string;
+    joinedProject?: { id: string; title: string; role: string } | null;
   }> {
     const existingUser = await this.prisma.users.findUnique({
       where: { email },
@@ -109,10 +111,48 @@ export class AuthService {
     const { accessToken, refreshToken, sessionId } =
       await this.createSessionAndTokens(user.id, user.email);
 
+    // If a project code was provided, auto-join as collaborator
+    let joinedProject: { id: string; title: string; role: string } | null = null;
+    if (projectCode) {
+      try {
+        // Find project by join code (raw query to avoid circular dep with ProjectsService)
+        const shortHex = projectCode.slice(-8).toLowerCase();
+        if (/^[0-9a-f]{8}$/.test(shortHex)) {
+          const rows = await this.prisma.$queryRaw<{ id: string; title: string; status: string }[]>`
+            SELECT id, title, status FROM projects
+            WHERE deleted_at IS NULL
+              AND replace(id::text, '-', '') LIKE ${shortHex + '%'}
+            LIMIT 1
+          `;
+          if (rows.length > 0) {
+            const project = rows[0];
+            // Add as collaborator (idempotent)
+            const existingMembership = await this.prisma.project_collaborators.findUnique({
+              where: { project_id_user_id: { project_id: project.id, user_id: user.id } },
+            });
+            if (!existingMembership) {
+              await this.prisma.project_collaborators.create({
+                data: { project_id: project.id, user_id: user.id, role: 'collaborator' },
+              });
+            }
+            joinedProject = {
+              id: project.id,
+              title: project.title,
+              role: existingMembership?.role ?? 'collaborator',
+            };
+          }
+        }
+      } catch (err) {
+        // Non-fatal: signup still succeeds even if join fails
+        console.warn('Failed to auto-join project during signup:', err);
+      }
+    }
+
     return {
       user,
       accessToken,
       refreshToken,
+      joinedProject,
     };
   }
 

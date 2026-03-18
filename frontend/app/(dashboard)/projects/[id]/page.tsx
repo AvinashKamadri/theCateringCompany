@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api/client';
+import { projectsApi, Collaborator, CollaboratorRole } from '@/lib/api/projects';
+import { useAuthStore } from '@/lib/store/auth-store';
 import { toast } from 'sonner';
-import { Calendar, Users, MapPin, FileText, MessageSquare, Loader2, ArrowLeft } from 'lucide-react';
+import { Calendar, Users, MapPin, FileText, MessageSquare, Loader2, ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield } from 'lucide-react';
 
 interface Contract {
   id: string;
@@ -35,12 +37,25 @@ export default function ProjectDetailPage() {
   const router = useRouter();
   const projectId = params.id as string;
 
+  const currentUser = useAuthStore((s) => s.user);
+
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Collaborator state
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [myRole, setMyRole] = useState<CollaboratorRole | null>(null);
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [addEmail, setAddEmail] = useState('');
+  const [addRole, setAddRole] = useState<CollaboratorRole>('collaborator');
+  const [addingCollaborator, setAddingCollaborator] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+
   useEffect(() => {
     fetchProject();
+    fetchCollaborators();
   }, [projectId]);
 
   const fetchProject = async () => {
@@ -63,6 +78,89 @@ export default function ProjectDetailPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchCollaborators = async () => {
+    try {
+      const data = await projectsApi.listCollaborators(projectId);
+      setCollaborators(data.collaborators);
+      if (currentUser) {
+        const me = data.collaborators.find((c) => c.user_id === currentUser.id);
+        setMyRole((me?.role ?? null) as CollaboratorRole | null);
+      }
+    } catch {
+      // Non-fatal
+    }
+  };
+
+  const loadJoinCode = async () => {
+    if (joinCode) return;
+    try {
+      const data = await projectsApi.getJoinCode(projectId);
+      setJoinCode(data.join_code);
+    } catch {
+      toast.error('Could not load join code');
+    }
+  };
+
+  const copyCode = async () => {
+    if (!joinCode) return;
+    await navigator.clipboard.writeText(joinCode);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  };
+
+  const handleAddCollaborator = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addEmail.trim()) return;
+    setAddingCollaborator(true);
+    try {
+      await projectsApi.addCollaborator(projectId, addEmail.trim(), addRole);
+      toast.success(`${addEmail} added as ${addRole}`);
+      setAddEmail('');
+      setShowAddForm(false);
+      fetchCollaborators();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to add collaborator');
+    } finally {
+      setAddingCollaborator(false);
+    }
+  };
+
+  const handleUpdateRole = async (userId: string, newRole: CollaboratorRole) => {
+    try {
+      await projectsApi.updateCollaboratorRole(projectId, userId, newRole);
+      toast.success('Role updated');
+      fetchCollaborators();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update role');
+    }
+  };
+
+  const handleRemove = async (userId: string, email: string) => {
+    if (!confirm(`Remove ${email} from this project?`)) return;
+    try {
+      await projectsApi.removeCollaborator(projectId, userId);
+      toast.success(`${email} removed`);
+      fetchCollaborators();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove collaborator');
+    }
+  };
+
+  const canManage = myRole === 'owner' || myRole === 'manager';
+
+  const roleIcon = (role: CollaboratorRole) => {
+    if (role === 'owner') return <Crown className="h-3.5 w-3.5 text-yellow-500" />;
+    if (role === 'manager') return <Shield className="h-3.5 w-3.5 text-blue-500" />;
+    return null;
+  };
+
+  const roleBadgeColor: Record<CollaboratorRole, string> = {
+    owner: 'bg-yellow-100 text-yellow-800',
+    manager: 'bg-blue-100 text-blue-800',
+    collaborator: 'bg-green-100 text-green-800',
+    viewer: 'bg-gray-100 text-gray-600',
   };
 
   if (loading) {
@@ -235,6 +333,122 @@ export default function ProjectDetailPage() {
 
           {/* Sidebar */}
           <div className="space-y-6">
+            {/* Collaborators Card */}
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Collaborators</h3>
+                {canManage && (
+                  <button
+                    onClick={() => { setShowAddForm(!showAddForm); loadJoinCode(); }}
+                    className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Add
+                  </button>
+                )}
+              </div>
+
+              {/* Add form */}
+              {showAddForm && canManage && (
+                <form onSubmit={handleAddCollaborator} className="mb-4 p-3 bg-gray-50 rounded-lg space-y-2">
+                  <input
+                    type="email"
+                    required
+                    placeholder="colleague@email.com"
+                    value={addEmail}
+                    onChange={(e) => setAddEmail(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                    disabled={addingCollaborator}
+                  />
+                  <select
+                    value={addRole}
+                    onChange={(e) => setAddRole(e.target.value as CollaboratorRole)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                    disabled={addingCollaborator}
+                  >
+                    {myRole === 'owner' && <option value="manager">Manager — full control</option>}
+                    <option value="collaborator">Collaborator — can message</option>
+                    <option value="viewer">Viewer — read only</option>
+                  </select>
+                  <button
+                    type="submit"
+                    disabled={addingCollaborator}
+                    className="w-full py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {addingCollaborator ? 'Adding…' : 'Add collaborator'}
+                  </button>
+                </form>
+              )}
+
+              {/* Join code (owner/manager) */}
+              {canManage && (
+                <div className="mb-4">
+                  <p className="text-xs text-gray-500 mb-1">Share this code to invite collaborators</p>
+                  {joinCode ? (
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs bg-gray-100 px-2 py-1.5 rounded font-mono truncate">{joinCode}</code>
+                      <button onClick={copyCode} className="p-1.5 text-gray-500 hover:text-gray-700">
+                        {codeCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={loadJoinCode}
+                      className="text-xs text-blue-600 hover:text-blue-700"
+                    >
+                      Show join code
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Collaborator list */}
+              <div className="space-y-2">
+                {collaborators.length === 0 && (
+                  <p className="text-sm text-gray-500">No collaborators yet.</p>
+                )}
+                {collaborators.map((c) => (
+                  <div key={c.user_id} className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {roleIcon(c.role)}
+                        <span className="text-sm font-medium text-gray-900 truncate">
+                          {c.first_name && c.last_name ? `${c.first_name} ${c.last_name}` : c.email}
+                        </span>
+                      </div>
+                      {(c.first_name || c.last_name) && (
+                        <p className="text-xs text-gray-500 truncate">{c.email}</p>
+                      )}
+                    </div>
+                    {canManage && c.role !== 'owner' && c.user_id !== currentUser?.id ? (
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <select
+                          value={c.role}
+                          onChange={(e) => handleUpdateRole(c.user_id, e.target.value as CollaboratorRole)}
+                          className="text-xs border border-gray-200 rounded px-1 py-0.5 focus:ring-1 focus:ring-blue-500 outline-none"
+                        >
+                          {myRole === 'owner' && <option value="manager">Manager</option>}
+                          <option value="collaborator">Collaborator</option>
+                          <option value="viewer">Viewer</option>
+                        </select>
+                        <button
+                          onClick={() => handleRemove(c.user_id, c.email)}
+                          className="p-1 text-red-400 hover:text-red-600"
+                          title="Remove"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${roleBadgeColor[c.role]}`}>
+                        {c.role}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* Status Card */}
             <div className="bg-white rounded-lg shadow-sm p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Project Status</h3>

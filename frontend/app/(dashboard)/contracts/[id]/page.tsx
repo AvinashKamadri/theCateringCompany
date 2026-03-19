@@ -12,7 +12,7 @@ import { useAuthStore } from '@/lib/store/auth-store';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
-const STAFF_DOMAINS = ['@flashbacklabs.com', '@flashbacklabs.inc'];
+const STAFF_DOMAINS = ['@catering-company.com', '@catering-company.com'];
 
 interface Contract {
   id: string;

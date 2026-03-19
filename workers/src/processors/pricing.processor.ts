@@ -1,4 +1,5 @@
-import { Job } from 'bullmq';
+
+
 import { Decimal } from '@prisma/client/runtime/library';
 import prisma from '../lib/prisma';
 import { createJobLogger } from '../lib/logger';
@@ -14,7 +15,7 @@ interface LineItem {
   cost?: number;
 }
 
-export async function processPricing(job: Job<PricingJobData>): Promise<void> {
+export async function processPricing(job: { id: string; data: PricingJobData }): Promise<void> {
   const { projectPricingId, changeOrderId, userId, projectId } = job.data;
   const log = createJobLogger('pricing', job.id!, userId, projectId);
 

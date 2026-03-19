@@ -1,219 +1,143 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   Users,
   TrendingUp,
-  DollarSign,
   Calendar,
-  Phone,
-  Mail,
-  MapPin,
-  AlertTriangle,
-  Star,
-  Plus,
+  FileText,
+  Sparkles,
+  ExternalLink,
 } from 'lucide-react';
+import { useAuthStore } from '@/lib/store/auth-store';
+import { apiClient } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
-
-type PipelineStage = 'inquiry' | 'qualified' | 'proposal_sent' | 'negotiation' | 'won' | 'lost';
 
 interface Lead {
   id: string;
-  name: string;
-  email: string;
-  phone: string;
-  company?: string;
-  event_type: string;
-  event_date: string;
-  guest_count: number;
-  budget?: number;
-  stage: PipelineStage;
-  score: number; // 0-100
-  risk_level: 'low' | 'medium' | 'high';
+  title: string;
+  status: 'draft' | 'active' | 'confirmed' | 'completed' | 'cancelled';
+  event_date: string | null;
+  guest_count: number | null;
   created_at: string;
-  last_contact: string;
+  created_via_ai_intake: boolean;
+  client_name: string | null;
+  client_email: string;
+  contract_count: number;
+  member_count: number;
+  paid_amount: number;
 }
 
-// Mock data
-const mockLeads: Lead[] = [
-  {
-    id: '1',
-    name: 'Sarah Johnson',
-    email: 'sarah.j@example.com',
-    phone: '(555) 123-4567',
-    company: 'Tech Corp',
-    event_type: 'corporate',
-    event_date: '2026-05-15',
-    guest_count: 200,
-    budget: 15000,
-    stage: 'proposal_sent',
-    score: 85,
-    risk_level: 'low',
-    created_at: '2026-03-01',
-    last_contact: '2026-03-07',
-  },
-  {
-    id: '2',
-    name: 'Michael Chen',
-    email: 'm.chen@weddings.com',
-    phone: '(555) 234-5678',
-    event_type: 'wedding',
-    event_date: '2026-07-20',
-    guest_count: 150,
-    budget: 25000,
-    stage: 'negotiation',
-    score: 92,
-    risk_level: 'low',
-    created_at: '2026-02-28',
-    last_contact: '2026-03-08',
-  },
-  {
-    id: '3',
-    name: 'Emily Davis',
-    email: 'emily.d@example.com',
-    phone: '(555) 345-6789',
-    event_type: 'birthday',
-    event_date: '2026-04-10',
-    guest_count: 50,
-    budget: 5000,
-    stage: 'qualified',
-    score: 65,
-    risk_level: 'medium',
-    created_at: '2026-03-05',
-    last_contact: '2026-03-06',
-  },
-];
+interface Stats {
+  total: number;
+  by_status: Record<string, number>;
+  avg_guests: number;
+  via_ai: number;
+}
 
-const stageConfig = {
-  inquiry: { label: 'Inquiry', color: 'bg-gray-100 text-gray-700', order: 0 },
-  qualified: { label: 'Qualified', color: 'bg-blue-100 text-blue-700', order: 1 },
-  proposal_sent: { label: 'Proposal Sent', color: 'bg-purple-100 text-purple-700', order: 2 },
-  negotiation: { label: 'Negotiation', color: 'bg-yellow-100 text-yellow-700', order: 3 },
-  won: { label: 'Won', color: 'bg-green-100 text-green-700', order: 4 },
-  lost: { label: 'Lost', color: 'bg-red-100 text-red-700', order: 5 },
+const STATUS_CONFIG: Record<string, { label: string; order: number }> = {
+  draft:     { label: 'Draft',     order: 0 },
+  active:    { label: 'Active',    order: 1 },
+  confirmed: { label: 'Confirmed', order: 2 },
+  completed: { label: 'Completed', order: 3 },
+  cancelled: { label: 'Cancelled', order: 4 },
 };
 
 export default function CRMPage() {
-  const [leads] = useState<Lead[]>(mockLeads);
+  const router = useRouter();
+  const { user, isAuthenticated } = useAuthStore();
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'pipeline' | 'list'>('pipeline');
 
-  const stats = {
-    totalLeads: leads.length,
-    qualified: leads.filter((l) => l.stage !== 'inquiry' && l.stage !== 'lost').length,
-    totalValue: leads.reduce((sum, l) => sum + (l.budget || 0), 0),
-    avgScore: Math.round(leads.reduce((sum, l) => sum + l.score, 0) / leads.length),
-  };
+  useEffect(() => {
+    if (!isAuthenticated) { router.push('/signin'); return; }
+    if (user && user.role !== 'staff') { router.push('/projects'); return; }
 
-  const getLeadsByStage = (stage: PipelineStage) => {
-    return leads.filter((l) => l.stage === stage);
-  };
+    const load = async () => {
+      try {
+        const [leadsData, statsData] = await Promise.all([
+          apiClient.get('/crm/leads') as Promise<any>,
+          apiClient.get('/crm/stats') as Promise<any>,
+        ]);
+        setLeads(leadsData);
+        setStats(statsData);
+      } catch (err) {
+        console.error('Failed to load CRM data', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    load();
+  }, [isAuthenticated, user, router]);
 
-  const getRiskColor = (risk: string) => {
-    switch (risk) {
-      case 'low':
-        return 'text-green-600 bg-green-100';
-      case 'medium':
-        return 'text-yellow-600 bg-yellow-100';
-      case 'high':
-        return 'text-red-600 bg-red-100';
-      default:
-        return 'text-gray-600 bg-gray-100';
-    }
-  };
+  if (!isAuthenticated || user?.role !== 'staff') return null;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-6 w-6 rounded-full border-2 border-neutral-200 border-t-black animate-spin" />
+          <p className="text-sm text-neutral-400">Loading CRM…</p>
+        </div>
+      </div>
+    );
+  }
+
+  const byStage = (status: string) => leads.filter((l) => l.status === status);
+  const stages = Object.entries(STATUS_CONFIG).sort((a, b) => a[1].order - b[1].order);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-neutral-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-center justify-between">
+      <div className="bg-white border-b border-neutral-200">
+        <div className="max-w-7xl mx-auto px-6 py-5">
+          <div className="flex items-center justify-between mb-5">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">CRM Dashboard</h1>
-              <p className="text-sm text-gray-500 mt-1">Manage leads and track your pipeline</p>
-            </div>
-            <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
-              <Plus className="h-5 w-5" />
-              New Lead
-            </button>
-          </div>
-
-          {/* Stats */}
-          <div className="grid grid-cols-4 gap-4 mt-6">
-            <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-600 rounded-lg">
-                  <Users className="h-5 w-5 text-white" />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Total Leads</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.totalLeads}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-600 rounded-lg">
-                  <TrendingUp className="h-5 w-5 text-white" />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Qualified</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.qualified}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-600 rounded-lg">
-                  <DollarSign className="h-5 w-5 text-white" />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Pipeline Value</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    ${(stats.totalValue / 1000).toFixed(0)}K
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-yellow-600 rounded-lg">
-                  <Star className="h-5 w-5 text-white" />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Avg Score</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.avgScore}</p>
-                </div>
-              </div>
+              <h1 className="text-xl font-bold text-black">CRM</h1>
+              <p className="text-sm text-neutral-400 mt-0.5">Project pipeline — staff view</p>
             </div>
           </div>
 
-          {/* View Mode Toggle */}
-          <div className="flex gap-2 mt-6">
-            <button
-              onClick={() => setViewMode('pipeline')}
-              className={cn(
-                'px-4 py-2 rounded-lg transition',
-                viewMode === 'pipeline'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              )}
-            >
-              Pipeline View
-            </button>
-            <button
-              onClick={() => setViewMode('list')}
-              className={cn(
-                'px-4 py-2 rounded-lg transition',
-                viewMode === 'list'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              )}
-            >
-              List View
-            </button>
+          {/* Stats row */}
+          {stats && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+              {[
+                { label: 'Total Projects', value: stats.total, icon: FileText },
+                { label: 'Confirmed', value: stats.by_status.confirmed ?? 0, icon: TrendingUp },
+                { label: 'Avg Guests', value: stats.avg_guests, icon: Users },
+                { label: 'Via AI Intake', value: stats.via_ai, icon: Sparkles },
+              ].map(({ label, value, icon: Icon }) => (
+                <div key={label} className="rounded-lg border border-neutral-200 bg-white p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className="h-4 w-4 text-neutral-400" />
+                    <p className="text-xs text-neutral-500">{label}</p>
+                  </div>
+                  <p className="text-2xl font-bold text-black">{value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* View toggle */}
+          <div className="flex gap-1.5">
+            {(['pipeline', 'list'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={cn(
+                  'px-3 py-1.5 rounded-md text-sm font-medium transition-colors capitalize',
+                  viewMode === mode
+                    ? 'bg-black text-white'
+                    : 'text-neutral-600 hover:text-black hover:bg-neutral-100'
+                )}
+              >
+                {mode} view
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -221,160 +145,135 @@ export default function CRMPage() {
       {/* Content */}
       <div className="max-w-7xl mx-auto px-6 py-6">
         {viewMode === 'pipeline' ? (
-          /* Pipeline View */
-          <div className="grid grid-cols-6 gap-4">
-            {(Object.keys(stageConfig) as PipelineStage[])
-              .sort((a, b) => stageConfig[a].order - stageConfig[b].order)
-              .map((stage) => {
-                const stageLeads = getLeadsByStage(stage);
-                const stageValue = stageLeads.reduce((sum, l) => sum + (l.budget || 0), 0);
-
-                return (
-                  <div key={stage} className="bg-gray-100 rounded-lg p-4">
-                    <div className="mb-4">
-                      <h3 className="font-semibold text-gray-900">{stageConfig[stage].label}</h3>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {stageLeads.length} leads • ${(stageValue / 1000).toFixed(0)}K
-                      </p>
-                    </div>
-
-                    <div className="space-y-3">
-                      {stageLeads.map((lead) => (
-                        <div key={lead.id} className="bg-white rounded-lg p-3 shadow-sm border border-gray-200">
-                          <div className="flex items-start justify-between mb-2">
-                            <h4 className="font-medium text-sm text-gray-900">{lead.name}</h4>
-                            <div className="flex items-center gap-1">
-                              <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
-                              <span className="text-xs text-gray-600">{lead.score}</span>
-                            </div>
-                          </div>
-
-                          <div className="space-y-1">
-                            <p className="text-xs text-gray-600 capitalize">{lead.event_type}</p>
-                            <p className="text-xs text-gray-500">{lead.guest_count} guests</p>
-                            {lead.budget && (
-                              <p className="text-xs font-medium text-gray-900">
-                                ${lead.budget.toLocaleString()}
-                              </p>
-                            )}
-                          </div>
-
-                          {lead.risk_level !== 'low' && (
-                            <div className="mt-2">
-                              <span
-                                className={cn(
-                                  'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium',
-                                  getRiskColor(lead.risk_level)
-                                )}
-                              >
-                                <AlertTriangle className="h-3 w-3" />
-                                {lead.risk_level} risk
-                              </span>
-                            </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            {stages.map(([status, { label }]) => {
+              const stageLeads = byStage(status);
+              return (
+                <div key={status} className="bg-white rounded-xl border border-neutral-200 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-black">{label}</h3>
+                    <span className="text-xs text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-full">
+                      {stageLeads.length}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {stageLeads.length === 0 && (
+                      <p className="text-xs text-neutral-300 text-center py-4">Empty</p>
+                    )}
+                    {stageLeads.map((lead) => (
+                      <Link
+                        key={lead.id}
+                        href={`/projects/${lead.id}`}
+                        className="block bg-neutral-50 border border-neutral-200 rounded-lg p-3 hover:border-black transition-colors group"
+                      >
+                        <div className="flex items-start justify-between gap-1 mb-1.5">
+                          <h4 className="text-xs font-semibold text-black leading-tight line-clamp-2 group-hover:underline">
+                            {lead.title}
+                          </h4>
+                          <ExternalLink className="h-3 w-3 text-neutral-300 shrink-0 mt-0.5" />
+                        </div>
+                        <p className="text-xs text-neutral-500 truncate">
+                          {lead.client_name || lead.client_email}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1">
+                          {lead.event_date && (
+                            <span className="flex items-center gap-0.5 text-xs text-neutral-400">
+                              <Calendar className="h-3 w-3" />
+                              {new Date(lead.event_date).toLocaleDateString('en-US', {
+                                month: 'short', day: 'numeric',
+                              })}
+                            </span>
+                          )}
+                          {lead.guest_count != null && (
+                            <span className="flex items-center gap-0.5 text-xs text-neutral-400">
+                              <Users className="h-3 w-3" />{lead.guest_count}
+                            </span>
                           )}
                         </div>
-                      ))}
-                    </div>
+                        {lead.created_via_ai_intake && (
+                          <span className="mt-1.5 inline-flex items-center gap-1 text-xs text-neutral-400">
+                            <Sparkles className="h-3 w-3" />AI
+                          </span>
+                        )}
+                      </Link>
+                    ))}
                   </div>
-                );
-              })}
+                </div>
+              );
+            })}
           </div>
         ) : (
-          /* List View */
-          <div className="bg-white rounded-lg border border-gray-200">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+          <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="border-b border-neutral-200 bg-neutral-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Lead
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Event
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Stage
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Score
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Value
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Risk
-                  </th>
+                  {['Project', 'Client', 'Event Date', 'Guests', 'Status', 'Contracts', ''].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wide"
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-neutral-100">
                 {leads.map((lead) => (
-                  <tr key={lead.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div>
-                        <p className="font-medium text-gray-900">{lead.name}</p>
-                        <div className="flex items-center gap-3 mt-1">
-                          <span className="text-xs text-gray-500 flex items-center gap-1">
-                            <Mail className="h-3 w-3" />
-                            {lead.email}
-                          </span>
-                          <span className="text-xs text-gray-500 flex items-center gap-1">
-                            <Phone className="h-3 w-3" />
-                            {lead.phone}
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-sm text-gray-900 capitalize">{lead.event_type}</p>
-                      <div className="flex items-center gap-3 mt-1">
-                        <span className="text-xs text-gray-500 flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          {new Date(lead.event_date).toLocaleDateString()}
+                  <tr key={lead.id} className="hover:bg-neutral-50 transition-colors">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-black">{lead.title}</p>
+                      {lead.created_via_ai_intake && (
+                        <span className="inline-flex items-center gap-1 text-xs text-neutral-400 mt-0.5">
+                          <Sparkles className="h-3 w-3" />AI intake
                         </span>
-                        <span className="text-xs text-gray-500 flex items-center gap-1">
-                          <Users className="h-3 w-3" />
-                          {lead.guest_count}
-                        </span>
-                      </div>
+                      )}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-3">
+                      <p className="text-sm text-black">{lead.client_name || '—'}</p>
+                      <p className="text-xs text-neutral-400">{lead.client_email}</p>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-neutral-600">
+                      {lead.event_date
+                        ? new Date(lead.event_date).toLocaleDateString('en-US', {
+                            month: 'short', day: 'numeric', year: 'numeric',
+                          })
+                        : <span className="text-neutral-300">TBD</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-neutral-600">
+                      {lead.guest_count ?? <span className="text-neutral-300">—</span>}
+                    </td>
+                    <td className="px-4 py-3">
                       <span
                         className={cn(
-                          'inline-flex px-2 py-1 rounded-full text-xs font-medium',
-                          stageConfig[lead.stage].color
+                          'px-2 py-0.5 rounded-md text-xs font-medium border',
+                          lead.status === 'confirmed' || lead.status === 'completed'
+                            ? 'bg-black text-white border-black'
+                            : lead.status === 'cancelled'
+                            ? 'bg-neutral-700 text-white border-neutral-700'
+                            : 'bg-neutral-100 text-neutral-600 border-neutral-200'
                         )}
                       >
-                        {stageConfig[lead.stage].label}
+                        {STATUS_CONFIG[lead.status]?.label ?? lead.status}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 bg-gray-200 rounded-full h-2">
-                          <div
-                            className="bg-blue-600 h-2 rounded-full"
-                            style={{ width: `${lead.score}%` }}
-                          />
-                        </div>
-                        <span className="text-sm text-gray-600">{lead.score}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-sm font-medium text-gray-900">
-                        {lead.budget ? `$${lead.budget.toLocaleString()}` : '-'}
-                      </p>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={cn(
-                          'inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium',
-                          getRiskColor(lead.risk_level)
-                        )}
+                    <td className="px-4 py-3 text-sm text-neutral-600">{lead.contract_count}</td>
+                    <td className="px-4 py-3">
+                      <Link
+                        href={`/projects/${lead.id}`}
+                        className="text-xs font-medium text-neutral-500 hover:text-black transition-colors"
                       >
-                        {lead.risk_level !== 'low' && <AlertTriangle className="h-3 w-3" />}
-                        {lead.risk_level}
-                      </span>
+                        View →
+                      </Link>
                     </td>
                   </tr>
                 ))}
+                {leads.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-12 text-center text-sm text-neutral-400">
+                      No projects yet.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

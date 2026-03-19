@@ -37,8 +37,9 @@ apiClient.interceptors.response.use(
   async (error: AxiosError<ApiError>) => {
     const originalRequest = error.config as any;
 
-    // If 401 and we haven't tried to refresh yet
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // If 401 and we haven't tried to refresh yet (skip for auth endpoints themselves)
+    const isAuthEndpoint = originalRequest.url?.includes('/auth/');
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
       if (isRefreshing) {
         // If already refreshing, queue this request
         return new Promise((resolve, reject) => {
@@ -73,8 +74,8 @@ apiClient.interceptors.response.use(
       }
     }
 
-    // For other errors or if refresh also failed
-    if (error.response?.status === 401) {
+    // For other errors or if refresh also failed — but never redirect from auth endpoints
+    if (error.response?.status === 401 && !isAuthEndpoint) {
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/signin')) {
         window.location.href = '/signin';
       }

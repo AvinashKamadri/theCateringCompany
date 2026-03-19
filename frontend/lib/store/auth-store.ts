@@ -6,6 +6,7 @@ export interface User {
   email: string;
   primary_phone?: string | null;
   status: string;
+  role: 'staff' | 'host';
   created_at: string;
   updated_at: string;
 }

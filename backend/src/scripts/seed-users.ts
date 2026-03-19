@@ -68,7 +68,7 @@ async function seedUsers() {
     try {
       const firstName = getRandomElement(firstNames);
       const lastName = getRandomElement(lastNames);
-      const email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}.${i}@flashbacklabs.com`;
+      const email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}.${i}@catering-company.com`;
       const phone = generatePhone();
 
       const user = await prisma.$transaction(async (tx) => {
@@ -186,7 +186,7 @@ async function seedUsers() {
 
   const sampleStaff = await prisma.users.findFirst({
     where: {
-      email: { contains: '@flashbacklabs.com' }
+      email: { contains: '@catering-company.com' }
     },
     include: {
       user_profiles: true,
@@ -204,7 +204,7 @@ async function seedUsers() {
 
   const sampleHost = await prisma.users.findFirst({
     where: {
-      email: { not: { contains: '@flashbacklabs.com' } }
+      email: { not: { contains: '@catering-company.com' } }
     },
     include: {
       user_profiles: true,

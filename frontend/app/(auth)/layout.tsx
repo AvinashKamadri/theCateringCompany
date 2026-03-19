@@ -1,79 +1,53 @@
 import Link from "next/link";
 
-export default function AuthLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
-      {/* Left side - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-blue-600 to-indigo-700 p-12 flex-col justify-between">
-        <div>
-          <Link href="/" className="flex items-center gap-2 text-white">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
-              <span className="text-xl font-bold">C</span>
-            </div>
-            <span className="text-2xl font-bold">CateringCo</span>
-          </Link>
-        </div>
+      {/* Left panel — branding */}
+      <div className="hidden lg:flex lg:w-5/12 bg-black p-12 flex-col justify-between">
+        <Link href="/" className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white">
+            <span className="text-sm font-bold text-black">TC</span>
+          </div>
+          <span className="text-lg font-semibold text-white tracking-tight">TheCateringCompany</span>
+        </Link>
 
-        <div className="space-y-6">
+        <div className="space-y-5">
           <h2 className="text-4xl font-bold text-white leading-tight">
-            Manage your catering business with confidence
+            Manage events.<br />Build relationships.<br />Get paid.
           </h2>
-          <p className="text-lg text-blue-100">
-            Join thousands of catering professionals who trust CateringCo for project management,
-            client collaboration, and seamless payment processing.
+          <p className="text-neutral-400 text-base leading-relaxed">
+            The platform catering professionals use to manage projects, automate contracts, and collaborate with clients — all in one place.
           </p>
-
-          <div className="space-y-4 pt-8">
-            <div className="flex items-start gap-3">
-              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white/20 flex-shrink-0 mt-1">
-                <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
+          <div className="pt-4 space-y-3">
+            {[
+              "Real-time project collaboration",
+              "Version-controlled e-sign contracts",
+              "Integrated payment processing",
+            ].map((item) => (
+              <div key={item} className="flex items-center gap-3">
+                <div className="h-1.5 w-1.5 rounded-full bg-white shrink-0" />
+                <span className="text-sm text-neutral-300">{item}</span>
               </div>
-              <div>
-                <p className="text-white font-medium">Real-time Collaboration</p>
-                <p className="text-blue-100 text-sm">Work seamlessly with your team and clients</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white/20 flex-shrink-0 mt-1">
-                <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-white font-medium">Secure Payments</p>
-                <p className="text-blue-100 text-sm">Stripe-powered payment processing</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white/20 flex-shrink-0 mt-1">
-                <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-white font-medium">Contract Management</p>
-                <p className="text-blue-100 text-sm">Version control and e-signatures built-in</p>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
 
-        <div className="text-blue-100 text-sm">
-          © 2026 CateringCo. All rights reserved.
-        </div>
+        <p className="text-xs text-neutral-600">© 2026 TheCateringCompany</p>
       </div>
 
-      {/* Right side - Auth forms */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-gray-50">
+      {/* Right panel — form */}
+      <div className="flex-1 flex items-center justify-center p-8 bg-neutral-50">
         <div className="w-full max-w-md">
+          {/* Mobile logo */}
+          <div className="lg:hidden mb-8">
+            <Link href="/" className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-black">
+                <span className="text-sm font-bold text-white">TC</span>
+              </div>
+              <span className="text-lg font-semibold text-black tracking-tight">TheCateringCompany</span>
+            </Link>
+          </div>
           {children}
         </div>
       </div>

@@ -1,15 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma.service';
 import { OpenSignService } from '../opensign/opensign.service';
+import { JobQueueService } from '../job_queue/job-queue.service';
 
 @Injectable()
 export class ContractsService {
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue('pdf_generation') private readonly pdfQueue: Queue,
+    private readonly jobQueue: JobQueueService,
     private readonly openSignService: OpenSignService,
   ) {}
 
@@ -74,10 +73,7 @@ export class ContractsService {
    * Enqueue a PDF generation job for a contract.
    */
   async enqueuePdfGeneration(contractId: string, userId: string) {
-    await this.pdfQueue.add('pdf_generation', {
-      contractId,
-      userId,
-    });
+    await this.jobQueue.send('pdf_generation', { contractId, userId });
   }
 
   /**

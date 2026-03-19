@@ -1,11 +1,12 @@
-import { Job } from 'bullmq';
+
+
 import prisma from '../lib/prisma';
 import { createJobLogger } from '../lib/logger';
 import type { NotificationJobData } from '../types/jobs';
 
 const NOTIFICATION_MOCK = process.env.NOTIFICATION_MOCK !== 'false'; // Default to true
 
-export async function processNotification(job: Job<NotificationJobData>): Promise<void> {
+export async function processNotification(job: { id: string; data: NotificationJobData }): Promise<void> {
   const { notificationId, channel, userId, projectId } = job.data;
   const log = createJobLogger('notifications', job.id!, userId, projectId);
 

@@ -41,10 +41,7 @@ export class AuthService {
     const passwordHash = await argon2.hash(password);
 
     // Determine role based on email domain
-    const isStaff =
-      email.endsWith('@flashbacklabs.com') ||
-      email.endsWith('@flashbacklabs.inc') ||
-      email.endsWith('@flashback.inc');
+    const isStaff = email.endsWith('@catering-company.com');
     const roleId = isStaff ? 'staff' : 'host';
     const profileType = isStaff ? 'staff' : 'client';
 

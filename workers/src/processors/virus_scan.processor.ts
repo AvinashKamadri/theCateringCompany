@@ -1,11 +1,12 @@
-import { Job } from 'bullmq';
+
+
 import prisma from '../lib/prisma';
 import { createJobLogger } from '../lib/logger';
 import type { VirusScanJobData } from '../types/jobs';
 
 const CLAM_AV_ENABLED = process.env.CLAM_AV_ENABLED === 'true';
 
-export async function processVirusScan(job: Job<VirusScanJobData>): Promise<void> {
+export async function processVirusScan(job: { id: string; data: VirusScanJobData }): Promise<void> {
   const { attachmentId, storagePath, userId, projectId } = job.data;
   const log = createJobLogger('virus_scan', job.id!, userId, projectId);
 
@@ -42,7 +43,7 @@ export async function processVirusScan(job: Job<VirusScanJobData>): Promise<void
     log.info({ attachmentId }, 'CLAM_AV_ENABLED=false, mock scan - marking as clean');
   }
 
-  if (scanResult === 'infected') {
+  if ((scanResult as string) === 'infected') {
     // Quarantine the attachment
     await prisma.attachments.update({
       where: { id: attachmentId },

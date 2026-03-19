@@ -16,7 +16,7 @@ export function middleware(request: NextRequest) {
   // If trying to access protected route without auth, redirect to signin
   if (isProtectedRoute && !hasAuthCookie) {
     const url = new URL('/signin', request.url);
-    url.searchParams.set('redirect', pathname);
+    url.searchParams.set('redirect', pathname + request.nextUrl.search);
     return NextResponse.redirect(url);
   }
 

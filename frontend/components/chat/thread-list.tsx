@@ -1,6 +1,7 @@
 "use client";
 
-import { MessageCircle, Plus } from 'lucide-react';
+import { useState } from 'react';
+import { MessageCircle, Plus, Loader2, Check, X } from 'lucide-react';
 import type { Thread } from '@/types/messages.types';
 import { cn } from '@/lib/utils';
 
@@ -8,7 +9,7 @@ interface ThreadListProps {
   threads: Thread[];
   activeThreadId?: string;
   onSelectThread: (threadId: string) => void;
-  onCreateThread: () => void;
+  onCreateThread: (subject?: string) => void;
   isLoading?: boolean;
 }
 
@@ -19,36 +20,75 @@ export function ThreadList({
   onCreateThread,
   isLoading,
 }: ThreadListProps) {
+  const [creating, setCreating] = useState(false);
+  const [subject, setSubject] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onCreateThread(subject.trim() || undefined);
+    setSubject('');
+    setCreating(false);
+  };
+
+  const handleCancel = () => {
+    setSubject('');
+    setCreating(false);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <div className="inline-block h-6 w-6 animate-spin rounded-full border-4 border-solid border-blue-600 border-r-transparent"></div>
+        <Loader2 className="h-4 w-4 animate-spin text-neutral-300" />
       </div>
     );
   }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Conversations</h2>
-        <button
-          onClick={onCreateThread}
-          className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
-        >
-          <Plus className="h-4 w-4" />
-          New
-        </button>
+      <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-neutral-900">Conversations</h2>
+        {!creating && (
+          <button
+            onClick={() => setCreating(true)}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-black text-white rounded-lg hover:bg-neutral-800 transition-colors text-xs font-medium"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New
+          </button>
+        )}
       </div>
+
+      {/* Inline new thread form */}
+      {creating && (
+        <form onSubmit={handleSubmit} className="px-3 py-2.5 border-b border-neutral-200 flex items-center gap-2">
+          <input
+            autoFocus
+            type="text"
+            placeholder="Subject (optional)"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            className="flex-1 text-sm px-2.5 py-1.5 border border-neutral-200 rounded-lg outline-none focus:ring-1 focus:ring-neutral-900"
+          />
+          <button type="submit" className="p-1.5 text-neutral-900 hover:bg-neutral-100 rounded-md transition-colors">
+            <Check className="h-3.5 w-3.5" />
+          </button>
+          <button type="button" onClick={handleCancel} className="p-1.5 text-neutral-400 hover:bg-neutral-100 rounded-md transition-colors">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </form>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {threads.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-            <MessageCircle className="h-12 w-12 text-gray-400 mb-3" />
-            <p className="text-sm text-gray-500">No conversations yet</p>
-            <p className="text-xs text-gray-400 mt-1">Create a new conversation to get started</p>
+            <div className="p-3 bg-neutral-100 rounded-full mb-3">
+              <MessageCircle className="h-5 w-5 text-neutral-300" />
+            </div>
+            <p className="text-sm font-medium text-neutral-900">No conversations yet</p>
+            <p className="text-xs text-neutral-400 mt-0.5">Create a new conversation to get started</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-200">
+          <div className="divide-y divide-neutral-100">
             {threads.map((thread) => {
               const isActive = thread.id === activeThreadId;
               const lastActivity = new Date(thread.last_activity_at);
@@ -58,42 +98,36 @@ export function ThreadList({
               const diffHours = Math.floor(diffMs / 3600000);
               const diffDays = Math.floor(diffMs / 86400000);
 
-              let timeAgo = '';
-              if (diffMins < 1) {
-                timeAgo = 'Just now';
-              } else if (diffMins < 60) {
-                timeAgo = `${diffMins}m ago`;
-              } else if (diffHours < 24) {
-                timeAgo = `${diffHours}h ago`;
-              } else {
-                timeAgo = `${diffDays}d ago`;
-              }
+              const timeAgo =
+                diffMins < 1 ? 'Just now' :
+                diffMins < 60 ? `${diffMins}m ago` :
+                diffHours < 24 ? `${diffHours}h ago` :
+                `${diffDays}d ago`;
 
               return (
                 <button
                   key={thread.id}
                   onClick={() => onSelectThread(thread.id)}
                   className={cn(
-                    'w-full px-4 py-3 text-left hover:bg-gray-50 transition',
-                    isActive && 'bg-blue-50 border-l-4 border-blue-600'
+                    'w-full px-4 py-3 text-left transition-colors',
+                    isActive
+                      ? 'bg-neutral-900 text-white'
+                      : 'hover:bg-neutral-50'
                   )}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium text-gray-900 truncate">
-                        {thread.subject || 'Untitled Conversation'}
-                      </h3>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-gray-500">{timeAgo}</span>
-                        <span className="text-xs text-gray-400">•</span>
-                        <span className="text-xs text-gray-500">
-                          {thread.message_count} {thread.message_count === 1 ? 'message' : 'messages'}
+                      <p className={cn('text-sm font-medium truncate', isActive ? 'text-white' : 'text-neutral-900')}>
+                        {thread.subject || 'General'}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className={cn('text-xs', isActive ? 'text-neutral-400' : 'text-neutral-400')}>{timeAgo}</span>
+                        <span className={cn('text-xs', isActive ? 'text-neutral-500' : 'text-neutral-300')}>·</span>
+                        <span className={cn('text-xs', isActive ? 'text-neutral-400' : 'text-neutral-400')}>
+                          {thread.message_count} {thread.message_count === 1 ? 'msg' : 'msgs'}
                         </span>
                       </div>
                     </div>
-                    <MessageCircle
-                      className={cn('h-5 w-5 flex-shrink-0', isActive ? 'text-blue-600' : 'text-gray-400')}
-                    />
                   </div>
                 </button>
               );

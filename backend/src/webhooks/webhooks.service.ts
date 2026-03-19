@@ -1,8 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { createHash } from 'crypto';
+import { JobQueueService } from '../job_queue/job-queue.service';
 import { PrismaService } from '../prisma.service';
 import {
   PAYMENT_PROVIDER,
@@ -17,7 +16,7 @@ export class WebhooksService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     @Inject(PAYMENT_PROVIDER) private readonly paymentProvider: PaymentProvider,
-    @InjectQueue('webhooks') private readonly webhooksQueue: Queue,
+    private readonly jobQueue: JobQueueService,
   ) {}
 
   async handleStripeWebhook(rawBody: Buffer, signature: string): Promise<void> {
@@ -57,7 +56,7 @@ export class WebhooksService {
       },
     });
 
-    await this.webhooksQueue.add('webhooks', {
+    await this.jobQueue.send('webhooks', {
       webhookEventId: webhookEvent.id,
     });
 
@@ -94,7 +93,7 @@ export class WebhooksService {
       },
     });
 
-    await this.webhooksQueue.add('webhooks', {
+    await this.jobQueue.send('webhooks', {
       webhookEventId: webhookEvent.id,
     });
 

@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CateringCo - Professional Catering Management Platform",
-  description: "Streamline your catering business with our all-in-one platform for project management, contracts, payments, and team collaboration.",
+  title: "TheCateringCompany",
+  description: "Professional catering management — projects, contracts, and team collaboration.",
 };
 
 export default function RootLayout({
@@ -25,11 +25,19 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
-        <Toaster position="top-right" richColors />
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            style: {
+              background: "#0a0a0a",
+              color: "#ffffff",
+              border: "1px solid #262626",
+              borderRadius: "8px",
+            },
+          }}
+        />
       </body>
     </html>
   );

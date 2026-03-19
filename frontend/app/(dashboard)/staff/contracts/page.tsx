@@ -38,7 +38,7 @@ export default function StaffContractsPage() {
   const [rejectReason, setRejectReason] = useState('');
 
   // Check if user is staff
-  const isStaff = user?.email?.endsWith('@flashbacklabs.com') || user?.email?.endsWith('@flashbacklabs.inc');
+  const isStaff = user?.email?.endsWith('@catering-company.com') || user?.email?.endsWith('@catering-company.com');
 
   useEffect(() => {
     if (!isStaff) {

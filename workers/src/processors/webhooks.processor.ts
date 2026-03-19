@@ -1,9 +1,10 @@
-import { Job } from 'bullmq';
+
+
 import prisma from '../lib/prisma';
 import { createJobLogger } from '../lib/logger';
 import type { WebhookJobData } from '../types/jobs';
 
-export async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
+export async function processWebhook(job: { id: string; data: WebhookJobData }): Promise<void> {
   const { webhookEventId, userId, projectId } = job.data;
   const log = createJobLogger('webhooks', job.id!, userId, projectId);
 

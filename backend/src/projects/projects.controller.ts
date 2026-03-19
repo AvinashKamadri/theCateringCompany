@@ -189,6 +189,7 @@ export class ProjectsController {
     @CurrentUser() user: { userId: string },
     @Body()
     body: {
+      project_id?: string;
       // Contract data from AI (all fields optional for partial intake)
       client_name?: string;
       contact_email?: string;

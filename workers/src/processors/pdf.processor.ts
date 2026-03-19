@@ -1,9 +1,10 @@
-import { Job } from 'bullmq';
+
+
 import prisma from '../lib/prisma';
 import { createJobLogger } from '../lib/logger';
 import type { PdfJobData } from '../types/jobs';
 
-export async function processPdf(job: Job<PdfJobData>): Promise<void> {
+export async function processPdf(job: { id: string; data: PdfJobData }): Promise<void> {
   const { contractId, userId, projectId } = job.data;
   const log = createJobLogger('pdf', job.id!, userId, projectId);
 

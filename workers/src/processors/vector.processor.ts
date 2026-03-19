@@ -1,4 +1,5 @@
-import { Job } from 'bullmq';
+
+
 import prisma from '../lib/prisma';
 import { createJobLogger } from '../lib/logger';
 import type { VectorJobData } from '../types/jobs';
@@ -6,7 +7,7 @@ import { randomUUID } from 'crypto';
 
 const VECTOR_ENABLED = process.env.VECTOR_ENABLED === 'true';
 
-export async function processVector(job: Job<VectorJobData>): Promise<void> {
+export async function processVector(job: { id: string; data: VectorJobData }): Promise<void> {
   const { messageId, content, userId, projectId } = job.data;
   const log = createJobLogger('vector', job.id!, userId, projectId);
 

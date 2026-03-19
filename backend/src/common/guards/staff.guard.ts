@@ -4,7 +4,7 @@ import { Reflector } from '@nestjs/core';
 @Injectable()
 export class StaffGuard implements CanActivate {
   private readonly logger = new Logger(StaffGuard.name);
-  private readonly allowedDomains = ['@flashbacklabs.com', '@flashbacklabs.inc'];
+  private readonly allowedDomains = ['@catering-company.com'];
 
   constructor(private reflector: Reflector) {}
 
@@ -25,7 +25,7 @@ export class StaffGuard implements CanActivate {
     if (!isStaff) {
       this.logger.warn(`🚫 [Staff Guard] Access denied - ${user.email} is not a staff member`);
       this.logger.warn(`🚫 [Staff Guard] Allowed domains: ${this.allowedDomains.join(', ')}`);
-      throw new ForbiddenException('Staff access required. Only @flashbacklabs.com or @flashbacklabs.inc accounts can access this resource.');
+      throw new ForbiddenException('Staff access required. Only @catering-company.com accounts can access this resource.');
     }
 
     this.logger.log(`✅ [Staff Guard] Access granted - ${user.email} is staff`);

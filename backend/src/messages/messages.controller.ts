@@ -9,9 +9,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { MessagesService } from './messages.service';
+import { JobQueueService } from '../job_queue/job-queue.service';
 import { SocketsGateway } from '../sockets/sockets.gateway';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
@@ -23,7 +22,7 @@ export class MessagesController {
   constructor(
     private readonly messagesService: MessagesService,
     private readonly socketsGateway: SocketsGateway,
-    @InjectQueue('vector_indexing') private readonly vectorQueue: Queue,
+    private readonly jobQueue: JobQueueService,
   ) {}
 
   /**
@@ -118,7 +117,7 @@ export class MessagesController {
     // Enqueue vector indexing if enabled
     if (process.env.VECTOR_ENABLED === 'true') {
       try {
-        await this.vectorQueue.add('vector_indexing', {
+        await this.jobQueue.send('vector_indexing', {
           messageId: message.id,
           threadId,
           projectId,

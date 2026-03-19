@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
 import { ContractsController } from './contracts.controller';
 import { StaffContractsController } from './staff-contracts.controller';
 import { ContractsService } from './contracts.service';
@@ -10,12 +9,7 @@ import { StaffGuard } from '../common/guards/staff.guard';
 import { PricingService } from '../pricing/pricing.service';
 
 @Module({
-  imports: [
-    BullModule.registerQueue({
-      name: 'pdf_generation',
-    }),
-    OpenSignModule,
-  ],
+  imports: [OpenSignModule],
   controllers: [ContractsController, StaffContractsController],
   providers: [ContractsService, ContractPdfService, PrismaService, StaffGuard, PricingService],
   exports: [ContractsService],

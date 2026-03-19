@@ -1,18 +1,31 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { projectsApi } from "@/lib/api/projects";
 import { toast } from "sonner";
 import { KeyRound, Search, ArrowRight, Loader2, ArrowLeft, CheckCircle2 } from "lucide-react";
 
 export default function JoinProjectPage() {
   const router = useRouter();
-  const [code, setCode] = useState("");
+  const searchParams = useSearchParams();
+  const [code, setCode] = useState(searchParams.get("code") ?? "");
   const [preview, setPreview] = useState<{ id: string; title: string; status: string } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [joining, setJoining] = useState(false);
   const [joined, setJoined] = useState(false);
+
+  // Auto-preview when code arrives via URL
+  useEffect(() => {
+    const urlCode = searchParams.get("code");
+    if (urlCode) {
+      setPreviewing(true);
+      projectsApi.lookupByCode(urlCode.trim()).then((result) => {
+        if (result.found && result.project) setPreview(result.project);
+        else toast.error("No project found for that link.");
+      }).catch(() => toast.error("Could not look up project.")).finally(() => setPreviewing(false));
+    }
+  }, []);
 
   const handlePreview = async (e: React.FormEvent) => {
     e.preventDefault();

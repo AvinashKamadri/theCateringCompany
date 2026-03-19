@@ -373,6 +373,7 @@ export class ProjectsService {
    */
   async createFromAiIntake(
     dto: {
+      project_id?: string;
       client_name?: string;
       contact_email?: string;
       contact_phone?: string;
@@ -424,21 +425,40 @@ export class ProjectsService {
       : validateItems(dto.menu_items || []);
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // Create project with AI data (handle partial/missing fields)
-      const project = await tx.projects.create({
-        data: {
-          // Associate with authenticated user
-          owner_user_id: userId,
-          title: dto.event_type && dto.client_name
-            ? `${dto.event_type} - ${dto.client_name}`
-            : dto.client_name || dto.event_type || 'AI Generated Event',
-          event_date: dto.event_date ? new Date(dto.event_date) : null,
-          guest_count: dto.guest_count ?? null,
-          status: 'draft',
-          created_via_ai_intake: true,
-          ai_event_summary: JSON.stringify(dto),
-        },
-      });
+      const projectTitle = dto.event_type && dto.client_name
+        ? `${dto.event_type} - ${dto.client_name}`
+        : dto.client_name || dto.event_type || 'AI Intake (draft)';
+
+      // If project_id provided, update the existing draft; otherwise create fresh
+      let project;
+      if (dto.project_id) {
+        project = await tx.projects.update({
+          where: { id: dto.project_id },
+          data: {
+            title: projectTitle,
+            event_date: dto.event_date ? new Date(dto.event_date) : undefined,
+            guest_count: dto.guest_count ?? undefined,
+            ai_event_summary: JSON.stringify(dto),
+          },
+        });
+      } else {
+        project = await tx.projects.create({
+          data: {
+            owner_user_id: userId,
+            title: projectTitle,
+            event_date: dto.event_date ? new Date(dto.event_date) : null,
+            guest_count: dto.guest_count ?? null,
+            status: 'draft',
+            created_via_ai_intake: true,
+            ai_event_summary: JSON.stringify(dto),
+          },
+        });
+
+        // Add owner as collaborator only on initial creation
+        await tx.project_collaborators.create({
+          data: { project_id: project.id, user_id: userId, role: 'owner' },
+        });
+      }
 
       // Create venue if provided and doesn't exist
       let venue = null;
@@ -462,15 +482,6 @@ export class ProjectsService {
           data: { venue_id: venue.id },
         });
       }
-
-      // Add owner as collaborator
-      await tx.project_collaborators.create({
-        data: {
-          project_id: project.id,
-          user_id: userId,
-          role: 'owner',
-        },
-      });
 
       // Generate contract if requested
       let contract = null;

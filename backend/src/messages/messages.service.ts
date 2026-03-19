@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, TooManyRequestsException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 
 // Roles that may NOT send messages at all
@@ -76,8 +76,9 @@ export class MessagesService {
       const rlKey = `${projectId}:${userId}`;
       const rl = this.checkRateLimit(rlKey);
       if (!rl.allowed) {
-        throw new TooManyRequestsException(
+        throw new HttpException(
           `Message limit reached. Resets at ${new Date(rl.resetAt).toISOString()}`,
+          HttpStatus.TOO_MANY_REQUESTS,
         );
       }
       return { role, remaining: rl.remaining, resetAt: rl.resetAt };

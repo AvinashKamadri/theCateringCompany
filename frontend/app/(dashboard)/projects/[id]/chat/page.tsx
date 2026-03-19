@@ -7,9 +7,9 @@ import { messagesApi } from '@/lib/api/messages';
 import { MessageList } from '@/components/chat/message-list';
 import { MessageInput } from '@/components/chat/message-input';
 import { ThreadList } from '@/components/chat/thread-list';
-import { ChatSidebar } from '@/components/chat/chat-sidebar';
 import type { Thread, Message, Collaborator } from '@/types/messages.types';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 export default function ProjectChatPage() {
   const params = useParams();
@@ -22,172 +22,103 @@ export default function ProjectChatPage() {
   const [isLoadingThreads, setIsLoadingThreads] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
-  // Mock project data - replace with actual API call
-  const projectData = {
-    name: 'Smith Wedding',
-    event_type: 'wedding',
-    event_date: '2026-06-15',
-    guest_count: 150,
-    venue_name: 'Grand Ballroom',
-    budget: 25000,
-    contract_status: 'draft',
-  };
+  const { isConnected, joinThread, leaveThread, sendTyping, on, off } = useSocket({});
 
-  const { isConnected, joinThread, leaveThread, sendTyping, on, off } = useSocket({
-    onConnect: () => {
-      console.log('WebSocket connected');
-    },
-    onDisconnect: () => {
-      console.log('WebSocket disconnected');
-    },
-  });
-
-  // Load threads on mount
+  // Load threads
   useEffect(() => {
-    const loadThreads = async () => {
+    if (!projectId) return;
+    const load = async () => {
       try {
         setIsLoadingThreads(true);
         const data = await messagesApi.getThreads(projectId);
         setThreads(data.threads);
-
-        // Auto-select first thread if available
         if (data.threads.length > 0 && !activeThreadId) {
           setActiveThreadId(data.threads[0].id);
         }
-      } catch (error: any) {
-        console.error('Failed to load threads:', error);
+      } catch {
         toast.error('Failed to load conversations');
       } finally {
         setIsLoadingThreads(false);
       }
     };
-
-    if (projectId) {
-      loadThreads();
-    }
+    load();
   }, [projectId]);
 
   // Load collaborators
   useEffect(() => {
-    const loadCollaborators = async () => {
-      try {
-        const data = await messagesApi.getCollaborators(projectId);
-        setCollaborators(data.collaborators);
-      } catch (error) {
-        console.error('Failed to load collaborators:', error);
-      }
-    };
-
-    if (projectId) {
-      loadCollaborators();
-    }
+    if (!projectId) return;
+    messagesApi.getCollaborators(projectId)
+      .then((data) => setCollaborators(data.collaborators))
+      .catch(() => {});
   }, [projectId]);
 
-  // Load messages when active thread changes
+  // Load messages when thread changes
   useEffect(() => {
-    const loadMessages = async () => {
-      if (!activeThreadId) return;
-
+    if (!activeThreadId) return;
+    const load = async () => {
       try {
         setIsLoadingMessages(true);
         const data = await messagesApi.getThread(activeThreadId);
         setMessages(data.messages);
-
-        // Join thread room for real-time updates
         joinThread(activeThreadId);
-      } catch (error: any) {
-        console.error('Failed to load messages:', error);
+      } catch {
         toast.error('Failed to load messages');
       } finally {
         setIsLoadingMessages(false);
       }
     };
-
-    loadMessages();
-
-    return () => {
-      if (activeThreadId) {
-        leaveThread(activeThreadId);
-      }
-    };
+    load();
+    return () => { leaveThread(activeThreadId); };
   }, [activeThreadId]);
 
-  // Listen for new messages via WebSocket
+  // Real-time messages
   useEffect(() => {
     const handleNewMessage = (message: Message) => {
       if (message.thread_id === activeThreadId) {
         setMessages((prev) => [...prev, message]);
       }
-
-      // Update thread last activity
       setThreads((prev) =>
         prev.map((t) =>
           t.id === message.thread_id
-            ? {
-                ...t,
-                last_activity_at: message.created_at,
-                message_count: t.message_count + 1,
-              }
+            ? { ...t, last_activity_at: message.created_at, message_count: t.message_count + 1 }
             : t
         )
       );
     };
-
-    const handleMention = (data: any) => {
-      toast.info('You were mentioned in a message');
-    };
-
     on('message.created', handleNewMessage);
-    on('message.mentioned', handleMention);
-
-    return () => {
-      off('message.created', handleNewMessage);
-      off('message.mentioned', handleMention);
-    };
+    return () => { off('message.created', handleNewMessage); };
   }, [activeThreadId, on, off]);
 
   const handleSendMessage = async (content: string, mentionedUserIds: string[]) => {
     if (!activeThreadId) return;
-
     try {
-      await messagesApi.createMessage(activeThreadId, {
-        content,
-        mentionedUserIds,
-      });
-      // Message will be added via WebSocket event
-    } catch (error: any) {
-      console.error('Failed to send message:', error);
-      toast.error('Failed to send message');
+      await messagesApi.createMessage(activeThreadId, { content, mentionedUserIds });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send message');
     }
   };
 
-  const handleCreateThread = async () => {
+  const handleCreateThread = async (subject?: string) => {
     try {
-      const subject = prompt('Enter conversation subject (optional):');
-      const data = await messagesApi.createThread(projectId, {
-        subject: subject || undefined,
-      });
-
+      const data = await messagesApi.createThread(projectId, { subject });
       setThreads((prev) => [data.thread, ...prev]);
       setActiveThreadId(data.thread.id);
-      toast.success('Conversation created');
-    } catch (error: any) {
-      console.error('Failed to create thread:', error);
-      toast.error('Failed to create conversation');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create conversation');
     }
   };
 
   const handleSelectThread = (threadId: string) => {
-    if (activeThreadId) {
-      leaveThread(activeThreadId);
-    }
+    if (activeThreadId) leaveThread(activeThreadId);
     setActiveThreadId(threadId);
   };
 
+  const activeThread = threads.find((t) => t.id === activeThreadId);
+
   return (
-    <div className="h-screen flex">
-      {/* Thread List - Left Sidebar */}
-      <div className="w-80 border-r border-gray-200 bg-white">
+    <div className="flex h-[calc(100vh-3.5rem)] bg-neutral-50">
+      {/* Thread list — left panel */}
+      <div className="w-72 border-r border-neutral-200 bg-white shrink-0">
         <ThreadList
           threads={threads}
           activeThreadId={activeThreadId || undefined}
@@ -197,33 +128,25 @@ export default function ProjectChatPage() {
         />
       </div>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col bg-gray-50">
+      {/* Main chat area */}
+      <div className="flex-1 flex flex-col min-w-0">
         {activeThreadId ? (
           <>
-            {/* Chat Header */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4">
+            {/* Chat header */}
+            <div className="bg-white border-b border-neutral-200 px-6 py-3 shrink-0">
               <div className="flex items-center justify-between">
-                <div>
-                  <h1 className="text-xl font-semibold text-gray-900">
-                    {threads.find((t) => t.id === activeThreadId)?.subject || 'Conversation'}
-                  </h1>
-                  <div className="flex items-center gap-2 mt-1">
-                    <div
-                      className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-400'}`}
-                    />
-                    <span className="text-sm text-gray-500">
-                      {isConnected ? 'Connected' : 'Disconnected'}
-                    </span>
-                  </div>
+                <p className="text-sm font-semibold text-neutral-900">
+                  {activeThread?.subject || 'General'}
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <div className={cn('w-1.5 h-1.5 rounded-full', isConnected ? 'bg-neutral-900' : 'bg-neutral-300')} />
+                  <span className="text-xs text-neutral-400">{isConnected ? 'Live' : 'Offline'}</span>
                 </div>
               </div>
             </div>
 
-            {/* Messages */}
             <MessageList messages={messages} isLoading={isLoadingMessages} />
 
-            {/* Message Input */}
             <MessageInput
               onSendMessage={handleSendMessage}
               collaborators={collaborators}
@@ -234,14 +157,11 @@ export default function ProjectChatPage() {
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <p className="text-gray-500">Select a conversation or create a new one</p>
+              <p className="text-sm text-neutral-400">Select a conversation or create a new one</p>
             </div>
           </div>
         )}
       </div>
-
-      {/* Project Info Sidebar - Right */}
-      <ChatSidebar projectData={projectData} />
     </div>
   );
 }

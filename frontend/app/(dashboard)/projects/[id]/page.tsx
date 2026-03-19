@@ -6,7 +6,11 @@ import { apiClient } from '@/lib/api/client';
 import { projectsApi, Collaborator, CollaboratorRole } from '@/lib/api/projects';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { toast } from 'sonner';
-import { Calendar, Users, MapPin, FileText, MessageSquare, Loader2, ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import {
+  Calendar, Users, MapPin, FileText, MessageSquare, Loader2,
+  ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield,
+} from 'lucide-react';
 
 interface Contract {
   id: string;
@@ -32,18 +36,41 @@ interface Project {
   latestActiveContract: Contract | null;
 }
 
+const CONTRACT_STATUS_LABEL: Record<string, string> = {
+  pending_staff_approval: 'Pending Review',
+  approved: 'Approved',
+  sent: 'Sent',
+  signed: 'Signed',
+  rejected: 'Rejected',
+  draft: 'Draft',
+};
+
+const CONTRACT_STATUS_STYLE: Record<string, string> = {
+  pending_staff_approval: 'bg-neutral-100 text-neutral-700',
+  approved: 'bg-neutral-900 text-white',
+  sent: 'bg-neutral-200 text-neutral-800',
+  signed: 'bg-black text-white',
+  rejected: 'bg-neutral-100 text-neutral-400',
+  draft: 'bg-neutral-100 text-neutral-500',
+};
+
+const ROLE_BADGE: Record<CollaboratorRole, string> = {
+  owner: 'bg-neutral-900 text-white',
+  manager: 'bg-neutral-200 text-neutral-800',
+  collaborator: 'bg-neutral-100 text-neutral-700',
+  viewer: 'bg-neutral-100 text-neutral-500',
+};
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.id as string;
-
   const currentUser = useAuthStore((s) => s.user);
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Collaborator state
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [myRole, setMyRole] = useState<CollaboratorRole | null>(null);
   const [joinCode, setJoinCode] = useState<string | null>(null);
@@ -61,18 +88,10 @@ export default function ProjectDetailPage() {
   const fetchProject = async () => {
     try {
       setLoading(true);
-      console.log('🔍 Fetching project:', projectId);
-
       const data = await apiClient.get(`/projects/${projectId}`);
-      console.log('✅ Project loaded:', data);
-      console.log('📋 Latest contract:', data.latestActiveContract);
-      console.log('📊 AI Event Summary:', data.ai_event_summary);
-      console.log('📦 Full response:', JSON.stringify(data, null, 2));
-
       setProject(data as Project);
       setError(null);
     } catch (err: any) {
-      console.error('❌ Failed to load project:', err);
       setError(err.message || 'Failed to load project');
       toast.error('Failed to load project details');
     } finally {
@@ -99,13 +118,17 @@ export default function ProjectDetailPage() {
       const data = await projectsApi.getJoinCode(projectId);
       setJoinCode(data.join_code);
     } catch {
-      toast.error('Could not load join code');
+      toast.error('Could not load invite link');
     }
   };
 
+  const joinUrl = joinCode
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/projects/join?code=${joinCode}`
+    : null;
+
   const copyCode = async () => {
-    if (!joinCode) return;
-    await navigator.clipboard.writeText(joinCode);
+    if (!joinUrl) return;
+    await navigator.clipboard.writeText(joinUrl);
     setCodeCopied(true);
     setTimeout(() => setCodeCopied(false), 2000);
   };
@@ -151,40 +174,27 @@ export default function ProjectDetailPage() {
   const canManage = myRole === 'owner' || myRole === 'manager';
 
   const roleIcon = (role: CollaboratorRole) => {
-    if (role === 'owner') return <Crown className="h-3.5 w-3.5 text-yellow-500" />;
-    if (role === 'manager') return <Shield className="h-3.5 w-3.5 text-blue-500" />;
+    if (role === 'owner') return <Crown className="h-3.5 w-3.5 text-neutral-500" />;
+    if (role === 'manager') return <Shield className="h-3.5 w-3.5 text-neutral-400" />;
     return null;
-  };
-
-  const roleBadgeColor: Record<CollaboratorRole, string> = {
-    owner: 'bg-yellow-100 text-yellow-800',
-    manager: 'bg-blue-100 text-blue-800',
-    collaborator: 'bg-green-100 text-green-800',
-    viewer: 'bg-gray-100 text-gray-600',
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">Loading project details...</p>
-        </div>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="h-5 w-5 animate-spin text-neutral-300" />
       </div>
     );
   }
 
   if (error || !project) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center max-w-md">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-4">
-            <p className="text-red-600 font-medium mb-2">Failed to load project</p>
-            <p className="text-red-500 text-sm">{error}</p>
-          </div>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <p className="text-sm text-neutral-500 mb-4">{error || 'Project not found'}</p>
           <button
             onClick={() => router.push('/projects')}
-            className="text-blue-600 hover:text-blue-700 font-medium"
+            className="text-sm font-medium text-neutral-900 hover:underline"
           >
             ← Back to Projects
           </button>
@@ -193,156 +203,288 @@ export default function ProjectDetailPage() {
     );
   }
 
-  const eventSummary = project.ai_event_summary || {};
+  const summary = (() => {
+    const raw = project.ai_event_summary;
+    if (!raw) return {};
+    if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return {}; } }
+    return raw;
+  })();
   const contract = project.latestActiveContract;
 
+  // Gather menu items from various possible fields
+  const menuItems: string[] = [
+    ...(Array.isArray(summary.main_dishes) ? summary.main_dishes : []),
+    ...(Array.isArray(summary.appetizers) ? summary.appetizers : []),
+    ...(Array.isArray(summary.desserts) ? summary.desserts : []),
+    ...(Array.isArray(summary.menu_items) ? summary.menu_items : []),
+  ].filter(Boolean);
+
+  const addons: string[] = (Array.isArray(summary.addons) ? summary.addons : []).filter(Boolean);
+
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-6">
+    <div className="min-h-screen bg-neutral-50">
+      {/* Page header */}
+      <div className="bg-white border-b border-neutral-200">
+        <div className="max-w-5xl mx-auto px-6 py-5">
           <button
             onClick={() => router.push('/projects')}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4"
+            className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 mb-4 transition-colors"
           >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Projects
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Projects
           </button>
-
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">{project.title}</h1>
-              <p className="text-gray-600 mt-1">Project ID: {project.id}</p>
+              <h1 className="text-lg font-semibold text-neutral-900">{project.title}</h1>
+              <p className="text-sm text-neutral-500 mt-0.5">
+                Created {new Date(project.created_at).toLocaleDateString('en-US', {
+                  month: 'short', day: 'numeric', year: 'numeric',
+                })}
+              </p>
             </div>
-            <div className="flex gap-3">
+            {summary.thread_id && (
               <button
-                onClick={() => router.push(`/projects/${project.id}/chat`)}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                onClick={() => router.push(`/chat?thread=${summary.thread_id}`)}
+                className="flex items-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors shrink-0"
               >
-                <MessageSquare className="h-4 w-4" />
-                Chat
+                <MessageSquare className="h-3.5 w-3.5" />
+                {contract ? 'View Conversation' : 'Continue Intake'}
               </button>
-            </div>
+            )}
           </div>
         </div>
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Content */}
-          <div className="lg:col-span-2 space-y-6">
+      <div className="max-w-5xl mx-auto px-6 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+          {/* Main content */}
+          <div className="lg:col-span-2 space-y-4">
+
             {/* Event Details */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Event Details</h2>
+            <div className="bg-white rounded-xl border border-neutral-200 p-5">
+              <h2 className="text-sm font-semibold text-neutral-900 mb-4">Event Details</h2>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-4">
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(summary.event_type || summary.service_type) && (
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-0.5">Event type</p>
+                    <p className="text-sm font-medium text-neutral-900">
+                      {summary.event_type}{summary.event_type && summary.service_type ? ' · ' : ''}{summary.service_type}
+                    </p>
+                  </div>
+                )}
+
                 {project.event_date && (
-                  <div className="flex items-start gap-3">
-                    <Calendar className="h-5 w-5 text-blue-600 mt-0.5" />
-                    <div>
-                      <p className="text-sm text-gray-500">Event Date</p>
-                      <p className="font-medium text-gray-900">
-                        {new Date(project.event_date).toLocaleDateString()}
-                      </p>
-                    </div>
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-0.5">Date</p>
+                    <p className="text-sm font-medium text-neutral-900 flex items-center gap-1.5">
+                      <Calendar className="h-3.5 w-3.5 text-neutral-400" />
+                      {new Date(project.event_date).toLocaleDateString('en-US', {
+                        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+                      })}
+                    </p>
                   </div>
                 )}
 
-                {project.guest_count && (
-                  <div className="flex items-start gap-3">
-                    <Users className="h-5 w-5 text-blue-600 mt-0.5" />
-                    <div>
-                      <p className="text-sm text-gray-500">Guest Count</p>
-                      <p className="font-medium text-gray-900">{project.guest_count} guests</p>
-                    </div>
+                {project.guest_count != null && (
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-0.5">Guests</p>
+                    <p className="text-sm font-medium text-neutral-900 flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5 text-neutral-400" />
+                      {project.guest_count}
+                    </p>
                   </div>
                 )}
 
-                {eventSummary.venue_name && (
-                  <div className="flex items-start gap-3">
-                    <MapPin className="h-5 w-5 text-blue-600 mt-0.5" />
-                    <div>
-                      <p className="text-sm text-gray-500">Venue</p>
-                      <p className="font-medium text-gray-900">{eventSummary.venue_name}</p>
-                      {eventSummary.venue_address && (
-                        <p className="text-sm text-gray-600">{eventSummary.venue_address}</p>
-                      )}
-                    </div>
+                {(summary.venue_name || summary.venue) && (
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-0.5">Venue</p>
+                    <p className="text-sm font-medium text-neutral-900 flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5 text-neutral-400" />
+                      {summary.venue_name || summary.venue}
+                    </p>
                   </div>
                 )}
 
-                {eventSummary.event_type && (
-                  <div className="flex items-start gap-3">
-                    <FileText className="h-5 w-5 text-blue-600 mt-0.5" />
-                    <div>
-                      <p className="text-sm text-gray-500">Event Type</p>
-                      <p className="font-medium text-gray-900">{eventSummary.event_type}</p>
-                    </div>
+                {summary.dietary_concerns && (
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-0.5">Dietary</p>
+                    <p className="text-sm font-medium text-neutral-900">{summary.dietary_concerns}</p>
+                  </div>
+                )}
+
+                {summary.special_requests && summary.special_requests !== 'none' && (
+                  <div className="col-span-2">
+                    <p className="text-xs text-neutral-400 mb-0.5">Special requests</p>
+                    <p className="text-sm text-neutral-700">{summary.special_requests}</p>
                   </div>
                 )}
               </div>
-
-              {/* Client Information */}
-              {(eventSummary.client_name || eventSummary.contact_email || eventSummary.contact_phone) && (
-                <div className="mt-6 pt-6 border-t border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Client Information</h3>
-                  <div className="space-y-2">
-                    {eventSummary.client_name && (
-                      <div>
-                        <span className="text-sm text-gray-500">Name: </span>
-                        <span className="font-medium text-gray-900">{eventSummary.client_name}</span>
-                      </div>
-                    )}
-                    {eventSummary.contact_email && (
-                      <div>
-                        <span className="text-sm text-gray-500">Email: </span>
-                        <span className="font-medium text-gray-900">{eventSummary.contact_email}</span>
-                      </div>
-                    )}
-                    {eventSummary.contact_phone && (
-                      <div>
-                        <span className="text-sm text-gray-500">Phone: </span>
-                        <span className="font-medium text-gray-900">{eventSummary.contact_phone}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Menu Items */}
-              {eventSummary.menu_items && eventSummary.menu_items.length > 0 && (
-                <div className="mt-6 pt-6 border-t border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Menu Items</h3>
-                  <ul className="list-disc list-inside space-y-1">
-                    {eventSummary.menu_items.map((item: string, idx: number) => (
-                      <li key={idx} className="text-gray-700">{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </div>
 
-            {/* AI Event Summary (Full Data) */}
-            {Object.keys(eventSummary).length > 0 && (
-              <div className="bg-white rounded-lg shadow-sm p-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-4">Full Event Summary</h2>
-                <pre className="bg-gray-50 p-4 rounded-lg overflow-auto text-sm">
-                  {JSON.stringify(eventSummary, null, 2)}
-                </pre>
+            {/* Client Info */}
+            {(summary.client_name || summary.contact_email || summary.contact_phone || summary.name) && (
+              <div className="bg-white rounded-xl border border-neutral-200 p-5">
+                <h2 className="text-sm font-semibold text-neutral-900 mb-4">Client</h2>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                  {(summary.client_name || summary.name) && (
+                    <div>
+                      <p className="text-xs text-neutral-400 mb-0.5">Name</p>
+                      <p className="text-sm font-medium text-neutral-900">{summary.client_name || summary.name}</p>
+                    </div>
+                  )}
+                  {summary.contact_email && (
+                    <div>
+                      <p className="text-xs text-neutral-400 mb-0.5">Email</p>
+                      <p className="text-sm font-medium text-neutral-900">{summary.contact_email}</p>
+                    </div>
+                  )}
+                  {summary.contact_phone && (
+                    <div>
+                      <p className="text-xs text-neutral-400 mb-0.5">Phone</p>
+                      <p className="text-sm font-medium text-neutral-900">{summary.contact_phone}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Menu */}
+            {menuItems.length > 0 && (
+              <div className="bg-white rounded-xl border border-neutral-200 p-5">
+                <h2 className="text-sm font-semibold text-neutral-900 mb-4">Menu</h2>
+                <div className="space-y-3">
+                  {summary.main_dishes?.length > 0 && (
+                    <div>
+                      <p className="text-xs text-neutral-400 mb-1.5">Main dishes</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {summary.main_dishes.map((item: string, i: number) => (
+                          <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-full text-xs text-neutral-700">{item}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {summary.appetizers?.length > 0 && (
+                    <div>
+                      <p className="text-xs text-neutral-400 mb-1.5">Appetizers</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {summary.appetizers.map((item: string, i: number) => (
+                          <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-full text-xs text-neutral-700">{item}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {summary.desserts?.length > 0 && (
+                    <div>
+                      <p className="text-xs text-neutral-400 mb-1.5">Desserts</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {summary.desserts.map((item: string, i: number) => (
+                          <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-full text-xs text-neutral-700">{item}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {summary.menu_notes && (
+                    <div>
+                      <p className="text-xs text-neutral-400 mb-0.5">Notes</p>
+                      <p className="text-sm text-neutral-700">{summary.menu_notes}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Add-ons */}
+            {addons.length > 0 && (
+              <div className="bg-white rounded-xl border border-neutral-200 p-5">
+                <h2 className="text-sm font-semibold text-neutral-900 mb-3">Add-ons</h2>
+                <div className="flex flex-wrap gap-1.5">
+                  {addons.map((addon: string, i: number) => (
+                    <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-full text-xs text-neutral-700">{addon}</span>
+                  ))}
+                </div>
               </div>
             )}
           </div>
 
           {/* Sidebar */}
-          <div className="space-y-6">
-            {/* Collaborators Card */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Collaborators</h3>
+          <div className="space-y-4">
+
+            {/* Status */}
+            <div className="bg-white rounded-xl border border-neutral-200 p-5">
+              <h3 className="text-sm font-semibold text-neutral-900 mb-3">Status</h3>
+              <span className={cn(
+                'inline-flex px-2.5 py-1 rounded-full text-xs font-medium',
+                project.status === 'active' ? 'bg-neutral-900 text-white' :
+                project.status === 'completed' ? 'bg-black text-white' :
+                'bg-neutral-100 text-neutral-600'
+              )}>
+                {project.status}
+              </span>
+            </div>
+
+            {/* Contract */}
+            {contract ? (
+              <div className="bg-white rounded-xl border border-neutral-200 p-5">
+                <h3 className="text-sm font-semibold text-neutral-900 mb-3">Contract</h3>
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-neutral-400">Status</span>
+                    <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium',
+                      CONTRACT_STATUS_STYLE[contract.status] ?? CONTRACT_STATUS_STYLE.draft
+                    )}>
+                      {CONTRACT_STATUS_LABEL[contract.status] ?? contract.status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-neutral-400">Version</span>
+                    <span className="text-xs font-medium text-neutral-700">v{contract.version_number}</span>
+                  </div>
+                  {contract.total_amount != null && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-neutral-400">Amount</span>
+                      <span className="text-xs font-medium text-neutral-900 tabular-nums">
+                        ${contract.total_amount.toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => router.push(`/contracts/${contract.id}`)}
+                  className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  View Contract
+                </button>
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl border border-neutral-200 p-5">
+                <h3 className="text-sm font-semibold text-neutral-900 mb-1">No contract yet</h3>
+                <p className="text-xs text-neutral-500 mb-4">
+                  {summary.thread_id
+                    ? 'The intake is in progress. Continue to complete it.'
+                    : 'Complete the AI intake to generate a contract.'}
+                </p>
+                <button
+                  onClick={() => router.push(summary.thread_id ? `/chat?thread=${summary.thread_id}` : '/chat')}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors"
+                >
+                  {summary.thread_id ? 'Continue Intake' : 'Start AI Intake'}
+                </button>
+              </div>
+            )}
+
+            {/* Collaborators */}
+            <div className="bg-white rounded-xl border border-neutral-200 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-neutral-900">Collaborators</h3>
                 {canManage && (
                   <button
                     onClick={() => { setShowAddForm(!showAddForm); loadJoinCode(); }}
-                    className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                    className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 transition-colors"
                   >
-                    <UserPlus className="h-4 w-4" />
+                    <UserPlus className="h-3.5 w-3.5" />
                     Add
                   </button>
                 )}
@@ -350,20 +492,20 @@ export default function ProjectDetailPage() {
 
               {/* Add form */}
               {showAddForm && canManage && (
-                <form onSubmit={handleAddCollaborator} className="mb-4 p-3 bg-gray-50 rounded-lg space-y-2">
+                <form onSubmit={handleAddCollaborator} className="mb-4 space-y-2">
                   <input
                     type="email"
                     required
                     placeholder="colleague@email.com"
                     value={addEmail}
                     onChange={(e) => setAddEmail(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="w-full px-3 py-2 text-sm border border-neutral-200 rounded-lg focus:ring-1 focus:ring-neutral-900 outline-none"
                     disabled={addingCollaborator}
                   />
                   <select
                     value={addRole}
                     onChange={(e) => setAddRole(e.target.value as CollaboratorRole)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="w-full px-3 py-2 text-sm border border-neutral-200 rounded-lg focus:ring-1 focus:ring-neutral-900 outline-none"
                     disabled={addingCollaborator}
                   >
                     {myRole === 'owner' && <option value="manager">Manager — full control</option>}
@@ -373,30 +515,32 @@ export default function ProjectDetailPage() {
                   <button
                     type="submit"
                     disabled={addingCollaborator}
-                    className="w-full py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                    className="w-full py-2 text-sm bg-black text-white rounded-lg hover:bg-neutral-800 disabled:opacity-50 transition-colors"
                   >
-                    {addingCollaborator ? 'Adding…' : 'Add collaborator'}
+                    {addingCollaborator ? 'Adding…' : 'Add'}
                   </button>
                 </form>
               )}
 
-              {/* Join code (owner/manager) */}
+              {/* Invite link */}
               {canManage && (
                 <div className="mb-4">
-                  <p className="text-xs text-gray-500 mb-1">Share this code to invite collaborators</p>
-                  {joinCode ? (
+                  <p className="text-xs text-neutral-400 mb-1.5">Invite link</p>
+                  {joinUrl ? (
                     <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs bg-gray-100 px-2 py-1.5 rounded font-mono truncate">{joinCode}</code>
-                      <button onClick={copyCode} className="p-1.5 text-gray-500 hover:text-gray-700">
-                        {codeCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                      <span className="flex-1 text-xs bg-neutral-50 border border-neutral-200 px-2.5 py-1.5 rounded-lg truncate text-neutral-600 select-all">
+                        {joinUrl}
+                      </span>
+                      <button onClick={copyCode} className="p-1.5 text-neutral-400 hover:text-neutral-900 shrink-0 transition-colors">
+                        {codeCopied ? <Check className="h-3.5 w-3.5 text-neutral-900" /> : <Copy className="h-3.5 w-3.5" />}
                       </button>
                     </div>
                   ) : (
                     <button
                       onClick={loadJoinCode}
-                      className="text-xs text-blue-600 hover:text-blue-700"
+                      className="text-xs text-neutral-500 hover:text-neutral-900 underline underline-offset-2 transition-colors"
                     >
-                      Show join code
+                      Show invite link
                     </button>
                   )}
                 </div>
@@ -405,27 +549,27 @@ export default function ProjectDetailPage() {
               {/* Collaborator list */}
               <div className="space-y-2">
                 {collaborators.length === 0 && (
-                  <p className="text-sm text-gray-500">No collaborators yet.</p>
+                  <p className="text-xs text-neutral-400">No collaborators yet.</p>
                 )}
                 {collaborators.map((c) => (
                   <div key={c.user_id} className="flex items-center gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         {roleIcon(c.role)}
-                        <span className="text-sm font-medium text-gray-900 truncate">
+                        <span className="text-sm font-medium text-neutral-900 truncate">
                           {c.first_name && c.last_name ? `${c.first_name} ${c.last_name}` : c.email}
                         </span>
                       </div>
                       {(c.first_name || c.last_name) && (
-                        <p className="text-xs text-gray-500 truncate">{c.email}</p>
+                        <p className="text-xs text-neutral-400 truncate">{c.email}</p>
                       )}
                     </div>
                     {canManage && c.role !== 'owner' && c.user_id !== currentUser?.id ? (
-                      <div className="flex items-center gap-1 flex-shrink-0">
+                      <div className="flex items-center gap-1 shrink-0">
                         <select
                           value={c.role}
                           onChange={(e) => handleUpdateRole(c.user_id, e.target.value as CollaboratorRole)}
-                          className="text-xs border border-gray-200 rounded px-1 py-0.5 focus:ring-1 focus:ring-blue-500 outline-none"
+                          className="text-xs border border-neutral-200 rounded px-1.5 py-0.5 outline-none"
                         >
                           {myRole === 'owner' && <option value="manager">Manager</option>}
                           <option value="collaborator">Collaborator</option>
@@ -433,14 +577,14 @@ export default function ProjectDetailPage() {
                         </select>
                         <button
                           onClick={() => handleRemove(c.user_id, c.email)}
-                          className="p-1 text-red-400 hover:text-red-600"
+                          className="p-1 text-neutral-300 hover:text-neutral-700 transition-colors"
                           title="Remove"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     ) : (
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${roleBadgeColor[c.role]}`}>
+                      <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium shrink-0', ROLE_BADGE[c.role])}>
                         {c.role}
                       </span>
                     )}
@@ -448,157 +592,6 @@ export default function ProjectDetailPage() {
                 ))}
               </div>
             </div>
-
-            {/* Status Card */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Project Status</h3>
-              <div className="space-y-3">
-                <div>
-                  <span className="text-sm text-gray-500">Status</span>
-                  <div className="mt-1">
-                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                      project.status === 'active' ? 'bg-green-100 text-green-800' :
-                      project.status === 'draft' ? 'bg-gray-100 text-gray-800' :
-                      'bg-blue-100 text-blue-800'
-                    }`}>
-                      {project.status}
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <span className="text-sm text-gray-500">Created</span>
-                  <p className="font-medium text-gray-900 mt-1">
-                    {new Date(project.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Contract Card */}
-            {contract ? (
-              <>
-                <div className="bg-white rounded-lg shadow-sm p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Contract Summary</h3>
-                  <div className="space-y-3">
-                    <div>
-                      <span className="text-sm text-gray-500">Status</span>
-                      <div className="mt-1">
-                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                          contract.status === 'signed' ? 'bg-green-100 text-green-800' :
-                          contract.status === 'pending_staff_approval' ? 'bg-yellow-100 text-yellow-800' :
-                          contract.status === 'sent' ? 'bg-blue-100 text-blue-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          {contract.status.replace(/_/g, ' ')}
-                        </span>
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-sm text-gray-500">Version</span>
-                      <p className="font-medium text-gray-900 mt-1">v{contract.version_number}</p>
-                    </div>
-                    <div>
-                      <span className="text-sm text-gray-500">Contract ID</span>
-                      <p className="font-mono text-xs text-gray-600 mt-1 break-all">{contract.id}</p>
-                    </div>
-                    {contract.total_amount && (
-                      <div>
-                        <span className="text-sm text-gray-500">Total Amount</span>
-                        <p className="font-medium text-gray-900 mt-1">
-                          ${contract.total_amount.toLocaleString()}
-                        </p>
-                      </div>
-                    )}
-
-                    <button
-                      onClick={() => router.push(`/contracts/${contract.id}`)}
-                      className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                    >
-                      View Full Contract
-                    </button>
-                  </div>
-                </div>
-
-                {/* Contract Details */}
-                {contract.body && (
-                  <div className="bg-white rounded-lg shadow-sm p-6">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Contract Details</h3>
-
-                    {/* Client Info */}
-                    {contract.body.client_info && (
-                      <div className="mb-4 pb-4 border-b border-gray-200">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Client</h4>
-                        <div className="space-y-1 text-sm">
-                          {contract.body.client_info.name && (
-                            <p><span className="text-gray-500">Name:</span> {contract.body.client_info.name}</p>
-                          )}
-                          {contract.body.client_info.email && (
-                            <p><span className="text-gray-500">Email:</span> {contract.body.client_info.email}</p>
-                          )}
-                          {contract.body.client_info.phone && (
-                            <p><span className="text-gray-500">Phone:</span> {contract.body.client_info.phone}</p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Event Info */}
-                    {contract.body.event_details && (
-                      <div className="mb-4 pb-4 border-b border-gray-200">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Event</h4>
-                        <div className="space-y-1 text-sm">
-                          {contract.body.event_details.type && (
-                            <p><span className="text-gray-500">Type:</span> {contract.body.event_details.type}</p>
-                          )}
-                          {contract.body.event_details.date && (
-                            <p><span className="text-gray-500">Date:</span> {contract.body.event_details.date}</p>
-                          )}
-                          {contract.body.event_details.guest_count && (
-                            <p><span className="text-gray-500">Guests:</span> {contract.body.event_details.guest_count}</p>
-                          )}
-                          {contract.body.event_details.service_type && (
-                            <p><span className="text-gray-500">Service:</span> {contract.body.event_details.service_type}</p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Menu */}
-                    {contract.body.menu?.items && contract.body.menu.items.length > 0 && (
-                      <div className="mb-4">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Menu</h4>
-                        <ul className="list-disc list-inside space-y-1 text-sm text-gray-600">
-                          {contract.body.menu.items.map((item: any, idx: number) => (
-                            <li key={idx}>{item.name || item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Full Contract Data */}
-                    <details className="mt-4">
-                      <summary className="text-sm font-medium text-gray-700 cursor-pointer hover:text-gray-900">
-                        View Full Contract Data
-                      </summary>
-                      <pre className="mt-2 bg-gray-50 p-3 rounded text-xs overflow-auto max-h-96">
-                        {JSON.stringify(contract.body, null, 2)}
-                      </pre>
-                    </details>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="bg-white rounded-lg shadow-sm p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Contract</h3>
-                <p className="text-sm text-gray-600">No contract has been generated for this project yet.</p>
-                <button
-                  onClick={() => router.push(`/projects/${projectId}/chat`)}
-                  className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  Start AI Chat to Generate Contract
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </div>

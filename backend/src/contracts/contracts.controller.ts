@@ -17,7 +17,7 @@ export class ContractsController {
     private readonly prisma: PrismaService,
   ) {}
 
-  private readonly STAFF_DOMAINS = ['@flashbacklabs.com', '@flashbacklabs.inc'];
+  private readonly STAFF_DOMAINS = ['@catering-company.com'];
 
   private isStaffEmail(email: string): boolean {
     return this.STAFF_DOMAINS.some((d) => email?.toLowerCase().endsWith(d));

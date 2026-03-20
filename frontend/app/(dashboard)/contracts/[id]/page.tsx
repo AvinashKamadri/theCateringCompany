@@ -89,14 +89,18 @@ export default function ContractDetailPage() {
   const [calculatingPricing, setCalculatingPricing] = useState(false);
   const [pricingBreakdown, setPricingBreakdown] = useState<any>(null);
   const [lineItems, setLineItems] = useState<Array<{ description: string; quantity: number; unitPrice: number }>>([]);
+  const [taxRate, setTaxRate] = useState(9.4);
+  const [gratuityRate, setGratuityRate] = useState(20);
 
   useEffect(() => {
     const controller = new AbortController();
     apiClient.get(`/contracts/${contractId}`, { signal: controller.signal })
       .then((data: any) => {
         setContract(data);
-        const existing = (data.body as any)?.pricing?.lineItems;
-        if (Array.isArray(existing) && existing.length > 0) setLineItems(existing);
+        const pricing = (data.body as any)?.pricing;
+        if (Array.isArray(pricing?.lineItems) && pricing.lineItems.length > 0) setLineItems(pricing.lineItems);
+        if (pricing?.taxRate != null) setTaxRate(Number(pricing.taxRate));
+        if (pricing?.gratuityRate != null) setGratuityRate(Number(pricing.gratuityRate));
       })
       .catch((err: any) => {
         if (controller.signal.aborted) return;
@@ -157,8 +161,8 @@ export default function ContractDetailPage() {
   };
 
   const pricingTotal = lineItems.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
-  const pricingTax = Math.round(pricingTotal * 0.094);
-  const pricingGratuity = Math.round(pricingTotal * 0.20);
+  const pricingTax = Math.round(pricingTotal * (taxRate / 100));
+  const pricingGratuity = Math.round(pricingTotal * (gratuityRate / 100));
   const pricingGrandTotal = pricingTotal + pricingTax + pricingGratuity;
   const pricingDeposit = Math.round(pricingGrandTotal * 0.50);
 
@@ -195,7 +199,7 @@ export default function ContractDetailPage() {
     try {
       const grandTotal = pricingGrandTotal;
       await apiClient.patch(`/staff/contracts/${contractId}/pricing`, {
-        pricing: { lineItems, subtotal: pricingTotal, total: grandTotal },
+        pricing: { lineItems, subtotal: pricingTotal, total: grandTotal, taxRate, gratuityRate },
       });
       toast.success('Pricing saved');
       const updated: any = await apiClient.get(`/contracts/${contractId}`);
@@ -391,27 +395,59 @@ export default function ContractDetailPage() {
                     </button>
                   </div>
 
-                  {/* Breakdown summary (tax, gratuity, deposit) shown after calculation */}
-                  {pricingBreakdown && (
+                  {/* Tax / Gratuity rate inputs */}
+                  <div className="flex gap-3 mb-2">
+                    <div className="flex-1">
+                      <label className="block text-xs text-yellow-800 font-medium mb-1">Tax %</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min={0}
+                          max={50}
+                          step={0.1}
+                          value={taxRate}
+                          onChange={(e) => setTaxRate(Number(e.target.value) || 0)}
+                          className="w-full border border-yellow-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-yellow-400 pr-6"
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-yellow-700">%</span>
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-xs text-yellow-800 font-medium mb-1">Gratuity %</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min={0}
+                          max={50}
+                          step={0.5}
+                          value={gratuityRate}
+                          onChange={(e) => setGratuityRate(Number(e.target.value) || 0)}
+                          className="w-full border border-yellow-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-yellow-400 pr-6"
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-yellow-700">%</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pricing breakdown — shown whenever line items exist */}
+                  {lineItems.length > 0 && (
                     <div className="bg-white border border-yellow-200 rounded-lg p-3 mb-2 text-xs text-yellow-900 space-y-1">
-                      {pricingBreakdown.packageName && (
+                      {pricingBreakdown?.packageName && (
                         <div className="flex justify-between">
                           <span className="text-yellow-700">Package</span>
                           <span>{pricingBreakdown.packageName} (${pricingBreakdown.packagePerPersonRate}/pp)</span>
                         </div>
                       )}
-                      {pricingBreakdown.serviceSurcharge > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-yellow-700">On-site labor</span>
-                          <span>${Number(pricingBreakdown.serviceSurcharge).toLocaleString()}</span>
-                        </div>
-                      )}
                       <div className="flex justify-between">
-                        <span className="text-yellow-700">Tax (9.4%)</span>
+                        <span className="text-yellow-700">Subtotal</span>
+                        <span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-yellow-700">Tax ({taxRate}%)</span>
                         <span>${pricingTax.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-yellow-700">Gratuity (20%)</span>
+                        <span className="text-yellow-700">Gratuity ({gratuityRate}%)</span>
                         <span>${pricingGratuity.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between font-semibold border-t border-yellow-200 pt-1 mt-1">
@@ -468,7 +504,7 @@ export default function ContractDetailPage() {
                       </button>
                       {lineItems.length > 0 && (
                         <span className="ml-auto text-xs font-semibold text-yellow-900">
-                          Total: ${pricingTotal.toLocaleString()}
+                          Subtotal: ${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       )}
                     </div>
@@ -690,14 +726,37 @@ export default function ContractDetailPage() {
                     {new Date(contract.created_at).toLocaleDateString()}
                   </span>
                 </div>
-                {contract.total_amount != null && (
+                {lineItems.length > 0 ? (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Subtotal</span>
+                      <span className="text-gray-700">${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Tax ({taxRate}%)</span>
+                      <span className="text-gray-700">${pricingTax.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Gratuity ({gratuityRate}%)</span>
+                      <span className="text-gray-700">${pricingGratuity.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-gray-100 pt-2">
+                      <span className="font-semibold text-gray-900">Grand Total</span>
+                      <span className="font-semibold text-gray-900">${pricingGrandTotal.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">50% Deposit Due</span>
+                      <span className="text-gray-700">${pricingDeposit.toLocaleString()}</span>
+                    </div>
+                  </>
+                ) : contract.total_amount != null ? (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Total</span>
+                    <span className="text-gray-500">Grand Total</span>
                     <span className="font-semibold text-gray-900">
                       ${Number(contract.total_amount).toLocaleString()}
                     </span>
                   </div>
-                )}
+                ) : null}
                 <div className="flex justify-between">
                   <span className="text-gray-500">Contract ID</span>
                   <span className="font-mono text-xs text-gray-500 truncate max-w-[120px]">{contract.id}</span>

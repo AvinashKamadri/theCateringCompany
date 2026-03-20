@@ -63,6 +63,7 @@ class ChatRequest(BaseModel):
     message: str
     author_id: str = "user"
     project_id: str | None = None
+    user_id: str | None = None  # real authenticated user UUID
 
 
 class ChatResponse(BaseModel):
@@ -91,11 +92,17 @@ async def chat(req: ChatRequest):
     """Send a message to the agent. Returns thread_id to continue conversation."""
     thread_id = req.thread_id or str(uuid.uuid4())
 
+    # Resolve the real user UUID: prefer explicit user_id, fall back to author_id if it looks like a UUID
+    import re as _re
+    _uuid_pattern = _re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.I)
+    resolved_user_id = req.user_id or (req.author_id if _uuid_pattern.match(req.author_id) else None)
+
     result = await orchestrator.process_message(
         thread_id=thread_id,
         message=req.message,
         author_id=req.author_id,
         project_id=req.project_id,
+        user_id=resolved_user_id,
     )
 
     contract_id = None

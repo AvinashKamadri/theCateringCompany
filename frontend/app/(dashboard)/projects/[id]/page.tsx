@@ -173,6 +173,17 @@ export default function ProjectDetailPage() {
 
   const canManage = myRole === 'owner' || myRole === 'manager';
 
+  const handleDeleteProject = async () => {
+    if (!confirm(`Delete "${project?.title}"? This cannot be undone.`)) return;
+    try {
+      await projectsApi.deleteProject(projectId);
+      toast.success('Project deleted');
+      router.push('/projects');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete project');
+    }
+  };
+
   const roleIcon = (role: CollaboratorRole) => {
     if (role === 'owner') return <Crown className="h-3.5 w-3.5 text-neutral-500" />;
     if (role === 'manager') return <Shield className="h-3.5 w-3.5 text-neutral-400" />;
@@ -242,15 +253,27 @@ export default function ProjectDetailPage() {
                 })}
               </p>
             </div>
-            {summary.thread_id && (
-              <button
-                onClick={() => router.push(`/chat?thread=${summary.thread_id}`)}
-                className="flex items-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors shrink-0"
-              >
-                <MessageSquare className="h-3.5 w-3.5" />
-                {contract ? 'View Conversation' : 'Continue Intake'}
-              </button>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {summary.thread_id && (
+                <button
+                  onClick={() => router.push(`/chat?thread=${summary.thread_id}`)}
+                  className="flex items-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  {contract ? 'View Conversation' : 'Continue Intake'}
+                </button>
+              )}
+              {myRole === 'owner' && (
+                <button
+                  onClick={handleDeleteProject}
+                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-500 border border-neutral-200 rounded-lg hover:border-neutral-400 hover:text-neutral-900 transition-colors"
+                  title="Delete project"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

@@ -748,6 +748,7 @@ model project_collaborators {
   user_id    String   @db.Uuid
   role       String?
   added_at   DateTime @default(now()) @db.Timestamptz(6)
+  added_by   String?  @db.Uuid
   projects   projects @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 

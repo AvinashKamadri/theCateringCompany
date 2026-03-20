@@ -298,6 +298,7 @@ export default function AiIntakePage() {
                   onComplete={handleComplete}
                   onSlotsUpdate={handleSlotsUpdate}
                   authorId={user?.id}
+                  userId={user?.id}
                   initialThreadId={activeThreadId}
                   onThreadStart={async (threadId) => {
                     setActiveThreadId(threadId);

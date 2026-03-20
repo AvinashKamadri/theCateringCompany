@@ -51,6 +51,7 @@ async def create_project_and_thread(
     thread_id: str,
     project_id: str | None = None,
     title: str = "AI Catering Intake",
+    user_id: str | None = None,
 ) -> tuple[str, str, str]:
     """
     Ensure a project, thread, and ai_conversation_state exist for a conversation.
@@ -60,6 +61,7 @@ async def create_project_and_thread(
     Otherwise creates the full FK chain: project -> thread -> ai_conversation_state.
     """
     client = _get_client()
+    owner_id = user_id or SYSTEM_USER_ID
 
     # Check if thread already exists
     existing_thread = await client.threads.find_unique(where={"id": thread_id})
@@ -81,11 +83,19 @@ async def create_project_and_thread(
         await client.projects.create(
             data={
                 "id": pid,
-                "owner_user_id": SYSTEM_USER_ID,
+                "owner_user_id": owner_id,
                 "title": title,
                 "status": "draft",
                 "created_via_ai_intake": True,
             }
+        )
+        # Add owner as collaborator so they can see and access the project.
+        # Use raw SQL — project_collaborators is not in the Python Prisma schema.
+        await client.execute_raw(
+            "INSERT INTO project_collaborators (project_id, user_id, role, added_by, added_at) "
+            "VALUES ($1::uuid, $2::uuid, 'owner', $3::uuid, now()) "
+            "ON CONFLICT (project_id, user_id) DO NOTHING",
+            pid, owner_id, owner_id,
         )
 
     # Create thread
@@ -94,7 +104,7 @@ async def create_project_and_thread(
             "id": thread_id,
             "project_id": pid,
             "subject": title,
-            "created_by": SYSTEM_USER_ID,
+            "created_by": owner_id,
         }
     )
 

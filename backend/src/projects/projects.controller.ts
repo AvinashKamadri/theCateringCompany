@@ -126,6 +126,19 @@ export class ProjectsController {
   }
 
   /**
+   * DELETE /projects/:id
+   * Delete a project. Only the owner may delete.
+   */
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  async deleteProject(
+    @Param('id') projectId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.projectsService.deleteProject(user.userId, projectId);
+  }
+
+  /**
    * DELETE /projects/:id/collaborators/:userId
    * Remove a collaborator. Only owners/managers may call this.
    */

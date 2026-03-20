@@ -39,6 +39,7 @@ class AgentOrchestrator:
         message: str,
         author_id: str = "user",
         project_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a user message through the conversation graph.
@@ -60,6 +61,7 @@ class AgentOrchestrator:
                 thread_id=thread_id,
                 project_id=project_id,
                 title="AI Catering Intake",
+                user_id=user_id,
             )
             project_id = pid
             current_node = "start"

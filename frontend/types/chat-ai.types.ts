@@ -9,6 +9,7 @@ export interface ChatRequest {
   message: string;
   author_id?: string;
   project_id?: string;
+  user_id?: string;
 }
 
 export interface ChatResponse {

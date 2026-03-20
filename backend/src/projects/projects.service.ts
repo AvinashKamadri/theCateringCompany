@@ -151,6 +151,7 @@ export class ProjectsService {
           project_id: project.id,
           user_id: userId,
           role: 'owner',
+          added_by: userId,
         },
       });
 
@@ -220,6 +221,7 @@ export class ProjectsService {
         last_name: meta.last_name ?? null,
         role: (c.role ?? 'collaborator') as CollaboratorRole,
         added_at: c.added_at,
+        added_by: c.added_by ?? null,
       };
     });
   }
@@ -265,7 +267,7 @@ export class ProjectsService {
     if (existing) throw new ConflictException('User is already a collaborator on this project');
 
     await this.prisma.project_collaborators.create({
-      data: { project_id: projectId, user_id: target.id, role },
+      data: { project_id: projectId, user_id: target.id, role, added_by: requestingUserId },
     });
 
     return { user_id: target.id, email: target.email, role };
@@ -346,11 +348,34 @@ export class ProjectsService {
       return { project, role: existing.role ?? 'collaborator', already_member: true };
     }
 
+    const projectRecord = await this.prisma.projects.findUnique({
+      where: { id: project.id },
+      select: { owner_user_id: true },
+    });
     await this.prisma.project_collaborators.create({
-      data: { project_id: project.id, user_id: userId, role: 'collaborator' },
+      data: {
+        project_id: project.id,
+        user_id: userId,
+        role: 'collaborator',
+        added_by: projectRecord?.owner_user_id ?? userId,
+      },
     });
 
     return { project, role: 'collaborator', already_member: false };
+  }
+
+  /**
+   * Delete a project. Only the owner may delete.
+   */
+  async deleteProject(userId: string, projectId: string) {
+    const membership = await this.prisma.project_collaborators.findUnique({
+      where: { project_id_user_id: { project_id: projectId, user_id: userId } },
+    });
+    if (!membership || membership.role !== 'owner') {
+      throw new ForbiddenException('Only the project owner can delete this project');
+    }
+    await this.prisma.projects.delete({ where: { id: projectId } });
+    return { deleted: true };
   }
 
   /**
@@ -456,7 +481,7 @@ export class ProjectsService {
 
         // Add owner as collaborator only on initial creation
         await tx.project_collaborators.create({
-          data: { project_id: project.id, user_id: userId, role: 'owner' },
+          data: { project_id: project.id, user_id: userId, role: 'owner', added_by: userId },
         });
       }
 

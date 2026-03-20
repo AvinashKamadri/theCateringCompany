@@ -78,6 +78,10 @@ export const projectsApi = {
   ): Promise<{ removed: boolean; user_id: string }> => {
     return (apiClient as any).delete(`/projects/${projectId}/collaborators/${userId}`);
   },
+
+  deleteProject: async (projectId: string): Promise<{ deleted: boolean }> => {
+    return (apiClient as any).delete(`/projects/${projectId}`);
+  },
 };
 
 export type CollaboratorRole = 'owner' | 'manager' | 'collaborator' | 'viewer';

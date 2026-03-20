@@ -6,11 +6,11 @@ import { chatAiApi } from '@/lib/api/chat-ai';
 import type { ChatMessage, ChatState, ContractData } from '@/types/chat-ai.types';
 import { toast } from 'sonner';
 import { CommandDialog } from './command-dialog';
-import { ChatSidebar } from './chat-sidebar';
 
 interface AiChatProps {
   projectId?: string;
   authorId?: string;
+  userId?: string;
   initialThreadId?: string;
   onComplete?: (contractData: ContractData) => void;
   onThreadStart?: (threadId: string) => void;
@@ -37,7 +37,7 @@ function saveSessionToStorage(threadId: string) {
   }
 }
 
-export function AiChat({ projectId, authorId, initialThreadId, onComplete, onThreadStart, onSlotsUpdate }: AiChatProps) {
+export function AiChat({ projectId, authorId, userId, initialThreadId, onComplete, onThreadStart, onSlotsUpdate }: AiChatProps) {
   const [state, setState] = useState<ChatState>({
     messages: [],
     isLoading: false,
@@ -150,6 +150,7 @@ export function AiChat({ projectId, authorId, initialThreadId, onComplete, onThr
         threadId: state.threadId,
         projectId,
         authorId,
+        userId,
       });
 
       const aiMessage: ChatMessage = {
@@ -225,11 +226,6 @@ export function AiChat({ projectId, authorId, initialThreadId, onComplete, onThr
         command={commandDialog.command}
         onClose={() => setCommandDialog({ isOpen: false, command: null })}
         onSelect={handleCommandSelect}
-      />
-      <ChatSidebar
-        contractData={state.contractData}
-        slotsFilled={state.progress.filled}
-        totalSlots={state.progress.total}
       />
       <div className="flex flex-col h-full bg-white">
         {/* Header with Progress */}

@@ -34,6 +34,7 @@ export interface SendMessageOptions {
   threadId?: string;
   authorId?: string;
   projectId?: string;
+  userId?: string;
 }
 
 export const chatAiApi = {
@@ -48,6 +49,7 @@ export const chatAiApi = {
       thread_id: options.threadId,
       author_id: options.authorId,
       project_id: options.projectId,
+      user_id: options.userId,
     };
 
     try {

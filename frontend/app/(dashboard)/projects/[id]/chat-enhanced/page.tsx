@@ -252,7 +252,7 @@ export default function ProjectChatEnhancedPage() {
       </div>
 
       {/* Project Info Sidebar - Right */}
-      <ChatSidebar projectData={projectData} />
+      <ChatSidebar contractData={projectData} slotsFilled={0} totalSlots={0} />
     </div>
   );
 }

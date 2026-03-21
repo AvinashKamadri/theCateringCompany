@@ -136,59 +136,98 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
         target_slot = detection_result.get("target_slot")
         new_value = detection_result.get("new_value")
 
-        # For date slots, resolve relative dates BEFORE validation
-        # (dateutil.parser can't handle "next month", "this week", etc.)
-        resolved_value = str(new_value)
-        print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] target_slot={target_slot}, raw new_value={new_value}")
-        if target_slot == "event_date" and _contains_relative_date(resolved_value):
-            print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Resolving relative date: {resolved_value}")
-            resolved_value = await _resolve_relative_date(resolved_value)
-            print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Resolved to: {resolved_value}")
+        # ── Menu slots: appetizers / selected_dishes — use item merge logic ──
+        if target_slot in ("appetizers", "selected_dishes"):
+            from agent.nodes.menu import _resolve_to_db_items, _parse_slot_items
+            slot_label = _get_slot_label(target_slot)
+            current_value = state["slots"].get(target_slot, {}).get("value") or ""
+            current_items = _parse_slot_items(current_value)
 
-        # Validate new value
-        validation_result = await validate_slot.ainvoke({
-            "slot_name": target_slot,
-            "value": resolved_value
-        })
+            # Detect remove vs. add intent from the raw user message
+            remove_intent = bool(re.search(r'\b(remove|delete|take out|drop)\b', last_message, re.IGNORECASE))
+            items_text = str(new_value).strip()
 
-        if validation_result.get("valid"):
-            old_value = state["slots"][target_slot].get("value")
-            normalized_value = validation_result.get("normalized_value")
+            if remove_intent:
+                matched, _ = await _resolve_to_db_items(items_text)
+                remove_names = {i["name"].lower() for i in matched}
+                remove_kws = [p.strip().lower() for p in items_text.split(",") if p.strip()]
+                updated = [
+                    n for n in current_items
+                    if n.lower() not in remove_names
+                    and not any(kw and kw in n.lower() for kw in remove_kws)
+                ]
+                _, resolved = await _resolve_to_db_items(", ".join(updated)) if updated else ([], current_value)
+                action_word = "removed from"
+            else:
+                matched, _ = await _resolve_to_db_items(items_text)
+                existing_lower = {n.lower() for n in current_items}
+                new_names = [i["name"] for i in matched if i["name"].lower() not in existing_lower]
+                merged = current_items + new_names
+                _, resolved = await _resolve_to_db_items(", ".join(merged)) if merged else ([], current_value)
+                action_word = "added to"
 
-            # Update slot with modification history
-            if state["slots"][target_slot].get("modification_history") is None:
-                state["slots"][target_slot]["modification_history"] = []
+            if resolved and resolved != current_value:
+                old_value = current_value
+                now = datetime.now().isoformat()
+                history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
+                history.append({"old_value": old_value, "new_value": resolved, "timestamp": now})
+                state["slots"][target_slot] = {
+                    "value": resolved,
+                    "filled": True,
+                    "modified_at": now,
+                    "modification_history": history,
+                }
+                confirm = f"Done! I've {action_word} your {slot_label}: **{resolved}**"
+            else:
+                confirm = f"I couldn't find those items on the menu. Your {slot_label} remain: {current_value or 'none selected'}."
 
-            state["slots"][target_slot]["modification_history"].append({
-                "old_value": old_value,
-                "new_value": normalized_value,
-                "timestamp": datetime.now().isoformat()
+            response = f"{confirm}\n\n{pending_question}" if pending_question else f"{confirm}\n\nPlease continue where we left off."
+            state["messages"] = add_ai_message(state, response)
+
+        else:
+            # ── Scalar slots: use standard date-resolve + validate path ──
+            resolved_value = str(new_value)
+            print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] target_slot={target_slot}, raw new_value={new_value}")
+            if target_slot == "event_date" and _contains_relative_date(resolved_value):
+                print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Resolving relative date: {resolved_value}")
+                resolved_value = await _resolve_relative_date(resolved_value)
+                print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Resolved to: {resolved_value}")
+
+            validation_result = await validate_slot.ainvoke({
+                "slot_name": target_slot,
+                "value": resolved_value
             })
 
-            state["slots"][target_slot]["value"] = normalized_value
-            state["slots"][target_slot]["filled"] = True
-            state["slots"][target_slot]["modified_at"] = datetime.now().isoformat()
+            if validation_result.get("valid"):
+                old_value = state["slots"][target_slot].get("value")
+                normalized_value = validation_result.get("normalized_value")
 
-            slot_label = _get_slot_label(target_slot)
+                if state["slots"][target_slot].get("modification_history") is None:
+                    state["slots"][target_slot]["modification_history"] = []
 
-            # Build confirmation
-            if old_value:
-                confirm = f"I've updated your {slot_label} from '{old_value}' to '{normalized_value}'."
+                state["slots"][target_slot]["modification_history"].append({
+                    "old_value": old_value,
+                    "new_value": normalized_value,
+                    "timestamp": datetime.now().isoformat()
+                })
+
+                state["slots"][target_slot]["value"] = normalized_value
+                state["slots"][target_slot]["filled"] = True
+                state["slots"][target_slot]["modified_at"] = datetime.now().isoformat()
+
+                slot_label = _get_slot_label(target_slot)
+
+                if old_value:
+                    confirm = f"I've updated your {slot_label} from '{old_value}' to '{normalized_value}'."
+                else:
+                    confirm = f"I've set your {slot_label} to '{normalized_value}'."
+
+                response = f"{confirm}\n\n{pending_question}" if pending_question else f"{confirm}\n\nPlease continue where we left off."
+                state["messages"] = add_ai_message(state, response)
             else:
-                confirm = f"I've set your {slot_label} to '{normalized_value}'."
-
-            # Re-ask the pending question from conversation history
-            # NO LLM call, NO NODE_PROMPTS — just replay the question the bot already asked
-            if pending_question:
-                response = f"{confirm}\n\n{pending_question}"
-            else:
-                response = f"{confirm}\n\nPlease continue where we left off."
-
-            state["messages"] = add_ai_message(state, response)
-        else:
-            error_message = validation_result.get("error_message", "Invalid value")
-            response = f"I couldn't update that: {error_message}"
-            state["messages"] = add_ai_message(state, response)
+                error_message = validation_result.get("error_message", "Invalid value")
+                response = f"I couldn't update that: {error_message}"
+                state["messages"] = add_ai_message(state, response)
     else:
         response = ("I'm not sure which information you'd like to change. Could you be more specific? "
                     "For example: '@AI change guest count to 200' or '@AI update the date to May 1st'.")

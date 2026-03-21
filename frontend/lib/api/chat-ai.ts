@@ -54,7 +54,7 @@ export const chatAiApi = {
 
     try {
       const response = await chatAiClient.post<ChatResponse>('/chat', request);
-      return response;
+      return response as unknown as ChatResponse;
     } catch (error) {
       throw new Error('Failed to send message to AI agent');
     }
@@ -101,7 +101,7 @@ export const chatAiApi = {
   checkHealth: async (): Promise<boolean> => {
     try {
       const response = await chatAiClient.get('/health');
-      return response.status === 'ok';
+      return (response as any).status === 'ok';
     } catch (error) {
       return false;
     }
@@ -140,7 +140,7 @@ export const chatAiApi = {
   getConversation: async (threadId: string): Promise<ConversationState> => {
     try {
       const response = await chatAiClient.get<ConversationState>(`/conversation/${threadId}`);
-      return response;
+      return response as unknown as ConversationState;
     } catch (error) {
       throw new Error('Failed to fetch conversation state');
     }

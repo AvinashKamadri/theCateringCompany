@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { Suspense, useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AiChat } from '@/components/chat/ai-chat';
 import type { ContractData } from '@/types/chat-ai.types';
@@ -46,7 +46,7 @@ function removeSession(threadId: string) {
   } catch {}
 }
 
-export default function AiIntakePage() {
+function AiIntakeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isAuthenticated } = useAuthStore();
@@ -314,5 +314,13 @@ export default function AiIntakePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AiIntakePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-neutral-50" />}>
+      <AiIntakeContent />
+    </Suspense>
   );
 }

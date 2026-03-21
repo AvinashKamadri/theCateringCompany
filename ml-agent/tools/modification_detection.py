@@ -26,7 +26,9 @@ SLOT_KEYWORDS = {
     "venue": ["venue", "location", "place", "address"],
     "service_type": ["service", "drop-off", "on-site"],
     "event_type": ["wedding", "corporate", "birthday", "event type"],
-    "special_requests": ["dietary", "halal", "vegan", "allergy", "allergies", "restrictions"]
+    "special_requests": ["dietary", "halal", "vegan", "allergy", "allergies", "restrictions"],
+    "appetizers": ["appetizer", "hors d'oeuvres", "hors doeuvres", "starter", "starters"],
+    "selected_dishes": ["dish", "dishes", "entree", "entrees", "main course", "main dish", "food selection"],
 }
 
 
@@ -39,7 +41,7 @@ SLOT_IDENTIFICATION_FUNCTION = {
         "properties": {
             "target_slot": {
                 "type": "string",
-                "enum": ["name", "phone", "event_date", "service_type", "event_type", "venue", "guest_count", "special_requests"],
+                "enum": ["name", "phone", "event_date", "service_type", "event_type", "venue", "guest_count", "special_requests", "appetizers", "selected_dishes"],
                 "description": "The slot/field the user wants to modify"
             },
             "new_value": {
@@ -158,6 +160,10 @@ The user is trying to modify one of these fields:
 - venue: Venue details (address, location)
 - guest_count: Number of guests
 - special_requests: Dietary restrictions, allergies, special requests
+- appetizers: Appetizer / hors d'oeuvres selections (add or remove specific items)
+- selected_dishes: Main dish / entrée selections (add or remove specific items)
+
+For appetizers and selected_dishes, the new_value should be a comma-separated list of the item names the user wants to ADD or the full instruction (e.g. "add Spanakopita" or "remove Chicken Satay").
 
 Analyze the user's message and identify:
 1. Which field they want to modify

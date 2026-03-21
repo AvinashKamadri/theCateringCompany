@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { projectsApi } from "@/lib/api/projects";
 import { toast } from "sonner";
@@ -19,7 +19,7 @@ function extractCode(input: string): string {
   return trimmed;
 }
 
-export default function JoinProjectPage() {
+function JoinProjectContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [input, setInput] = useState(searchParams.get("code") ?? "");
@@ -165,5 +165,13 @@ export default function JoinProjectPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function JoinProjectPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-neutral-50" />}>
+      <JoinProjectContent />
+    </Suspense>
   );
 }

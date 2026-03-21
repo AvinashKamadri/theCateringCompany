@@ -18,10 +18,12 @@ def _slots_context(state):
 
 async def ask_utensils_node(state: ConversationState) -> ConversationState:
     """Handle yes/no about utensils."""
+    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_affirmative(user_msg):
+    mentions_utensils = bool(_re.search(r'\butensils?\b', user_msg, _re.IGNORECASE))
+    if is_affirmative(user_msg) or (mentions_utensils and not is_negative(user_msg)):
         context = f"Customer wants utensils. Event: {_slots_context(state)}"
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_utensils']}", context
@@ -68,10 +70,16 @@ async def select_utensils_node(state: ConversationState) -> ConversationState:
 
 async def ask_desserts_node(state: ConversationState) -> ConversationState:
     """Handle yes/no about desserts — present real dessert items from DB."""
+    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_affirmative(user_msg):
+    # Treat as affirmative if: standard yes-word OR user explicitly mentions "dessert"
+    # (e.g. "lets go to desserts", "looks good, desserts please")
+    mentions_dessert = bool(_re.search(r'\bdesserts?\b', user_msg, _re.IGNORECASE))
+    wants_desserts = is_affirmative(user_msg) or (mentions_dessert and not is_negative(user_msg))
+
+    if wants_desserts:
         # Fetch real dessert data from DB
         dessert_ctx = await get_dessert_context(state)
         response = await llm_respond(

@@ -21,6 +21,7 @@ from database.db_manager import (
     save_contract, load_contract, load_contracts_by_project,
     load_menu_by_category, load_pricing_packages,
     update_project_summary,
+    sync_slots_to_project,
 )
 
 
@@ -143,6 +144,15 @@ async def chat(req: ChatRequest):
             guest_count=guest_count if guest_count > 0 else None,
             summary=f"{slot_vals.get('event_type', '')} for {slot_vals.get('name', '')}",
         )
+
+    # Always sync current slot state to project so the project view stays live
+    _project_id = result.get("project_id", "")
+    _slots = result.get("slots", {})
+    if _project_id and _slots:
+        try:
+            await sync_slots_to_project(_project_id, _slots, thread_id)
+        except Exception as _e:
+            pass  # non-fatal
 
     return ChatResponse(
         thread_id=thread_id,

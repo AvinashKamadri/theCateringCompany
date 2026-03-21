@@ -356,19 +356,28 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
             f"Customer message: {user_msg}"
         )
 
-    # Resolve to actual DB items with prices
-    matched_items, resolved_text = await _resolve_to_db_items(extraction, menu)
+    # Build a MAIN-DISHES-ONLY menu so appetizer items can't accidentally be selected here
+    main_dishes_menu = {
+        cat: items for cat, items in menu.items()
+        if cat.lower() not in exclude_cats
+    }
+
+    # Resolve ONLY against main-dish categories (prevents appetizer items sneaking in)
+    matched_items, resolved_text = await _resolve_to_db_items(extraction, main_dishes_menu)
 
     if matched_items:
         fill_slot(state["slots"], "selected_dishes", resolved_text)
     else:
-        # Nothing matched — do NOT store unrecognised items; ask the customer to re-select
+        # Nothing matched in main dishes — check if user might be trying to add to appetizers
+        # (e.g. "wait let me add Double Stuffed Mushrooms to the appetizers")
+        # Re-present the menu and ask them to pick from the listed items
         menu_context = await get_main_dishes_context(state)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n"
-            "The customer mentioned items that are NOT on our menu. "
-            "Politely let them know those items are not available and re-present the menu. "
-            "Ask them to choose 3 to 5 dishes from the list below.",
+            "The customer mentioned items that are NOT available as main dishes. "
+            "If they seem to be referring to appetizer or other items, let them know those "
+            "belong to a different category. "
+            "Politely re-present the main dishes menu and ask them to choose 3 to 5 dishes.",
             menu_context
         )
         state["messages"] = add_ai_message(state, response)
@@ -387,10 +396,12 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
 
 async def ask_appetizers_node(state: ConversationState) -> ConversationState:
     """Handle yes/no response about appetizers."""
+    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_affirmative(user_msg):
+    mentions_appetizers = bool(_re.search(r'\bappetizers?\b|\bhors\s+d\'?oeuvres?\b|\bstarters?\b', user_msg, _re.IGNORECASE))
+    if is_affirmative(user_msg) or (mentions_appetizers and not is_negative(user_msg)):
         appetizer_context = await get_appetizer_context(state)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n"
@@ -493,27 +504,89 @@ async def menu_design_node(state: ConversationState) -> ConversationState:
     return state
 
 
+def _count_slot_revisions(slots: dict, *slot_names: str) -> int:
+    """Count total modification_history entries across the given slots."""
+    total = 0
+    for name in slot_names:
+        total += len(slots.get(name, {}).get("modification_history", []))
+    return total
+
+
+def _parse_slot_items(value: str) -> list[str]:
+    """Parse a slot value like 'Item A ($3.50/pp), Item B' into ['Item A', 'Item B']."""
+    import re as _re
+    if not value or value.strip().lower() in ("none", "no", "n/a", ""):
+        return []
+    # Strip price annotations: ($3.50/pp) or ($3.50)
+    cleaned = _re.sub(r'\s*\(\$[\d.]+(?:/\w+)?\)', '', value)
+    return [name.strip() for name in cleaned.split(',') if name.strip()]
+
+
 async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
-    """Handle yes/no about menu changes."""
+    """Handle yes/no about menu changes, allowing up to 3 revisions per menu."""
+    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
+
+    MAX_REVISIONS = 3
+    total_revisions = _count_slot_revisions(state["slots"], "selected_dishes", "appetizers")
 
     # "yes these are final" / "yes looks good" / "yes we're done" = NO changes
     finalize_keywords = ["final", "done", "good", "perfect", "that's all", "thats all",
                          "no changes", "looks good", "all set", "we're set", "we are set"]
     user_lower = user_msg.lower()
+
+    # Detect direct change action words ("add X", "remove X", "also include", etc.)
+    change_action_patterns = [
+        r'\badd\b', r'\bremove\b', r'\breplace\b', r'\bswap\b',
+        r'\balso\b', r'\binstead\b', r'\bswitch\b',
+        r'\bcan you (?:also|add|remove|include)\b',
+    ]
+    directly_requesting_change = (
+        any(_re.search(p, user_lower) for p in change_action_patterns)
+        and not is_negative(user_msg)
+        and not any(kw in user_lower for kw in finalize_keywords)
+    )
+
+    # If the user directly requested a change WITH details already in the message,
+    # forward immediately to collect_menu_changes_node — no need to ask what they want.
+    if directly_requesting_change:
+        if total_revisions >= MAX_REVISIONS:
+            response = await llm_respond(
+                f"{SYSTEM_PROMPT}\n\n"
+                "The customer wants more changes but the menu has already been revised several times. "
+                "Politely let them know we'll go with the current selections and move on.",
+                f"Current menu: {_slots_context(state)}"
+            )
+            state["current_node"] = "ask_desserts"
+            state["messages"] = add_ai_message(state, response)
+            return state
+        return await collect_menu_changes_node(state)
+
     wants_changes = is_affirmative(user_msg) and not any(kw in user_lower for kw in finalize_keywords)
+
+    # Enforce revision cap
+    if wants_changes and total_revisions >= MAX_REVISIONS:
+        wants_changes = False
+        extra_instruction = (
+            "The customer wants more changes but the menu has already been revised several times. "
+            "Politely let them know we'll go with the current selections and move on. "
+        )
+    else:
+        extra_instruction = ""
 
     if wants_changes:
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nThe customer wants to make changes to the menu. "
-            "Ask them what they'd like to change.",
+            "Ask them what they'd like to change — they can add items, remove items, or replace selections. "
+            f"They have made {total_revisions} revision(s) so far (limit is {MAX_REVISIONS}).",
             f"Current menu: {_slots_context(state)}"
         )
         state["current_node"] = "collect_menu_changes"
     else:
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThe menu is finalized. Confirm it looks great. "
+            f"{SYSTEM_PROMPT}\n\n{extra_instruction}"
+            "The menu is finalized. Confirm it looks great. "
             "Ask: Would you like to add desserts to your event?",
             f"Final menu: {_slots_context(state)}"
         )
@@ -524,18 +597,98 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
 
 
 async def collect_menu_changes_node(state: ConversationState) -> ConversationState:
-    """Process menu change requests and re-present menu."""
+    """Process menu change requests — actually updates the relevant slot (add/remove/replace)."""
+    import re as _re
+    import json as _json
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
+    menu = await load_menu_by_category()
 
+    # --- Step 1: Use LLM to parse intent, items, and target slot ---
+    extraction = await llm_respond(
+        "You are a menu change parser. Analyze the customer's change request and return a JSON object with:\n"
+        '- "action": one of "add", "remove", "replace"\n'
+        '- "items": comma-separated names of items to add or remove\n'
+        '- "replace_with": (only for replace action) comma-separated new item names\n'
+        '- "slot": "dishes" if they are changing main dishes/entrees, "appetizers" if changing appetizers/hors d\'oeuvres\n'
+        "Return ONLY valid JSON with no markdown, no explanation.",
+        f"Customer change request: {user_msg}"
+    )
+
+    try:
+        raw = _re.sub(r"```(?:json)?|```", "", extraction).strip()
+        change_data = _json.loads(raw)
+        action = change_data.get("action", "add").lower()
+        items_text = change_data.get("items", "").strip()
+        replace_with = change_data.get("replace_with", "").strip()
+        slot_target = change_data.get("slot", "dishes")
+    except Exception:
+        # Fallback: treat the whole message as "add to dishes"
+        action = "add"
+        items_text = user_msg
+        replace_with = ""
+        slot_target = "dishes"
+
+    slot_name = "appetizers" if slot_target == "appetizers" else "selected_dishes"
+    current_value = get_slot_value(state["slots"], slot_name) or ""
+    current_items = _parse_slot_items(current_value)
+
+    # --- Step 2: Apply the change ---
+    if action == "remove" and items_text:
+        matched_remove, _ = await _resolve_to_db_items(items_text, menu)
+        remove_names = {item["name"].lower() for item in matched_remove}
+        # Also do a loose keyword match for partial name removal
+        remove_keywords = [p.strip().lower() for p in items_text.split(',') if p.strip()]
+        updated_items = [
+            name for name in current_items
+            if name.lower() not in remove_names
+            and not any(kw and kw in name.lower() for kw in remove_keywords)
+        ]
+        if updated_items:
+            _, resolved_text = await _resolve_to_db_items(", ".join(updated_items), menu)
+        else:
+            resolved_text = current_value  # nothing matched to remove — keep original
+
+    elif action == "replace":
+        new_items_text = replace_with if replace_with else items_text
+        matched_new, resolved_text = await _resolve_to_db_items(new_items_text, menu)
+        if not matched_new:
+            resolved_text = current_value  # nothing resolved — keep original
+
+    else:  # add (default)
+        if items_text:
+            matched_new, _ = await _resolve_to_db_items(items_text, menu)
+            existing_lower = {name.lower() for name in current_items}
+            new_names = [item["name"] for item in matched_new if item["name"].lower() not in existing_lower]
+            merged = current_items + new_names
+            if merged:
+                _, resolved_text = await _resolve_to_db_items(", ".join(merged), menu)
+            else:
+                resolved_text = current_value
+        else:
+            resolved_text = current_value
+
+    # --- Step 3: Persist updated slot ---
+    if resolved_text and resolved_text != current_value:
+        fill_slot(state["slots"], slot_name, resolved_text)
+
+    # Always log the request in menu_notes for traceability
     existing_notes = get_slot_value(state["slots"], "menu_notes") or ""
-    new_notes = f"{existing_notes}\nChange: {user_msg}".strip()
-    fill_slot(state["slots"], "menu_notes", new_notes)
+    fill_slot(state["slots"], "menu_notes", f"{existing_notes}\nChange: {user_msg}".strip())
 
-    context = (f"Customer wants these changes: {user_msg}\n"
-               f"Full context: {_slots_context(state)}")
+    context = (
+        f"Customer requested: {user_msg}\n"
+        f"Action taken: {action} on {slot_name}\n"
+        f"Updated {slot_name}: {resolved_text}\n"
+        f"All current selections: {_slots_context(state)}"
+    )
     response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_menu_changes']}", context
+        f"{SYSTEM_PROMPT}\n\n"
+        "The customer just made a change to their menu. "
+        "Confirm exactly what was changed (what was added, removed, or replaced) "
+        "and show their updated full selection clearly. "
+        "Then ask: 'Would you like any other changes, or are you happy with this?'",
+        context
     )
 
     state["current_node"] = "ask_menu_changes"

@@ -33,14 +33,38 @@ def get_last_human_message(messages) -> str:
 def is_affirmative(text: str) -> bool:
     """Check if user response is affirmative (yes). Uses word boundaries."""
     t = text.strip().lower()
-    # Check negative FIRST - if it starts with "no" it's not affirmative
+    # Check negative FIRST — if it contains "no" it's not affirmative
     if re.search(r'\bno\b', t):
         return False
     patterns = [
-        r'\byes\b', r'\byeah\b', r'\byep\b', r'\bsure\b', r'\bok\b', r'\bokay\b',
-        r'\bplease\b', r'\bdefinitely\b', r'\babsolutely\b', r'\bof course\b',
-        r'\byea\b', r'\bya\b', r'\bwhy not\b', r'\bsounds good\b',
-        r'\bi would\b', r'\bi do\b', r'\bi\'d like\b',
+        # Classic yes words
+        r'\byes\b', r'\byeah\b', r'\byep\b', r'\byea\b', r'\bya\b',
+        r'\bsure\b', r'\bok\b', r'\bokay\b', r'\bplease\b',
+        r'\bdefinitely\b', r'\babsolutely\b', r'\bof course\b',
+        r'\bwhy not\b',
+        # "sounds good/great/fine/perfect"
+        r'\bsounds (good|great|fine|perfect|amazing|awesome|wonderful)\b',
+        # "looks good/great/fine/perfect" (e.g. "looks good for me")
+        r'\blooks (good|great|fine|perfect|amazing|awesome|wonderful)\b',
+        # "that's/that works/that's good/fine"
+        r'\bthat(\'?s)? (good|great|fine|perfect|works|correct|right)\b',
+        # "let's go / let's do it / let's proceed"
+        r'\blet\'?s (go|do it|proceed|continue|start|begin)\b',
+        r'\blets (go|do it|proceed|continue|start|begin)\b',
+        # "go ahead / proceed"
+        r'\bgo ahead\b', r'\bproceed\b',
+        # "i would / i do / i'd like / i'd love / i want"
+        r'\bi would\b', r'\bi do\b', r'\bi\'?d (like|love|want)\b', r'\bi want\b',
+        # "bring it on / show me / love to"
+        r'\bbring it on\b', r'\bshow me\b', r'\blove to\b',
+        # "count me in / i'm in / i'm interested"
+        r'\bcount me in\b', r'\bi\'?m in\b', r'\bi\'?m interested\b',
+        # "for sure / totally / exactly / correct / right"
+        r'\bfor sure\b', r'\btotally\b', r'\bexactly\b', r'\bcorrect\b',
+        # "happy with / good with / fine with / cool with"
+        r'\b(happy|good|fine|cool) with\b',
+        # "that\'s final / yes that\'s it / that\'s all I need"
+        r'\bthat\'?s (it|all|final|my final)\b',
     ]
     return any(re.search(p, t) for p in patterns)
 
@@ -49,9 +73,26 @@ def is_negative(text: str) -> bool:
     """Check if user response is negative (no). Uses word boundaries."""
     t = text.strip().lower()
     patterns = [
-        r'\bno\b', r'\bnah\b', r'\bnope\b', r'\bnone\b', r'\bskip\b', r'\bpass\b',
-        r"i'm good", r"im good", r"no thanks", r"that's all", r"thats all",
-        r'\bnegative\b', r"don't need", r"dont need", r"that's it", r"thats it",
+        # Classic no words
+        r'\bno\b', r'\bnah\b', r'\bnope\b', r'\bnone\b',
+        r'\bskip\b', r'\bpass\b', r'\bnegative\b',
+        # "no thanks / no need / not really"
+        r'\bno\s+thanks\b', r'\bno\s+need\b', r'\bnot\s+really\b',
+        # "i'm good / im good" (declining)
+        r'\bi\'?m\s+good\b', r'\bim\s+good\b',
+        # "that's all / thats all / that's it / thats it"
+        r'\bthat\'?s\s+all\b', r'\bthats\s+all\b',
+        r'\bthat\'?s\s+it\b', r'\bthats\s+it\b',
+        # "don't need / dont need / not needed"
+        r'\bdon\'?t\s+need\b', r'\bnot\s+needed\b',
+        # "not interested / not right now"
+        r'\bnot\s+interested\b', r'\bnot\s+right\s+now\b',
+        # "forget it / skip it / skip that"
+        r'\bforget\s+it\b', r'\bskip\s+it\b', r'\bskip\s+that\b',
+        # "i'll pass / pass on that"
+        r'\bi\'?ll\s+pass\b', r'\bpass\s+on\s+that\b',
+        # "without / not for me"
+        r'\bnot\s+for\s+me\b',
     ]
     return any(re.search(p, t) for p in patterns)
 

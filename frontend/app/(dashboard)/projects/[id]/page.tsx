@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api/client';
 import { projectsApi, Collaborator, CollaboratorRole } from '@/lib/api/projects';
@@ -79,23 +79,46 @@ export default function ProjectDetailPage() {
   const [addRole, setAddRole] = useState<CollaboratorRole>('collaborator');
   const [addingCollaborator, setAddingCollaborator] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
+  const pollRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   useEffect(() => {
     fetchProject();
     fetchCollaborators();
   }, [projectId]);
 
-  const fetchProject = async () => {
+  // Poll every 5 s while the project has an active AI conversation in progress
+  useEffect(() => {
+    if (!project) return;
+    const summary = (() => {
+      const raw = project.ai_event_summary;
+      if (!raw) return {};
+      if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return {}; } }
+      return raw as Record<string, unknown>;
+    })();
+    const hasActiveConversation = project.status === 'draft' && !!summary.thread_id;
+    if (!hasActiveConversation) {
+      clearInterval(pollRef.current);
+      return;
+    }
+    pollRef.current = setInterval(() => {
+      fetchProject(true);
+    }, 5000);
+    return () => clearInterval(pollRef.current);
+  }, [project?.status, (project?.ai_event_summary as any)?.thread_id ?? (typeof project?.ai_event_summary === 'string' ? '' : '')]);
+
+  const fetchProject = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const data = await apiClient.get(`/projects/${projectId}`);
-      setProject(data as Project);
+      setProject(data as unknown as Project);
       setError(null);
     } catch (err: any) {
-      setError(err.message || 'Failed to load project');
-      toast.error('Failed to load project details');
+      if (!silent) {
+        setError(err.message || 'Failed to load project');
+        toast.error('Failed to load project details');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -246,7 +269,15 @@ export default function ProjectDetailPage() {
           </button>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-lg font-semibold text-neutral-900">{project.title}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-semibold text-neutral-900">{project.title}</h1>
+                {project.status === 'draft' && summary.thread_id && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 bg-green-50 border border-green-200 rounded-full text-xs font-medium text-green-700">
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                    Live
+                  </span>
+                )}
+              </div>
               <p className="text-sm text-neutral-500 mt-0.5">
                 Created {new Date(project.created_at).toLocaleDateString('en-US', {
                   month: 'short', day: 'numeric', year: 'numeric',

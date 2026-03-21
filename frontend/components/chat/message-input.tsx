@@ -28,7 +28,7 @@ export function MessageInput({
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
   const [mentionedUsers, setMentionedUsers] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  const typingTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const filteredCollaborators = collaborators.filter((c) =>
     c.email.toLowerCase().includes(mentionFilter.toLowerCase())

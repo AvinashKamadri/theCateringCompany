@@ -529,3 +529,67 @@ async def update_project_summary(
         data["ai_event_summary"] = summary
     if data:
         await client.projects.update(where={"id": project_id}, data=data)
+
+
+async def sync_slots_to_project(project_id: str, slots: dict, thread_id: str) -> None:
+    """Write current filled slot values to ai_event_summary so the project view
+    reflects live conversation progress. Called after every AI message."""
+    client = _get_client()
+
+    def slot_val(name: str):
+        s = slots.get(name, {})
+        return s.get("value") if s.get("filled") else None
+
+    # Build addons list from individual add-on slots
+    addons = []
+    for addon_slot in ("utensils", "rentals", "florals"):
+        v = slot_val(addon_slot)
+        if v and str(v).lower() not in ("no", "none", ""):
+            addons.append(v if isinstance(v, str) else str(v))
+
+    desserts = slot_val("desserts")
+
+    summary_json: dict = {"thread_id": thread_id}
+
+    # Map slots → the shape the project page expects
+    mappings = {
+        "client_name": slot_val("name"),
+        "event_type": slot_val("event_type"),
+        "service_type": slot_val("service_type"),
+        "service_style": slot_val("service_style"),
+        "venue_name": slot_val("venue"),
+        "main_dishes": slot_val("selected_dishes"),
+        "appetizers": slot_val("appetizers"),
+        "desserts": [desserts] if desserts and str(desserts).lower() not in ("no", "none") else [],
+        "menu_notes": slot_val("menu_notes"),
+        "addons": addons,
+        "dietary_concerns": slot_val("dietary_concerns"),
+        "special_requests": slot_val("special_requests"),
+        "additional_notes": slot_val("additional_notes"),
+    }
+    for k, v in mappings.items():
+        if v is not None and v != [] and v != "":
+            summary_json[k] = v
+
+    # Also update scalar project fields if we have them
+    data: dict = {"ai_event_summary": Json(summary_json)}
+
+    guest_count = slot_val("guest_count")
+    if guest_count:
+        try:
+            data["guest_count"] = int(guest_count)
+        except (ValueError, TypeError):
+            pass
+
+    event_date = slot_val("event_date")
+    if event_date:
+        try:
+            from datetime import datetime
+            data["event_date"] = datetime.strptime(str(event_date), "%Y-%m-%d")
+        except (ValueError, TypeError):
+            pass
+
+    try:
+        await client.projects.update(where={"id": project_id}, data=data)
+    except Exception as e:
+        logger.warning(f"sync_slots_to_project failed: {e}")

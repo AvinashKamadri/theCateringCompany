@@ -1,0 +1,120 @@
+version: '3.9'
+
+# GCP VM deployment — frontend is on Vercel, everything else runs here.
+# Run: docker compose -f docker-compose.gcp.yml --env-file .env.production up -d --build
+
+services:
+  # ─── Infrastructure ───────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ─── Backend (NestJS) ─────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - '3001:3001'
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      BACKEND_PORT: '3001'
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      DOCUSEAL_ENABLED: ${DOCUSEAL_ENABLED:-false}
+      DOCUSEAL_API_KEY: ${DOCUSEAL_API_KEY:-}
+      DOCUSEAL_API_URL: ${DOCUSEAL_API_URL:-https://api.docuseal.co}
+      DOCUSEAL_SIGNING_URL: ${DOCUSEAL_SIGNING_URL:-https://docuseal.co}
+      STRIPE_ENABLED: ${STRIPE_ENABLED:-false}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
+      R2_SECRET_KEY: ${R2_SECRET_KEY:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_BUCKET: ${R2_BUCKET:-catering-uploads}
+      NOTIFICATION_MOCK: ${NOTIFICATION_MOCK:-false}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-}
+      VECTOR_ENABLED: ${VECTOR_ENABLED:-false}
+      CLAM_AV_ENABLED: ${CLAM_AV_ENABLED:-false}
+      RATE_LIMIT_TTL: ${RATE_LIMIT_TTL:-60}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── Workers (BullMQ / Puppeteer PDF) ────────────────────────────────────
+  workers:
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?connection_limit=5
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      STRIPE_ENABLED: ${STRIPE_ENABLED:-false}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      NOTIFICATION_MOCK: ${NOTIFICATION_MOCK:-false}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-}
+      CLAM_AV_ENABLED: ${CLAM_AV_ENABLED:-false}
+      VECTOR_ENABLED: ${VECTOR_ENABLED:-false}
+      WORKER_MAX_RETRIES: ${WORKER_MAX_RETRIES:-5}
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── ML Agent (FastAPI / LangGraph) ──────────────────────────────────────
+  ml-agent:
+    build:
+      context: ./ml-agent
+      dockerfile: Dockerfile
+    ports:
+      - '8000:8000'
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MODEL_NAME: ${MODEL_NAME:-gpt-4o-mini}
+      HOST: 0.0.0.0
+      PORT: '8000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads_data:

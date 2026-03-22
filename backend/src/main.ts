@@ -9,9 +9,13 @@ async function bootstrap() {
 
   app.use(cookieParser());
 
-  // CORS Configuration - Allow all origins in development
+  // CORS: use CORS_ORIGIN env var in production, allow all in development
+  const corsOrigin = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+    : true;
+
   app.enableCors({
-    origin: true, // Allow all origins in development
+    origin: corsOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
@@ -23,6 +27,6 @@ async function bootstrap() {
   const port = process.env.BACKEND_PORT || 3001;
   await app.listen(port);
   console.log(`🚀 Backend running on port ${port}`);
-  console.log(`✅ CORS enabled for all origins`);
+  console.log(`✅ CORS origin: ${JSON.stringify(corsOrigin)}`);
 }
 bootstrap();

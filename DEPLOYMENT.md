@@ -4,56 +4,126 @@
 | Service | Host | Notes |
 |---------|------|-------|
 | Frontend (Next.js) | Vercel | auto-deploy from git |
-| Backend (NestJS) | GCP VM | Docker Compose |
-| Workers (BullMQ) | GCP VM | Docker Compose |
-| ML Agent (FastAPI) | GCP VM | Docker Compose |
-| Postgres | GCP VM | Docker container, data in volume |
-| Redis | GCP VM | Docker container |
+| Backend (NestJS) | EC2 — Docker Compose | |
+| Workers (BullMQ) | EC2 — Docker Compose | |
+| ML Agent (FastAPI) | EC2 — Docker Compose | |
+| Postgres | AWS RDS | managed, separate from EC2 |
+| Redis | EC2 — Docker container | |
+| File Storage | AWS S3 | uploads, PDFs |
 
 ---
 
-## Part 1 — GCP VM (Backend)
+## Part 1 — AWS RDS (Postgres)
 
-### 1.1 Create a VM on GCP
+### 1.1 Create RDS Instance
 
-1. Go to **Compute Engine → VM Instances → Create Instance**
-2. Recommended specs:
-   - Machine type: `e2-standard-2` (2 vCPU, 8 GB) or `e2-medium` (1 vCPU, 4 GB)
-   - OS: Ubuntu 22.04 LTS
-   - Boot disk: 30 GB SSD
-3. Under **Firewall**: check **Allow HTTP** and **Allow HTTPS**
-4. Under **Networking → Network tags** add tag: `catering-backend`
-5. Click Create, wait for the VM to start
+1. Go to **AWS Console → RDS → Create database**
+2. Settings:
+   - Engine: **PostgreSQL 16**
+   - Template: **Free tier** (or Production)
+   - DB instance identifier: `cateringco-prod`
+   - Master username: `cateringco`
+   - Master password: pick a strong password, save it
+   - DB instance class: `db.t3.micro` (free tier)
+   - Storage: 20 GB gp2
+   - **Public access: No** (EC2 will connect privately)
+3. Under **Connectivity**:
+   - VPC: default (must be same VPC as your EC2)
+   - Create a new security group: `rds-cateringco`
+4. Click **Create database** — takes ~5 minutes
 
-### 1.2 Open Firewall Ports
+### 1.2 Allow EC2 to Connect to RDS
 
-In GCP Console → **VPC Network → Firewall → Create Firewall Rule**:
+1. Go to **RDS → your database → Connectivity → Security groups → `rds-cateringco`**
+2. Edit inbound rules → Add rule:
+   - Type: **PostgreSQL** (port 5432)
+   - Source: the security group of your EC2 instance (add this after creating EC2)
 
-| Rule name | Direction | Targets | Protocols/ports |
-|-----------|-----------|---------|-----------------|
-| `allow-backend` | Ingress | Tag: `catering-backend` | tcp: 3001 |
-| `allow-ml-agent` | Ingress | Tag: `catering-backend` | tcp: 8000 |
+### 1.3 Get the RDS Endpoint
 
-> Port 3000 (frontend) is NOT needed — frontend is on Vercel.
+From RDS Console → your database → **Endpoint**. Looks like:
+```
+cateringco-prod.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com
+```
+Save this — you'll use it as `DATABASE_URL`.
 
-### 1.3 SSH into the VM
+---
 
-```bash
-# From GCP Console → VM Instances → click "SSH"
-# Or via gcloud:
-gcloud compute ssh INSTANCE_NAME --zone=YOUR_ZONE
+## Part 2 — AWS S3 (Storage)
+
+### 2.1 Create S3 Bucket
+
+1. Go to **AWS Console → S3 → Create bucket**
+2. Settings:
+   - Bucket name: `catering-uploads` (must be globally unique — add your name e.g. `catering-uploads-avinash`)
+   - Region: same as your EC2 (e.g. `us-east-1`)
+   - Block all public access: **ON** (uploads are private, served via signed URLs)
+3. Click **Create bucket**
+
+### 2.2 Create IAM User for S3 Access
+
+1. Go to **IAM → Users → Create user**
+   - Username: `cateringco-s3`
+2. **Attach policies directly** → select **AmazonS3FullAccess** (or create a scoped policy)
+3. After creation → **Security credentials → Create access key**
+   - Use case: Application running outside AWS
+   - Save the **Access key ID** and **Secret access key** — shown once only
+
+### 2.3 Update S3 Environment Variables
+
+In `.env.production` on EC2:
+```
+R2_ACCESS_KEY=YOUR_IAM_ACCESS_KEY_ID
+R2_SECRET_KEY=YOUR_IAM_SECRET_ACCESS_KEY
+R2_ENDPOINT=https://s3.us-east-1.amazonaws.com   # change region if needed
+R2_BUCKET=catering-uploads-avinash
 ```
 
-### 1.4 Install Docker
+> The app uses S3-compatible env vars (`R2_*`) — AWS S3 is fully compatible with this.
+
+---
+
+## Part 3 — EC2 (Backend Services)
+
+### 3.1 Launch EC2 Instance
+
+1. Go to **EC2 → Launch Instance**
+2. Settings:
+   - Name: `cateringco-backend`
+   - AMI: **Ubuntu Server 22.04 LTS**
+   - Instance type: `t3.small` (2 vCPU, 2 GB) — minimum; `t3.medium` recommended
+   - Key pair: create or use existing — **download the `.pem` file**
+   - Network settings:
+     - VPC: same VPC as your RDS
+     - Auto-assign public IP: **Enable**
+     - Create security group: `ec2-cateringco`
+       - Inbound: SSH (22), Custom TCP 3001, Custom TCP 8000
+3. Storage: 20 GB gp3
+4. Click **Launch Instance**
+
+### 3.2 Allow RDS to Accept EC2 Connections
+
+Go back to your RDS security group (`rds-cateringco`) → Edit inbound rules:
+- Type: PostgreSQL (5432)
+- Source: **security group** `ec2-cateringco`
+
+### 3.3 SSH into EC2
+
+```bash
+chmod 400 your-key.pem
+ssh -i your-key.pem ubuntu@EC2_PUBLIC_IP
+```
+
+### 3.4 Install Docker
 
 ```bash
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 newgrp docker
-docker compose version   # should print v2.x
+docker compose version   # should show v2.x
 ```
 
-### 1.5 Clone the Repo
+### 3.5 Clone the Repo
 
 ```bash
 git clone <your-repo-url> app
@@ -61,163 +131,181 @@ cd app
 git checkout deploy
 ```
 
-### 1.6 Create the Production Env File
+### 3.6 Create the Production Env File
 
 ```bash
 cp .env.production.example .env.production
 nano .env.production
 ```
 
-Fill in every `FILL_IN` value. Key ones:
+Fill in:
 
 ```bash
-# Generate JWT secrets:
-openssl rand -base64 48   # → JWT_SECRET
-openssl rand -base64 48   # → JWT_REFRESH_SECRET
+# Database — RDS connection string
+DATABASE_URL=postgresql://cateringco:YOUR_PASSWORD@YOUR_RDS_ENDPOINT:5432/cateringco_prod
 
-# Pick a strong Postgres password for POSTGRES_PASSWORD
-# Paste your OpenAI API key for OPENAI_API_KEY
-# CORS_ORIGIN = your Vercel URL (get this after Part 2)
+# Auth — generate both:
+# openssl rand -base64 48
+JWT_SECRET=...
+JWT_REFRESH_SECRET=...
+
+# AI
+OPENAI_API_KEY=sk-...
+
+# Storage — S3
+R2_ACCESS_KEY=...
+R2_SECRET_KEY=...
+R2_ENDPOINT=https://s3.us-east-1.amazonaws.com
+R2_BUCKET=catering-uploads-avinash
+
+# CORS — your Vercel URL (fill after Part 4)
+CORS_ORIGIN=https://FILL_IN.vercel.app
 ```
 
-### 1.7 Start All Backend Services
+### 3.7 Create the Database on RDS
+
+Before starting the app, create the database on RDS:
+
+```bash
+# Install psql client
+sudo apt install postgresql-client -y
+
+# Create the database
+psql postgresql://cateringco:YOUR_PASSWORD@YOUR_RDS_ENDPOINT:5432/postgres \
+  -c "CREATE DATABASE cateringco_prod;"
+```
+
+### 3.8 Start All Backend Services
 
 ```bash
 docker compose -f docker-compose.gcp.yml --env-file .env.production up -d --build
 ```
 
-This starts: **postgres, redis, backend, workers, ml-agent**
+> `docker-compose.gcp.yml` starts: **redis, backend, workers, ml-agent**
+> Postgres is NOT started (it's on RDS). The backend connects to RDS via `DATABASE_URL`.
+> Migrations run automatically on backend startup.
 
-First run takes ~5-10 minutes (builds all images). The backend automatically runs `prisma migrate deploy` on startup.
-
-### 1.8 Verify
+### 3.9 Verify
 
 ```bash
 docker compose -f docker-compose.gcp.yml ps
-# All 5 services should show "Up" or "healthy"
+# Should show redis, backend, workers, ml-agent as Up/healthy
 
-# Check logs
 docker compose -f docker-compose.gcp.yml logs backend --tail=30
 docker compose -f docker-compose.gcp.yml logs ml-agent --tail=30
 ```
 
-Test from your local machine:
+Test from your browser:
 ```
-http://VM_EXTERNAL_IP:3001/api        → backend
-http://VM_EXTERNAL_IP:8000/health     → ml-agent
+http://EC2_PUBLIC_IP:3001/api      → backend health
+http://EC2_PUBLIC_IP:8000/health   → ml-agent health
 ```
-
-Get your VM's external IP from GCP Console → Compute Engine → VM Instances.
 
 ---
 
-## Part 2 — Vercel (Frontend)
+## Part 4 — Vercel (Frontend)
 
-### 2.1 Push the deploy branch
+### 4.1 Push the deploy branch
 
 ```bash
 git push origin deploy
 ```
 
-### 2.2 Import on Vercel
+### 4.2 Import on Vercel
 
 1. Go to [vercel.com](https://vercel.com) → **Add New Project**
 2. Import your GitHub repo
 3. Set **Root Directory** to `frontend`
-4. Framework is auto-detected as Next.js
+4. Framework auto-detects as Next.js
 
-### 2.3 Set Environment Variables in Vercel
+### 4.3 Set Environment Variables in Vercel
 
-In Vercel → Project Settings → **Environment Variables**, add:
+In Vercel → Project Settings → **Environment Variables**:
 
 | Variable | Value |
 |----------|-------|
-| `NEXT_PUBLIC_API_URL` | `http://VM_EXTERNAL_IP:3001` |
-| `NEXT_PUBLIC_ML_API_URL` | `http://VM_EXTERNAL_IP:8000` |
-| `NEXT_PUBLIC_WS_URL` | `ws://VM_EXTERNAL_IP:3001` |
+| `NEXT_PUBLIC_API_URL` | `http://EC2_PUBLIC_IP:3001` |
+| `NEXT_PUBLIC_ML_API_URL` | `http://EC2_PUBLIC_IP:8000` |
+| `NEXT_PUBLIC_WS_URL` | `ws://EC2_PUBLIC_IP:3001` |
 
-> Replace `VM_EXTERNAL_IP` with your GCP VM's external IP.
-> Once you have a domain + SSL, change these to `https://` and `wss://`.
+> Once you add a domain + SSL, change these to `https://` and `wss://`.
 
-### 2.4 Deploy
+### 4.4 Deploy
 
-Click **Deploy**. Vercel builds and deploys automatically.
+Click **Deploy**. Copy your Vercel URL after deploy (e.g. `https://the-catering-company.vercel.app`).
 
-After deploy, copy your Vercel URL (e.g. `https://the-catering-company.vercel.app`).
+### 4.5 Update CORS on EC2
 
-### 2.5 Update CORS on the GCP VM
-
-Edit `.env.production` on the VM:
 ```bash
-CORS_ORIGIN=https://the-catering-company.vercel.app
-```
+# On EC2:
+nano .env.production
+# Set: CORS_ORIGIN=https://the-catering-company.vercel.app
 
-Restart the backend:
-```bash
 docker compose -f docker-compose.gcp.yml --env-file .env.production up -d backend
 ```
 
 ---
 
-## Database
+## Database (RDS)
 
-The database runs as a **Docker container on the GCP VM** (`pgdata` volume).
+Migrations run automatically on every backend startup via `prisma migrate deploy`.
+
+**Manual connection:**
+```bash
+psql postgresql://cateringco:PASSWORD@YOUR_RDS_ENDPOINT:5432/cateringco_prod
+```
 
 **Backup:**
 ```bash
-docker compose -f docker-compose.gcp.yml exec postgres \
-  pg_dump -U cateringco cateringco_prod > backup_$(date +%Y%m%d).sql
+pg_dump postgresql://cateringco:PASSWORD@YOUR_RDS_ENDPOINT:5432/cateringco_prod \
+  > backup_$(date +%Y%m%d).sql
 ```
 
 **Restore:**
 ```bash
-cat backup_YYYYMMDD.sql | docker compose -f docker-compose.gcp.yml exec -T postgres \
-  psql -U cateringco cateringco_prod
+psql postgresql://cateringco:PASSWORD@YOUR_RDS_ENDPOINT:5432/cateringco_prod \
+  < backup_YYYYMMDD.sql
 ```
 
-**Migrations** run automatically every time the backend container starts (`prisma migrate deploy` in entrypoint.sh).
-
-> Later you can migrate to **Cloud SQL** (GCP managed Postgres) by changing
-> `DATABASE_URL` in `.env.production` to the Cloud SQL connection string
-> and removing the `postgres` service from `docker-compose.gcp.yml`.
+RDS handles automated backups, multi-AZ failover, and point-in-time recovery automatically.
 
 ---
 
 ## Deploying Updates
 
 ```bash
-# On the GCP VM:
+# On EC2:
 cd app
 git pull origin deploy
 docker compose -f docker-compose.gcp.yml --env-file .env.production up -d --build
 ```
 
-Vercel auto-deploys when you push to the `deploy` branch (if you connect the branch in Vercel settings).
+Vercel auto-deploys on every push to `deploy` branch.
 
 ---
 
 ## Optional: Custom Domain + HTTPS
 
-1. Point your domain's DNS to the GCP VM's external IP (A record)
-2. SSH into the VM, install Nginx + Certbot:
+1. **Elastic IP** — assign a static IP to your EC2 (EC2 → Elastic IPs → Allocate)
+2. Point your domain DNS to the Elastic IP (A record for `api.yourdomain.com` and `ml.yourdomain.com`)
+3. Install Nginx + Certbot on EC2:
    ```bash
    sudo apt install nginx certbot python3-certbot-nginx -y
    ```
-3. Create Nginx config to proxy ports 3001 and 8000 behind your domain
-4. Run `sudo certbot --nginx` to get free SSL
-5. Update `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL` in Vercel to `https://` URLs
-6. Update `CORS_ORIGIN` on the VM to your frontend domain
-7. Redeploy both
+4. Create Nginx config to reverse proxy ports 3001 and 8000
+5. Run `sudo certbot --nginx` for free SSL
+6. Update Vercel env vars to `https://api.yourdomain.com` etc.
+7. Update `CORS_ORIGIN` to your frontend domain and restart backend
 
 ---
 
 ## Quick Reference
 
-| What | Command |
+| What | Command (on EC2) |
 |------|---------|
-| Start all services | `docker compose -f docker-compose.gcp.yml --env-file .env.production up -d --build` |
+| Start all | `docker compose -f docker-compose.gcp.yml --env-file .env.production up -d --build` |
 | Stop all | `docker compose -f docker-compose.gcp.yml down` |
 | View logs | `docker compose -f docker-compose.gcp.yml logs -f SERVICE` |
-| Restart one service | `docker compose -f docker-compose.gcp.yml restart backend` |
+| Restart service | `docker compose -f docker-compose.gcp.yml restart backend` |
+| Service status | `docker compose -f docker-compose.gcp.yml ps` |
 | DB backup | see Database section above |
-| Check service status | `docker compose -f docker-compose.gcp.yml ps` |

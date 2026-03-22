@@ -96,11 +96,39 @@ async def select_event_type_node(state: ConversationState) -> ConversationState:
     extracted = await llm_extract(EXTRACTION_PROMPTS["event_type"], user_msg)
     extracted = extracted.strip()
 
+    slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+
+    # If the customer said "Custom" but hasn't described their event yet,
+    # stay on this node and ask what kind of event it is.
+    is_bare_custom = extracted.lower() == "custom"
+    already_asking_custom = get_slot_value(state["slots"], "event_type") == "Custom - pending description"
+
+    if is_bare_custom and not already_asking_custom:
+        # Mark that we're waiting for a custom description, then ask
+        fill_slot(state["slots"], "event_type", "Custom - pending description")
+        context = f"Customer said: {user_msg}\nSlots: {slots_summary}"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer said 'custom event'. Acknowledge that warmly, then ask: "
+            "'That sounds exciting! Could you tell me a bit more about what kind of event you have in mind?'",
+            context,
+        )
+        # Stay on select_event_type
+        state["messages"] = add_ai_message(state, response)
+        return state
+
+    # If we were waiting for a custom description, use the full message as the event type
+    if already_asking_custom:
+        event_description = await llm_extract(
+            "The customer is describing their custom event type. "
+            "Extract a concise event name/description (e.g. 'Charity Gala', 'Product Launch', 'Retirement Party'). "
+            "Return ONLY the event description, max 5 words.",
+            user_msg,
+        )
+        extracted = event_description.strip() if event_description.strip().upper() != "NONE" else user_msg.strip()
+
     if extracted and extracted.upper() != "NONE":
         fill_slot(state["slots"], "event_type", extracted)
-
-    # Always collect event date next regardless of event type
-    next_node = "collect_event_date"
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
     context = (
@@ -108,13 +136,12 @@ async def select_event_type_node(state: ConversationState) -> ConversationState:
         f"CURRENT slot values: {slots_summary}"
     )
 
-    prompt_key = "select_event_type"
     response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS[prompt_key]}",
+        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_event_type']}",
         context,
     )
 
-    state["current_node"] = next_node
+    state["current_node"] = "collect_event_date"
     state["messages"] = add_ai_message(state, response)
     return state
 

@@ -38,6 +38,7 @@ def _is_non_dish_category(cat_name: str) -> bool:
         "dessert", "cake", "floral", "flower", "bouquet", "boutonniere",
         "corsage", "arbor", "center piece", "centerpiece", "table runner",
         "coffee", "beverage", "drink", "bar setup",
+        "utensil", "rental", "linen", "chair", "table",
     ])
 
 
@@ -362,22 +363,35 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
         if cat.lower() not in exclude_cats
     }
 
+    # Check if user is trying to skip — main dishes are mandatory
+    skip_patterns = r'\b(skip|pass|no|none|next|move on|forget|skip menu|no menu|skip dishes?)\b'
+    is_trying_to_skip = (
+        _re.search(skip_patterns, user_msg, _re.IGNORECASE)
+        and not bare_numbers
+    )
+
     # Resolve ONLY against main-dish categories (prevents appetizer items sneaking in)
     matched_items, resolved_text = await _resolve_to_db_items(extraction, main_dishes_menu)
 
     if matched_items:
         fill_slot(state["slots"], "selected_dishes", resolved_text)
     else:
-        # Nothing matched in main dishes — check if user might be trying to add to appetizers
-        # (e.g. "wait let me add Double Stuffed Mushrooms to the appetizers")
-        # Re-present the menu and ask them to pick from the listed items
+        # Nothing matched — re-present the menu with mandatory notice
         menu_context = await get_main_dishes_context(state)
+        if is_trying_to_skip:
+            instruction = (
+                "The customer is trying to skip the main dish selection, but it is REQUIRED. "
+                "Politely but firmly let them know that selecting main dishes is mandatory — "
+                "they must choose at least 1 dish (ideally 3–5) to proceed. "
+                "Re-present the menu below and ask them to make a selection."
+            )
+        else:
+            instruction = (
+                "The customer mentioned items that are NOT available as main dishes. "
+                "Politely re-present the main dishes menu and ask them to choose 3 to 5 dishes."
+            )
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            "The customer mentioned items that are NOT available as main dishes. "
-            "If they seem to be referring to appetizer or other items, let them know those "
-            "belong to a different category. "
-            "Politely re-present the main dishes menu and ask them to choose 3 to 5 dishes.",
+            f"{SYSTEM_PROMPT}\n\n{instruction}",
             menu_context
         )
         state["messages"] = add_ai_message(state, response)
@@ -414,13 +428,26 @@ async def ask_appetizers_node(state: ConversationState) -> ConversationState:
         state["current_node"] = "select_appetizers"
     else:
         fill_slot(state["slots"], "appetizers", "none")
-        context = f"Customer doesn't want appetizers.\nSlots: {_slots_context(state)}"
+        # Immediately fetch and present the real main menu so the LLM
+        # doesn't fabricate dishes when told "show them the menu".
+        menu_context = await get_main_dishes_context(state)
+        event_slots = {
+            k: v["value"] for k, v in state["slots"].items()
+            if v.get("filled") and k in ("name", "event_type", "event_date", "guest_count", "venue")
+        }
+        context = (
+            f"Customer skipped appetizers.\n"
+            f"Event details: {event_slots}\n\n"
+            f"{menu_context}"
+        )
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThe customer doesn't want appetizers. Acknowledge and move on. "
-            "Let them know you'll now show them the main menu to choose their entrées.",
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['present_menu']}\n\n"
+            "Briefly acknowledge they've skipped appetizers (one sentence), then present the menu. "
+            "CRITICAL: Use ONLY the exact items listed in the database context. "
+            "DO NOT invent, rename, or add any item not in that list.",
             context
         )
-        state["current_node"] = "present_menu"
+        state["current_node"] = "select_dishes"
 
     state["messages"] = add_ai_message(state, response)
     return state
@@ -479,13 +506,30 @@ async def select_appetizers_node(state: ConversationState) -> ConversationState:
         state["messages"] = add_ai_message(state, response)
         return state
 
-    context = (f"Appetizers selected: {resolved_text or extraction}\n"
-               f"All selections: {_slots_context(state)}")
+    # Confirm appetizer selections and immediately present the real main menu.
+    # This avoids a redundant "are you ready?" step and prevents the LLM from
+    # fabricating menu items when present_menu_node runs on an empty user message.
+    menu_context = await get_main_dishes_context(state)
+    event_slots = {
+        k: v["value"] for k, v in state["slots"].items()
+        if v.get("filled") and k in ("name", "event_type", "event_date", "guest_count", "venue")
+    }
+    context = (
+        f"Appetizers selected: {resolved_text}\n"
+        f"Event details: {event_slots}\n\n"
+        f"{menu_context}"
+    )
     response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_appetizers']}", context
+        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_appetizers']}\n\n"
+        f"{NODE_PROMPTS['present_menu']}\n\n"
+        "First confirm the appetizer selections enthusiastically (list them). "
+        "Then immediately present the main menu from the database context above. "
+        "CRITICAL: Use ONLY the exact items listed in the database context for the main menu. "
+        "DO NOT invent, rename, or add any item not in that list.",
+        context
     )
 
-    state["current_node"] = "present_menu"
+    state["current_node"] = "select_dishes"
     state["messages"] = add_ai_message(state, response)
     return state
 

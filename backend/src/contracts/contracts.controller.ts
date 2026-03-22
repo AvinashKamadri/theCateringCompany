@@ -1,15 +1,16 @@
 import { Controller, Post, Get, Param, Body, UseGuards, NotFoundException, Res } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { Response } from 'express';
 import { ContractsService } from './contracts.service';
 import { ContractPdfService } from './contract-pdf.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PrismaService } from '../prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
 @Controller()
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(JwtAuthGuard)
 export class ContractsController {
   constructor(
     private readonly contractsService: ContractsService,
@@ -111,7 +112,8 @@ export class ContractsController {
     return { message: 'PDF generation queued' };
   }
 
-  /** GET /contracts/:id/pdf — serve the contract PDF file */
+  /** GET /contracts/:id/pdf — serve the contract PDF file (public so browser can open in new tab) */
+  @Public()
   @Get('contracts/:id/pdf')
   async servePdf(
     @Param('id') id: string,

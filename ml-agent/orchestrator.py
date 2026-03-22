@@ -4,6 +4,7 @@ Agent Orchestrator — persists everything via production FK chain:
 """
 
 import uuid
+import traceback
 from typing import Dict, Any, Optional
 
 from langchain_core.messages import HumanMessage, AIMessage
@@ -127,6 +128,7 @@ class AgentOrchestrator:
             new_slots = slots
             contract_data = None
             print(f"[ERROR] Graph execution failed: {e}")
+            traceback.print_exc()
 
         # Save conversation state
         new_state_id = await save_conversation_state(

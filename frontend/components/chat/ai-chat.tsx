@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Fragment } from 'react';
 import { Send, Loader2, CheckCircle2, Sparkles } from 'lucide-react';
 import { chatAiApi } from '@/lib/api/chat-ai';
 import type { ChatMessage, ChatState, ContractData } from '@/types/chat-ai.types';
@@ -18,6 +18,92 @@ interface AiChatProps {
 }
 
 const STORAGE_KEY = 'tc_chat_sessions';
+
+/** Render AI message content with basic markdown support */
+function MarkdownMessage({ content }: { content: string }) {
+  const lines = content.split('\n');
+  const elements: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Heading
+    const headingMatch = line.match(/^(#{1,3})\s+(.+)/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const text = headingMatch[2];
+      const Tag = (`h${level}`) as keyof React.JSX.IntrinsicElements;
+      const cls = level === 1 ? 'font-bold text-base mt-2 mb-1' : level === 2 ? 'font-semibold text-sm mt-2 mb-1' : 'font-semibold text-sm mt-1';
+      elements.push(<Tag key={i} className={cls}>{inlineFormat(text)}</Tag>);
+      i++; continue;
+    }
+
+    // Numbered list item
+    const numMatch = line.match(/^(\d+)\.\s+(.*)/);
+    if (numMatch) {
+      const listItems: React.ReactNode[] = [];
+      while (i < lines.length) {
+        const m = lines[i].match(/^(\d+)\.\s+(.*)/);
+        if (!m) break;
+        listItems.push(
+          <li key={i} className="flex gap-2 text-sm">
+            <span className="text-neutral-400 shrink-0 w-5 text-right">{m[1]}.</span>
+            <span>{inlineFormat(m[2])}</span>
+          </li>
+        );
+        i++;
+      }
+      elements.push(<ol key={`ol-${i}`} className="space-y-1 my-1">{listItems}</ol>);
+      continue;
+    }
+
+    // Bullet list item
+    const bulletMatch = line.match(/^[-*•]\s+(.*)/);
+    if (bulletMatch) {
+      const listItems: React.ReactNode[] = [];
+      while (i < lines.length) {
+        const m = lines[i].match(/^[-*•]\s+(.*)/);
+        if (!m) break;
+        listItems.push(
+          <li key={i} className="flex gap-2 text-sm">
+            <span className="text-neutral-400 shrink-0">•</span>
+            <span>{inlineFormat(m[1])}</span>
+          </li>
+        );
+        i++;
+      }
+      elements.push(<ul key={`ul-${i}`} className="space-y-1 my-1">{listItems}</ul>);
+      continue;
+    }
+
+    // Blank line
+    if (line.trim() === '') {
+      elements.push(<div key={i} className="h-1" />);
+      i++; continue;
+    }
+
+    // Regular paragraph
+    elements.push(<p key={i} className="text-sm">{inlineFormat(line)}</p>);
+    i++;
+  }
+
+  return <div className="space-y-0.5">{elements}</div>;
+}
+
+function inlineFormat(text: string): React.ReactNode {
+  // Handle **bold**, *italic*, and `code`
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**'))
+      return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+    if (part.startsWith('*') && part.endsWith('*'))
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    if (part.startsWith('`') && part.endsWith('`'))
+      return <code key={i} className="bg-neutral-200 rounded px-1 text-xs font-mono">{part.slice(1, -1)}</code>;
+    return <Fragment key={i}>{part}</Fragment>;
+  });
+}
 
 function saveSessionToStorage(threadId: string) {
   try {
@@ -272,7 +358,10 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
                     : 'bg-neutral-100 text-neutral-900'
                 }`}
               >
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                {msg.role === 'user'
+                  ? <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  : <MarkdownMessage content={msg.content} />
+                }
                 <span
                   className={`text-xs mt-1 block ${
                     msg.role === 'user' ? 'text-neutral-400' : 'text-neutral-400'
@@ -347,8 +436,8 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
           </div>
         )}
 
-        {/* Input — always visible (allows modifications even after completion) */}
-        <div className="border-t border-neutral-200 px-6 py-4 bg-white">
+        {/* Input — hidden once contract summary is shown */}
+        <div className={`border-t border-neutral-200 px-6 py-4 bg-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
           <div className="flex items-end gap-3">
             <textarea
               value={input}

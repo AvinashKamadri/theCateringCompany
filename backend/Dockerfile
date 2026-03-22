@@ -16,7 +16,11 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
+# Chromium for Puppeteer PDF generation (contract approvals)
+RUN apk add --no-cache chromium
+
 ENV NODE_ENV=production
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules

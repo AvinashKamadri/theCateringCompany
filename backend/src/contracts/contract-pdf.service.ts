@@ -133,6 +133,7 @@ export class ContractPdfService {
       const puppeteer = await import('puppeteer');
       const browser = await puppeteer.default.launch({
         headless: true,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       });
       const page = await browser.newPage();

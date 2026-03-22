@@ -105,17 +105,50 @@ async def ask_desserts_node(state: ConversationState) -> ConversationState:
 
 async def select_desserts_node(state: ConversationState) -> ConversationState:
     """Process dessert selections — resolve to actual DB items with prices."""
+    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
+    # If user wants to skip, move on
+    skip_patterns = r'\b(skip|no|none|pass|no desserts?|skip desserts?|not?\s+want|forget it|move on)\b'
+    if is_negative(user_msg) or _re.search(skip_patterns, user_msg, _re.IGNORECASE):
+        fill_slot(state["slots"], "desserts", "no")
+        context = f"No desserts. Slots: {_slots_context(state)}"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer skipped desserts. Acknowledge and move on.",
+            context
+        )
+        state["current_node"] = "ask_utensils"
+        state["messages"] = add_ai_message(state, response)
+        return state
+
+    # Load dessert-only menu for resolution (so "Coffee Bar" etc. match correctly)
+    menu = await load_menu_by_category()
+    dessert_menu = {}
+    for cat_name, items in menu.items():
+        cat_lower = cat_name.lower()
+        if any(kw in cat_lower for kw in ["dessert", "coffee", "cake"]):
+            dessert_menu[cat_name] = items
+
+    # Build numbered list so LLM knows exact item names
+    numbered_lines = []
+    item_num = 1
+    for items in dessert_menu.values():
+        for item in items:
+            numbered_lines.append(f"{item_num}. {item['name']}")
+            item_num += 1
+    numbered_str = "\n".join(numbered_lines)
+
     extraction = await llm_respond(
-        "Extract the dessert selections from this message. Return as a comma-separated list "
-        "using the exact item names from the menu.",
+        "Extract the dessert selections from this customer message. "
+        "Use the numbered list below to map references to exact item names. "
+        "Return ONLY a comma-separated list of exact item names, nothing else.\n\n"
+        f"Available desserts:\n{numbered_str}",
         f"Customer message: {user_msg}"
     )
 
-    # Resolve to DB items with prices — only store matched items
-    matched_items, resolved_text = await _resolve_to_db_items(extraction)
+    # Resolve against dessert-only menu
+    matched_items, resolved_text = await _resolve_to_db_items(extraction, dessert_menu)
 
     if not matched_items:
         # Nothing matched — re-present dessert menu

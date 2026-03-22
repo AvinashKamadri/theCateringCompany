@@ -53,6 +53,7 @@ NODE_PROMPTS = {
     "select_event_type": (
         "The customer told you the event type. Confirm it warmly. "
         "If it's a Wedding, add a heartfelt congratulatory message. "
+        "If it's a custom/unique event, express excitement for their special celebration. "
         "Then ask: What is the date of your event?"
     ),
 

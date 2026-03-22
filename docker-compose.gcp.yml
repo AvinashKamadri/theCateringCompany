@@ -2,19 +2,9 @@ version: '3.9'
 
 # EC2 deployment — frontend on Vercel, Postgres on RDS, everything else here.
 # Run: docker compose -f docker-compose.gcp.yml --env-file .env.production up -d --build
+# Note: no Redis — job queue uses pg-boss (runs on Postgres/RDS)
 
 services:
-  # ─── Infrastructure (Redis only — Postgres is on RDS) ─────────────────────
-  redis:
-    image: redis:7-alpine
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-
   # ─── Backend (NestJS) ─────────────────────────────────────────────────────
   backend:
     build:
@@ -24,7 +14,6 @@ services:
       - '3001:3001'
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: redis://redis:6379
       NODE_ENV: production
       BACKEND_PORT: '3001'
       JWT_SECRET: ${JWT_SECRET}
@@ -44,38 +33,26 @@ services:
       NOTIFICATION_MOCK: ${NOTIFICATION_MOCK:-false}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-}
-      VECTOR_ENABLED: ${VECTOR_ENABLED:-false}
-      CLAM_AV_ENABLED: ${CLAM_AV_ENABLED:-false}
       RATE_LIMIT_TTL: ${RATE_LIMIT_TTL:-60}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
     volumes:
       - uploads_data:/app/uploads
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
 
-  # ─── Workers (BullMQ / Puppeteer PDF) ────────────────────────────────────
+  # ─── Workers (pg-boss / Puppeteer PDF) ───────────────────────────────────
   workers:
     build:
       context: .
       dockerfile: workers/Dockerfile
     environment:
       DATABASE_URL: ${DATABASE_URL}?connection_limit=5
-      REDIS_URL: redis://redis:6379
       NODE_ENV: production
       STRIPE_ENABLED: ${STRIPE_ENABLED:-false}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       NOTIFICATION_MOCK: ${NOTIFICATION_MOCK:-false}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-}
-      CLAM_AV_ENABLED: ${CLAM_AV_ENABLED:-false}
-      VECTOR_ENABLED: ${VECTOR_ENABLED:-false}
-      WORKER_MAX_RETRIES: ${WORKER_MAX_RETRIES:-5}
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
 
   # ─── ML Agent (FastAPI / LangGraph) ──────────────────────────────────────

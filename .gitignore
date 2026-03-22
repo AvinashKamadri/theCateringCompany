@@ -11,6 +11,7 @@
 .env.test
 .env.production
 .env.*.local
+.env.pp1
 *.pem
 *.key
 *.crt

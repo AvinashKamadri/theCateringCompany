@@ -35,6 +35,10 @@ services:
       SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-}
       RATE_LIMIT_TTL: ${RATE_LIMIT_TTL:-60}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
+      DOCUSEAL_ENABLED: ${DOCUSEAL_ENABLED:-false}
+      DOCUSEAL_API_KEY: ${DOCUSEAL_API_KEY:-}
+      DOCUSEAL_API_URL: ${DOCUSEAL_API_URL:-https://api.docuseal.co}
+      DOCUSEAL_SIGNING_URL: ${DOCUSEAL_SIGNING_URL:-https://docuseal.co}
     volumes:
       - uploads_data:/app/uploads
     restart: unless-stopped

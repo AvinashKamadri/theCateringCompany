@@ -40,6 +40,7 @@ node_modules/
 
 # Backend (NestJS)
 backend/dist/
+backend/dist_new/
 backend/build/
 backend/.nest-cli.json
 

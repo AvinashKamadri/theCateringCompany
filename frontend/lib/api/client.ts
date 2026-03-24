@@ -13,7 +13,16 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  withCredentials: true, // Important for HTTP-only cookies
+  withCredentials: true,
+});
+
+// Attach JWT from cookie as Authorization header (needed for cross-origin requests)
+apiClient.interceptors.request.use((config) => {
+  if (typeof document !== 'undefined') {
+    const token = document.cookie.match(/app_jwt=([^;]+)/)?.[1];
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 // Flag to prevent multiple refresh attempts

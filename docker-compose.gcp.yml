@@ -35,6 +35,7 @@ services:
       SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-}
       RATE_LIMIT_TTL: ${RATE_LIMIT_TTL:-60}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
+      NODE_TLS_REJECT_UNAUTHORIZED: '0'
     volumes:
       - uploads_data:/app/uploads
     restart: unless-stopped
@@ -45,7 +46,7 @@ services:
       context: .
       dockerfile: workers/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL}?connection_limit=5
+      DATABASE_URL: ${DATABASE_URL}&connection_limit=5
       NODE_ENV: production
       STRIPE_ENABLED: ${STRIPE_ENABLED:-false}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
@@ -53,6 +54,7 @@ services:
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-}
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+      NODE_TLS_REJECT_UNAUTHORIZED: '0'
     restart: unless-stopped
 
   # ─── ML Agent (FastAPI / LangGraph) ──────────────────────────────────────

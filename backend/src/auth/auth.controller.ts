@@ -60,6 +60,7 @@ export class AuthController {
         updated_at: user.updated_at,
       },
       joined_project: joinedProject ?? null,
+      accessToken,
     };
   }
 
@@ -86,6 +87,7 @@ export class AuthController {
         created_at: user.created_at,
         updated_at: user.updated_at,
       },
+      accessToken,
     };
   }
 

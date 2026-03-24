@@ -22,6 +22,9 @@ function SignInForm() {
     setIsLoading(true);
     try {
       const data: any = await apiClient.post("/auth/login", formData);
+      if (data.accessToken) {
+        document.cookie = `app_jwt=${data.accessToken}; path=/; max-age=7200; SameSite=Lax`;
+      }
       setUser(data.user);
       const redirect = searchParams.get("redirect");
       router.push(redirect || "/projects");

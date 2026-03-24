@@ -41,6 +41,9 @@ export default function SignUpPage() {
       if (!payload.project_code) delete payload.project_code;
       if (!payload.primary_phone) delete payload.primary_phone;
       const data: any = await apiClient.post("/auth/signup", payload);
+      if (data.accessToken) {
+        document.cookie = `app_jwt=${data.accessToken}; path=/; max-age=7200; SameSite=Lax`;
+      }
       setUser(data.user);
       if (data.joined_project?.id) {
         router.push(`/projects/${data.joined_project.id}`);

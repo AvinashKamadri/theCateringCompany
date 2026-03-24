@@ -206,8 +206,8 @@ storage/pdfs/
 
 # Uploaded files (should be in R2/S3)
 uploads/
-attachments/
 storage/uploads/
+# Note: src/attachments/ (source code) is NOT ignored — only runtime upload dirs
 
 # Vector indexes
 *.faiss

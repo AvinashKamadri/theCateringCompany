@@ -117,6 +117,12 @@ export class CateringStack extends cdk.Stack {
       machineImage: ec2.MachineImage.fromSsmParameter(
         '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id',
       ),
+      blockDevices: [
+        {
+          deviceName: '/dev/sda1',
+          volume: ec2.BlockDeviceVolume.ebs(30),
+        },
+      ],
       securityGroup: ec2Sg,
       role: ec2Role,
       keyPair,

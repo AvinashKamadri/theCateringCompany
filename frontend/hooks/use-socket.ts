@@ -26,10 +26,15 @@ export function useSocket(options: UseSocketOptions = {}) {
       return;
     }
 
-    // Create socket connection
+    // Create socket connection — pass JWT as auth token for cross-origin support
+    const token = typeof document !== 'undefined'
+      ? document.cookie.match(/app_jwt=([^;]+)/)?.[1]
+      : undefined;
+
     const socket = io(WS_URL, {
       withCredentials: true,
       transports: ['websocket', 'polling'],
+      auth: { token: token || '' },
     });
 
     socketRef.current = socket;

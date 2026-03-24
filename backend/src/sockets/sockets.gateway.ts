@@ -28,20 +28,19 @@ export class SocketsGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
   async handleConnection(client: Socket) {
     try {
-      // Extract JWT from HTTP-only cookie
-      const cookies = client.handshake.headers.cookie;
-      if (!cookies) {
+      // Extract JWT from auth token (cross-origin) or cookie fallback
+      let token: string | undefined = client.handshake.auth?.token;
+
+      if (!token) {
+        const cookies = client.handshake.headers.cookie;
+        const tokenMatch = cookies?.split(';').find(c => c.trim().startsWith('app_jwt='));
+        token = tokenMatch?.split('=')[1]?.trim();
+      }
+
+      if (!token) {
         client.disconnect();
         return;
       }
-
-      const tokenMatch = cookies.split(';').find(c => c.trim().startsWith('app_jwt='));
-      if (!tokenMatch) {
-        client.disconnect();
-        return;
-      }
-
-      const token = tokenMatch.split('=')[1]?.trim();
       const payload = this.jwtService.verify(token);
       const userId = payload.sub;
 

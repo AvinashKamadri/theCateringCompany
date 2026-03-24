@@ -68,6 +68,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       MODEL_NAME: ${MODEL_NAME:-gpt-4o-mini}
+      CORS_ORIGIN: ${CORS_ORIGIN}
       HOST: 0.0.0.0
       PORT: '8000'
     restart: unless-stopped

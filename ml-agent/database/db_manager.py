@@ -220,7 +220,7 @@ async def save_message(
             "id": msg_id,
             "thread_id": thread_id,
             "project_id": project_id,
-            "author_id": SYSTEM_USER_ID if sender_type == "ai" else None,
+            "author_id": None,
             "sender_type": sender_type,
             "content": content,
             "ai_conversation_state_id": ai_conversation_state_id,
@@ -292,7 +292,7 @@ async def save_contract(
             "body": Json(body),
             "total_amount": Decimal(str(total_amount)) if total_amount else None,
             "ai_generated": True,
-            "created_by": SYSTEM_USER_ID,
+            "created_by": None,
             "is_active": True,
         }
     )
@@ -492,7 +492,7 @@ async def log_ai_generation(
             "entity_type": entity_type,
             "entity_id": entity_id,
             "project_id": project_id,
-            "triggered_by": SYSTEM_USER_ID,
+            "triggered_by": None,
             "model": model,
             "prompt_version": prompt_version,
             "input_summary": Json(input_summary) if input_summary else None,

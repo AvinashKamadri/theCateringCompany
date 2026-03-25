@@ -113,13 +113,12 @@ async def _resolve_to_db_items(extraction: str, menu: dict | None = None) -> tup
         for item in items:
             items_by_name[item["name"].lower()] = (item, cat_name)
 
-    # Parse comma / "and" separated selections
-    raw_names = []
-    for part in extraction.split(","):
-        for sub in part.split(" and "):
-            cleaned = sub.strip()
-            if cleaned:
-                raw_names.append(cleaned)
+    # Parse comma-separated selections.
+    # IMPORTANT: do NOT split on " and " here — item names like "Shrimp and Mango Bites"
+    # contain "and" and would be broken into partial tokens that fuzzy-match many items.
+    # Instead, try the whole comma part first; only split on " and " as a fallback when
+    # the whole part produces zero matches (handled in the match loop below).
+    raw_names = [part.strip() for part in extraction.split(",") if part.strip()]
 
     matched = []
     seen = set()
@@ -165,8 +164,22 @@ async def _resolve_to_db_items(extraction: str, menu: dict | None = None) -> tup
                 continue
             break
 
-        # 4. Partial item name match (last resort)
-        if name not in seen:
+        # 4. Fallback: if name contains " and ", try splitting and resolving sub-parts
+        #    (e.g. "Chicken and Ham" → ["Chicken", "Ham"] — only when no exact match found)
+        if " and " in name_lower:
+            sub_parts = [s.strip() for s in name.split(" and ") if s.strip()]
+            for sub in sub_parts:
+                sub_lower = sub.lower()
+                if sub_lower in items_by_name:
+                    item, cat = items_by_name[sub_lower]
+                    if item["name"] not in seen:
+                        matched.append({**item, "matched_category": cat})
+                        seen.add(item["name"])
+            if any(s.lower() in items_by_name for s in sub_parts):
+                continue  # matched via sub-parts, skip partial fuzzy match
+
+        # 5. Partial item name match (last resort — single token must be 5+ chars to avoid noise)
+        if name not in seen and len(name_lower) >= 5:
             for db_name_lower, (item, cat) in items_by_name.items():
                 if name_lower in db_name_lower or db_name_lower in name_lower:
                     if item["name"] not in seen:
@@ -341,6 +354,24 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
             item_num += 1
 
     numbered_str = "\n".join(numbered_lines)
+
+    # Guard: if user message is too short/vague (e.g. just "entrée", "ok", "yes"),
+    # re-present the menu instead of letting the LLM hallucinate all dishes as selected.
+    vague_msg = user_msg.strip().lower()
+    is_vague = (
+        len(vague_msg.split()) <= 2
+        and not _re.search(r'\d', vague_msg)  # no numbers
+        and not any(item_name.lower() in vague_msg for item_name in number_to_name.values())
+    )
+    if is_vague and not _re.search(r'\b(skip|pass|none|no)\b', vague_msg):
+        menu_context = await get_main_dishes_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nThe customer hasn't selected specific dishes yet. "
+            "Re-present the main dishes menu below and ask them to choose 3 to 5 dishes by name or number.",
+            menu_context
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
 
     # Fast path: user typed numbers → resolve directly without LLM
     bare_numbers = _re.findall(r"\b(\d+)\b", user_msg)

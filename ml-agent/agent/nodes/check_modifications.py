@@ -143,20 +143,44 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
             current_value = state["slots"].get(target_slot, {}).get("value") or ""
             current_items = _parse_slot_items(current_value)
 
-            # Detect remove vs. add intent from the raw user message
+            # Detect remove / add intent from the raw user message
             remove_intent = bool(re.search(r'\b(remove|delete|take out|drop)\b', last_message, re.IGNORECASE))
+            add_intent = bool(re.search(r'\badd\b', last_message, re.IGNORECASE))
             items_text = str(new_value).strip()
 
+            # ── Extract remove-items and add-items separately when both appear ──
+            # Pattern: "remove X and add Y" or "remove X, add Y"
+            remove_text = items_text
+            add_text = ""
+            if remove_intent and add_intent:
+                # Try to split the message on "and add" or ", add"
+                split_match = re.split(r'(?:,?\s+and\s+add\b|\badd\b)', last_message, maxsplit=1, flags=re.IGNORECASE)
+                if len(split_match) == 2:
+                    add_text = split_match[1].strip()
+                    # remove_text: everything before "add" in the LLM's new_value, or use remove section
+                    remove_section = re.split(r'\b(?:and\s+)?add\b', items_text, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+                    remove_text = remove_section if remove_section else items_text
+
             if remove_intent:
-                matched, _ = await _resolve_to_db_items(items_text)
+                matched, _ = await _resolve_to_db_items(remove_text)
                 remove_names = {i["name"].lower() for i in matched}
-                remove_kws = [p.strip().lower() for p in items_text.split(",") if p.strip()]
+                remove_kws = [p.strip().lower() for p in remove_text.split(",") if p.strip()]
                 updated = [
                     n for n in current_items
                     if n.lower() not in remove_names
                     and not any(kw and kw in n.lower() for kw in remove_kws)
                 ]
                 removed_items = [n for n in current_items if n not in updated]
+
+                # Also process add if combined
+                added_items = []
+                if add_intent and add_text:
+                    add_matched, _ = await _resolve_to_db_items(add_text)
+                    existing_lower = {n.lower() for n in updated}
+                    new_names = [i["name"] for i in add_matched if i["name"].lower() not in existing_lower]
+                    updated = updated + new_names
+                    added_items = new_names
+
                 _, resolved = await _resolve_to_db_items(", ".join(updated)) if updated else ([], "")
                 action_word = "removed"
             else:
@@ -170,7 +194,7 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
             if remove_intent:
                 actually_resolved = resolved if resolved else ""
                 value_changed = set(updated) != set(current_items)
-                if value_changed and removed_items:
+                if value_changed and (removed_items or (add_intent and add_text)):
                     old_value = current_value
                     now = datetime.now().isoformat()
                     history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
@@ -181,9 +205,14 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                         "modified_at": now,
                         "modification_history": history,
                     }
-                    removed_str = ", ".join(removed_items)
+                    parts = []
+                    if removed_items:
+                        parts.append(f"Removed **{', '.join(removed_items)}**")
+                    if add_intent and 'added_items' in dir() and added_items:
+                        parts.append(f"Added **{', '.join(added_items)}**")
+                    action_summary = " and ".join(parts) if parts else "Updated"
                     remaining_str = actually_resolved if actually_resolved else "none"
-                    confirm = f"Done! Removed **{removed_str}** from your {slot_label}. Updated {slot_label}: {remaining_str}"
+                    confirm = f"Done! {action_summary} from your {slot_label}. Updated {slot_label}: {remaining_str}"
                 else:
                     confirm = f"I couldn't find that item in your {slot_label}. Current {slot_label}: {current_value or 'none selected'}."
             elif resolved and resolved != current_value:

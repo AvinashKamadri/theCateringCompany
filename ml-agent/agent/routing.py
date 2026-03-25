@@ -73,6 +73,12 @@ _ADD_TO_PREV_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Remove/delete intent on any previously-collected item → always route to check_modifications
+_REMOVE_INTENT_PATTERN = re.compile(
+    r'\b(remove|delete|take out|drop|i (added|selected|chose|picked).+by mistake|by mistake.+(remove|delete|take out))\b',
+    re.IGNORECASE,
+)
+
 
 def _detect_off_topic_correction(msg: str, current_slot: str | None, filled_slots: set[str]) -> bool:
     """Return True if the message looks like a correction targeting a slot OTHER than the current one.
@@ -123,7 +129,11 @@ def route_message(state: ConversationState) -> str:
 
     current = state.get("current_node", "start")
 
-    # 2. Natural correction for a slot different from what we're currently asking
+    # 2. Remove/delete intent on any item → always route to check_modifications
+    if _REMOVE_INTENT_PATTERN.search(last_user_msg):
+        return "check_modifications"
+
+    # 3. Natural correction for a slot different from what we're currently asking
     current_slot = _NODE_COLLECTS.get(current)
     filled_slots = {
         name for name, data in state.get("slots", {}).items()
@@ -131,6 +141,7 @@ def route_message(state: ConversationState) -> str:
     }
     if _detect_off_topic_correction(last_user_msg, current_slot, filled_slots):
         return "check_modifications"
+
 
     valid_nodes = {
         "start", "collect_name", "collect_event_date", "select_service_type",

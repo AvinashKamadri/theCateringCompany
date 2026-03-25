@@ -156,8 +156,9 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                     if n.lower() not in remove_names
                     and not any(kw and kw in n.lower() for kw in remove_kws)
                 ]
-                _, resolved = await _resolve_to_db_items(", ".join(updated)) if updated else ([], current_value)
-                action_word = "removed from"
+                removed_items = [n for n in current_items if n not in updated]
+                _, resolved = await _resolve_to_db_items(", ".join(updated)) if updated else ([], "")
+                action_word = "removed"
             else:
                 matched, _ = await _resolve_to_db_items(items_text)
                 existing_lower = {n.lower() for n in current_items}
@@ -166,7 +167,26 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                 _, resolved = await _resolve_to_db_items(", ".join(merged)) if merged else ([], current_value)
                 action_word = "added to"
 
-            if resolved and resolved != current_value:
+            if remove_intent:
+                actually_resolved = resolved if resolved else ""
+                value_changed = set(updated) != set(current_items)
+                if value_changed and removed_items:
+                    old_value = current_value
+                    now = datetime.now().isoformat()
+                    history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
+                    history.append({"old_value": old_value, "new_value": actually_resolved, "timestamp": now})
+                    state["slots"][target_slot] = {
+                        "value": actually_resolved,
+                        "filled": bool(updated),
+                        "modified_at": now,
+                        "modification_history": history,
+                    }
+                    removed_str = ", ".join(removed_items)
+                    remaining_str = actually_resolved if actually_resolved else "none"
+                    confirm = f"Done! Removed **{removed_str}** from your {slot_label}. Updated {slot_label}: {remaining_str}"
+                else:
+                    confirm = f"I couldn't find that item in your {slot_label}. Current {slot_label}: {current_value or 'none selected'}."
+            elif resolved and resolved != current_value:
                 old_value = current_value
                 now = datetime.now().isoformat()
                 history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
@@ -177,7 +197,7 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                     "modified_at": now,
                     "modification_history": history,
                 }
-                confirm = f"Done! I've {action_word} your {slot_label}: **{resolved}**"
+                confirm = f"Done! Updated your {slot_label}: **{resolved}**"
             else:
                 confirm = f"I couldn't find those items on the menu. Your {slot_label} remain: {current_value or 'none selected'}."
 

@@ -45,8 +45,10 @@ NODE_PROMPTS = {
     ),
 
     "select_service_type": (
-        "The customer chose their service type. Confirm their choice. "
-        "Then ask: Do you need any rentals for your event? "
+        "The customer just confirmed their service type — it is now SET. "
+        "DO NOT ask about service type again. "
+        "In ONE sentence, confirm the service type they chose. "
+        "Then IMMEDIATELY ask: Do you need any rentals for your event? "
         "We offer linens, tables, and chairs — you can select multiple or none."
     ),
 

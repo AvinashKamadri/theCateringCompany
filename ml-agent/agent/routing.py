@@ -157,6 +157,11 @@ def route_message(state: ConversationState) -> str:
         "generate_contract", "check_modifications",
     }
 
+    # "complete" means contract was already generated — stay at generate_contract
+    # so post-contract messages don't restart the flow
+    if current == "complete":
+        return "generate_contract"
+
     if current in valid_nodes:
         return current
 

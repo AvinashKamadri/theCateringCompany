@@ -183,8 +183,21 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
 
 async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
     """Handle yes/no about more desserts."""
+    from agent.nodes.helpers import is_done_confirming
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
+
+    # Check done/negative FIRST — "that's all", "im good", "sufficient" should exit
+    if is_negative(user_msg) or is_done_confirming(user_msg):
+        context = f"Desserts finalized. Slots: {_slots_context(state)}"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nDessert selections are finalized. "
+            "Ask: Would you like us to provide utensils for your event?",
+            context
+        )
+        state["current_node"] = "ask_utensils"
+        state["messages"] = add_ai_message(state, response)
+        return state
 
     if is_affirmative(user_msg):
         dessert_ctx = await get_dessert_context(state)

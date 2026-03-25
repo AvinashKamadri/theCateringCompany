@@ -60,11 +60,12 @@ async def ask_special_requests_node(state: ConversationState) -> ConversationSta
 
 async def collect_special_requests_node(state: ConversationState) -> ConversationState:
     """Record special requests. Appends if there's already a value."""
+    from agent.nodes.helpers import is_done_confirming
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # If user says "that's all" / "nothing else", keep existing value and move on
-    if is_negative(user_msg):
+    # If user says "that's all" / "nothing else" / "done", move on
+    if is_negative(user_msg) or is_done_confirming(user_msg):
         existing = get_slot_value(state["slots"], "special_requests")
         if not existing or existing == "none":
             fill_slot(state["slots"], "special_requests", "none")
@@ -90,6 +91,7 @@ async def collect_special_requests_node(state: ConversationState) -> Conversatio
             "to dietary concerns?",
             context
         )
+        # Stay here for more requests — but user can exit via done/negative above
         state["current_node"] = "collect_special_requests"
 
     state["messages"] = add_ai_message(state, response)
@@ -178,17 +180,31 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
 
 
 async def ask_anything_else_node(state: ConversationState) -> ConversationState:
-    """Handle yes/no about anything else needed."""
+    """Handle yes/no about anything else needed.
+
+    Key distinction: "yes that's correct" / "yep this works" = DONE (generate contract),
+    while "yes I want to add X" = wants more. Check done/negative FIRST.
+    """
+    from agent.nodes.helpers import is_done_confirming
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_affirmative(user_msg):
+    if is_negative(user_msg) or is_done_confirming(user_msg):
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nThat's everything! Tell the customer you have all the "
+            "information needed and their contract is being generated now. "
+            "Thank them warmly.",
+            f"All details: {_slots_context(state)}"
+        )
+        state["current_node"] = "generate_contract"
+    elif is_affirmative(user_msg):
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_anything_else']}",
             f"Customer wants to add something. Ask what else they need.\nSlots: {_slots_context(state)}"
         )
         state["current_node"] = "collect_anything_else"
     else:
+        # Ambiguous — treat as finalization (safer than looping)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nThat's everything! Tell the customer you have all the "
             "information needed and their contract is being generated now. "
@@ -202,10 +218,27 @@ async def ask_anything_else_node(state: ConversationState) -> ConversationState:
 
 
 async def collect_anything_else_node(state: ConversationState) -> ConversationState:
-    """Record additional notes and ask again."""
+    """Record additional notes and ask again.
+
+    If user says 'nothing else' / 'that's all' / 'done' here, go straight to contract
+    instead of storing it as a note and looping back.
+    """
+    from agent.nodes.helpers import is_done_confirming
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
+    if is_negative(user_msg) or is_done_confirming(user_msg):
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nThat's everything! Tell the customer you have all the "
+            "information needed and their contract is being generated now. "
+            "Thank them warmly.",
+            f"All details: {_slots_context(state)}"
+        )
+        state["current_node"] = "generate_contract"
+        state["messages"] = add_ai_message(state, response)
+        return state
+
+    # Actual additional notes — store and ask again
     existing = get_slot_value(state["slots"], "additional_notes") or ""
     new_notes = f"{existing}\n{user_msg}".strip() if existing else user_msg.strip()
     fill_slot(state["slots"], "additional_notes", new_notes)

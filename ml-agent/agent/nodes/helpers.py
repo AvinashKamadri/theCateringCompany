@@ -31,46 +31,79 @@ def get_last_human_message(messages) -> str:
 
 
 def is_affirmative(text: str) -> bool:
-    """Check if user response is affirmative (yes). Uses word boundaries."""
+    """Check if user response is affirmative (yes, I want MORE / yes, proceed with the option).
+
+    IMPORTANT: This should only match when the user is saying "yes" to WANTING something.
+    Confirmation phrases like "this works", "looks good", "correct", "that's all" are NOT
+    affirmative — they mean "I'm satisfied / done". Use is_done_confirming() for those.
+    """
     t = text.strip().lower()
-    # Check negative FIRST — if it contains "no" it's not affirmative
+    # Check negative/done FIRST — these override any affirmative signal
     if re.search(r'\bno\b', t):
         return False
+    if is_done_confirming(t):
+        return False
     patterns = [
-        # Classic yes words
+        # Classic yes words (unambiguous "I want this")
         r'\byes\b', r'\byeah\b', r'\byep\b', r'\byea\b', r'\bya\b',
         r'\bsure\b', r'\bok\b', r'\bokay\b', r'\bplease\b',
         r'\bdefinitely\b', r'\babsolutely\b', r'\bof course\b',
         r'\bwhy not\b',
-        # "sounds good/great/fine/perfect"
-        r'\bsounds (good|great|fine|perfect|amazing|awesome|wonderful)\b',
-        # "looks good/great/fine/perfect" (e.g. "looks good for me")
-        r'\blooks (good|great|fine|perfect|amazing|awesome|wonderful)\b',
-        # "that's/that works/that's good/fine"
-        r'\bthat(\'?s)? (good|great|fine|perfect|works|correct|right)\b',
         # "let's go / let's do it / let's proceed"
         r'\blet\'?s (go|do it|proceed|continue|start|begin)\b',
         r'\blets (go|do it|proceed|continue|start|begin)\b',
-        # "go ahead / proceed"
-        r'\bgo ahead\b', r'\bproceed\b',
+        # "go ahead"
+        r'\bgo ahead\b',
         # "i would / i do / i'd like / i'd love / i want"
         r'\bi would\b', r'\bi do\b', r'\bi\'?d (like|love|want)\b', r'\bi want\b',
         # "bring it on / show me / love to"
         r'\bbring it on\b', r'\bshow me\b', r'\blove to\b',
         # "count me in / i'm in / i'm interested"
         r'\bcount me in\b', r'\bi\'?m in\b', r'\bi\'?m interested\b',
-        # "for sure / totally / exactly / correct / right"
-        r'\bfor sure\b', r'\btotally\b', r'\bexactly\b', r'\bcorrect\b',
-        # "happy with / good with / fine with / cool with"
-        r'\b(happy|good|fine|cool) with\b',
-        # "that\'s final / yes that\'s it / that\'s all I need"
-        r'\bthat\'?s (it|all|final|my final)\b',
+        # "for sure / totally"
+        r'\bfor sure\b', r'\btotally\b',
+    ]
+    return any(re.search(p, t) for p in patterns)
+
+
+def is_done_confirming(text: str) -> bool:
+    """Check if user is confirming satisfaction / signaling they're done.
+
+    These phrases mean "I'm happy with what we have" — NOT "yes I want more".
+    Use this BEFORE is_affirmative() in any node where both meanings are possible.
+
+    Examples: "this works", "looks good", "correct", "that's all", "im done",
+              "everything is correct", "yep this works", "sufficient"
+    """
+    t = text.strip().lower() if isinstance(text, str) else text
+    patterns = [
+        # Satisfaction/correctness confirmations
+        r'\b(this|that|everything|it)\s+(works|is\s+(good|fine|correct|right|perfect))\b',
+        r'\b(this|that)\s+suffices\b',
+        r'\b(looks|sounds)\s+(good|great|fine|perfect|amazing|awesome|wonderful)\b',
+        r'\bcorrect\b', r'\bperfect\b', r'\bexactly\b',
+        # "that's all / that's it / that's final / that is all"
+        r'\bthat\'?s\s*(it|all|final|everything|my final)\b',
+        r'\bthats\s*(it|all|final|everything)\b',
+        r'\bthat\s+is\s+(it|all|final|everything)\b',
+        # Done/finished signals
+        r'\b(im|i\'?m)\s+(good|done|set|satisfied|happy)\b',
+        r'\bwe\s*(\'re|are)\s+(good|set|done|all set)\b',
+        r'\ball\s+(good|set|done)\b',
+        r'\b(done|finished|complete|sufficient|enough|suffices)\b',
+        # Nothing more
+        r'\bnothing\s+(else|more)\b',
+        r'\bno\s+(more|changes?)\b',
+        # Explicit finalization
+        r'\b(generate|finalize|proceed)\b',
+        # "good with / happy with / fine with"
+        r'\b(happy|good|fine|cool|satisfied)\s+with\b',
     ]
     return any(re.search(p, t) for p in patterns)
 
 
 def is_negative(text: str) -> bool:
-    """Check if user response is negative (no). Uses word boundaries."""
+    """Check if user response is negative (no, I don't want this). Uses word boundaries."""
     t = text.strip().lower()
     patterns = [
         # Classic no words
@@ -93,6 +126,10 @@ def is_negative(text: str) -> bool:
         r'\bi\'?ll\s+pass\b', r'\bpass\s+on\s+that\b',
         # "without / not for me"
         r'\bnot\s+for\s+me\b',
+        # Done signals (these are contextually negative in yes/no questions)
+        r'\bnothing\s+(else|more)\b',
+        r'\bno\s+(more|changes?)\b',
+        r'\b(done|sufficient|enough)\b',
     ]
     return any(re.search(p, t) for p in patterns)
 

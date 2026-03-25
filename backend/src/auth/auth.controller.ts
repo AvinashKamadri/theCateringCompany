@@ -125,7 +125,7 @@ export class AuthController {
     this.setAccessTokenCookie(res, accessToken);
     this.setRefreshTokenCookie(res, refreshToken);
 
-    return { message: 'Tokens refreshed successfully' };
+    return { message: 'Tokens refreshed successfully', accessToken };
   }
 
   @UseGuards(AuthGuard('jwt'))
@@ -162,8 +162,8 @@ export class AuthController {
   private setRefreshTokenCookie(res: Response, token: string): void {
     res.cookie('refresh_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true,
+      sameSite: 'none',
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });

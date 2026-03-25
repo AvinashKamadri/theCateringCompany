@@ -67,7 +67,10 @@ apiClient.interceptors.response.use(
 
       try {
         // Try to refresh the token
-        await apiClient.post('/auth/refresh', {});
+        const refreshData: any = await apiClient.post('/auth/refresh', {});
+        if (refreshData?.accessToken && typeof document !== 'undefined') {
+          document.cookie = `app_jwt=${refreshData.accessToken}; path=/; max-age=7200; SameSite=Lax`;
+        }
         processQueue(null, 'refreshed');
         isRefreshing = false;
         // Retry the original request

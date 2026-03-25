@@ -284,7 +284,12 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
 
     # CRITICAL: Stay on the same node — never jump ahead
     # EXCEPT: reroute conditional nodes when their condition no longer holds
-    restored_node = _adjust_node_for_slot_change(previous_node, state["slots"])
+    # EXCEPT: after processing a menu change from collect_menu_changes → go to ask_menu_changes
+    #         so user gets "are you happy with this?" not "what would you like to change?"
+    if previous_node == "collect_menu_changes" and detection_result.get("detected"):
+        restored_node = "ask_menu_changes"
+    else:
+        restored_node = _adjust_node_for_slot_change(previous_node, state["slots"])
     state["current_node"] = restored_node
     print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Exiting. current_node: {restored_node} (previous: {previous_node})")
     return state

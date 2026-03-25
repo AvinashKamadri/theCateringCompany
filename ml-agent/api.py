@@ -2,7 +2,7 @@
 FastAPI server wrapping the catering intake agent.
 """
 # Code version — bump this to verify server is running latest code
-_CODE_VERSION = "v6-2026-03-14"
+_CODE_VERSION = "v7-2026-03-26"
 
 import uuid
 from contextlib import asynccontextmanager
@@ -138,6 +138,7 @@ async def chat(req: ChatRequest):
             event_date=slot_vals.get("event_date", ""),
             body=body,
             total_amount=contract_data.get("total_amount"),
+            user_id=resolved_user_id,
         )
 
         # Update project with event details

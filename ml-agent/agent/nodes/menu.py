@@ -677,6 +677,22 @@ async def collect_menu_changes_node(state: ConversationState) -> ConversationSta
     import json as _json
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
+
+    # If user says they're done / happy, skip to next step
+    finalize_kws = ["final", "done", "good", "perfect", "that's all", "thats all",
+                    "no changes", "looks good", "all set", "we're set", "we are set",
+                    "happy with", "satisfied", "these are fine", "this is fine"]
+    user_lower = user_msg.lower()
+    if is_negative(user_msg) or any(kw in user_lower for kw in finalize_kws):
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nThe menu is finalized. Confirm it looks great. "
+            "Ask: Would you like to add desserts to your event?",
+            f"Final menu: {_slots_context(state)}"
+        )
+        state["current_node"] = "ask_desserts"
+        state["messages"] = add_ai_message(state, response)
+        return state
+
     menu = await load_menu_by_category()
 
     # --- Step 1: Use LLM to parse intent, items, and target slot ---

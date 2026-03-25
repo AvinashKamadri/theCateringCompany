@@ -180,36 +180,27 @@ function AiIntakeContent() {
       <AppNav />
 
       <div className="pt-14 h-screen flex flex-col">
-        {/* Page header — matches dashboard page header style */}
-        <div className="bg-white border-b border-neutral-200 px-6 py-4 shrink-0">
-          <div className="max-w-4xl mx-auto flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-semibold text-neutral-900">AI Intake</h1>
-              <p className="text-sm text-neutral-500">Plan your event with our AI assistant</p>
-            </div>
-            <div className="flex items-center gap-3">
-              {view === 'chat' && sessions.filter((s) => !s.error).length > 0 && (
+        {/* Content */}
+        <div className="flex-1 overflow-hidden">
+          <div className="max-w-4xl mx-auto h-full py-6 px-4 flex flex-col">
+            {/* Sessions button — only shown when in chat view with existing sessions */}
+            {view === 'chat' && sessions.filter((s) => !s.error).length > 0 && (
+              <div className="flex justify-end mb-3 shrink-0">
                 <button
                   onClick={() => setView('picker')}
-                  className="text-sm text-neutral-600 hover:text-neutral-900 flex items-center gap-1.5 border border-neutral-200 rounded-lg px-3 py-1.5 hover:border-neutral-300 transition-colors"
+                  className="text-sm text-neutral-600 hover:text-neutral-900 flex items-center gap-1.5 border border-neutral-200 rounded-lg px-3 py-1.5 hover:border-neutral-300 transition-colors bg-white"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
                   My sessions
                 </button>
-              )}
-              {isSaving && (
-                <div className="flex items-center gap-2 text-neutral-500 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Saving…
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-hidden">
-          <div className="max-w-4xl mx-auto h-full py-6 px-4">
+                {isSaving && (
+                  <div className="flex items-center gap-2 text-neutral-500 text-sm ml-3">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving…
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Session Picker */}
             {view === 'picker' && !loadingSessions && (

@@ -454,11 +454,20 @@ export class ProjectsService {
         ? `${dto.event_type} - ${dto.client_name}`
         : dto.client_name || dto.event_type || 'AI Intake (draft)';
 
-      // If project_id provided, update the existing draft; otherwise create fresh
+      // Resolve project_id: explicit > lookup by thread_id > create new
+      let resolvedProjectId = dto.project_id;
+      if (!resolvedProjectId && dto.thread_id) {
+        const convState = await tx.ai_conversation_states.findUnique({
+          where: { thread_id: dto.thread_id },
+          select: { project_id: true },
+        });
+        if (convState?.project_id) resolvedProjectId = convState.project_id;
+      }
+
       let project;
-      if (dto.project_id) {
+      if (resolvedProjectId) {
         project = await tx.projects.update({
-          where: { id: dto.project_id },
+          where: { id: resolvedProjectId },
           data: {
             title: projectTitle,
             event_date: dto.event_date ? new Date(dto.event_date) : undefined,

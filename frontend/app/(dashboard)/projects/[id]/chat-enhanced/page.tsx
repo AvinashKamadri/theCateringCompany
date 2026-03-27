@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
 import { useSocket } from '@/hooks/use-socket';
 import { messagesApi } from '@/lib/api/messages';
 import { MessageList } from '@/components/chat/message-list';
@@ -15,6 +16,7 @@ import { toast } from 'sonner';
 
 export default function ProjectChatEnhancedPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params?.id as string;
 
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -193,7 +195,18 @@ export default function ProjectChatEnhancedPage() {
   };
 
   return (
-    <div className="h-screen flex">
+    <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+      {/* Back navigation */}
+      <div className="bg-white border-b border-neutral-200 px-4 py-2 shrink-0">
+        <button
+          onClick={() => router.push(`/projects/${projectId}`)}
+          className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back to Project
+        </button>
+      </div>
+      <div className="flex flex-1 overflow-hidden">
       {/* Thread List - Left Sidebar */}
       <div className="w-80 border-r border-gray-200 bg-white">
         <ThreadList
@@ -253,6 +266,7 @@ export default function ProjectChatEnhancedPage() {
 
       {/* Project Info Sidebar - Right */}
       <ChatSidebar contractData={projectData} slotsFilled={0} totalSlots={0} />
+      </div>
     </div>
   );
 }

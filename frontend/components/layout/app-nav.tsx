@@ -8,17 +8,21 @@ import { useAuthStore } from '@/lib/store/auth-store';
 import { apiClient } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
-const navigation = [
-  { name: 'Projects',   href: '/projects',   icon: FolderKanban },
-  { name: 'Contracts',  href: '/contracts',  icon: FileText },
-  { name: 'CRM',        href: '/crm',        icon: Users },
-  { name: 'AI Intake',  href: '/chat',       icon: Sparkles },
+const STAFF_DOMAINS = ['@catering-company.com'];
+
+const ALL_NAVIGATION = [
+  { name: 'Projects',   href: '/projects',   icon: FolderKanban, hideForStaff: false },
+  { name: 'Contracts',  href: '/contracts',  icon: FileText,     hideForStaff: true },
+  { name: 'CRM',        href: '/crm',        icon: Users,        hideForStaff: false },
+  { name: 'AI Intake',  href: '/chat',       icon: Sparkles,     hideForStaff: true },
 ];
 
 export function AppNav() {
   const router = useRouter();
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
+  const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));
+  const navigation = ALL_NAVIGATION.filter((item) => !(item.hideForStaff && isStaff));
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const handleLogout = async () => {

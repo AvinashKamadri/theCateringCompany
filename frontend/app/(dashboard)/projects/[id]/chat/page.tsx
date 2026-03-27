@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
 import { useSocket } from '@/hooks/use-socket';
 import { messagesApi } from '@/lib/api/messages';
 import { MessageList } from '@/components/chat/message-list';
@@ -13,6 +14,7 @@ import { cn } from '@/lib/utils';
 
 export default function ProjectChatPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params?.id as string;
 
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -22,9 +24,9 @@ export default function ProjectChatPage() {
   const [isLoadingThreads, setIsLoadingThreads] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
-  const { isConnected, joinThread, leaveThread, sendTyping, on, off } = useSocket({});
+  const { socket, isConnected, joinThread, leaveThread, sendTyping } = useSocket({});
 
-  // Load threads
+  // Load threads on mount
   useEffect(() => {
     if (!projectId) return;
     const load = async () => {
@@ -44,6 +46,18 @@ export default function ProjectChatPage() {
     load();
   }, [projectId]);
 
+  // Poll thread list every 10 s — catches new threads from collaborators
+  useEffect(() => {
+    if (!projectId) return;
+    const interval = setInterval(async () => {
+      try {
+        const data = await messagesApi.getThreads(projectId);
+        setThreads(data.threads);
+      } catch { /* silent */ }
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [projectId]);
+
   // Load collaborators
   useEffect(() => {
     if (!projectId) return;
@@ -52,7 +66,7 @@ export default function ProjectChatPage() {
       .catch(() => {});
   }, [projectId]);
 
-  // Load messages when thread changes
+  // Load messages when thread changes and join WS room
   useEffect(() => {
     if (!activeThreadId) return;
     const load = async () => {
@@ -69,14 +83,39 @@ export default function ProjectChatPage() {
     };
     load();
     return () => { leaveThread(activeThreadId); };
+  }, [activeThreadId, joinThread, leaveThread]);
+
+  // Poll active thread every 3 s — reliable fallback for real-time messages
+  useEffect(() => {
+    if (!activeThreadId) return;
+    const interval = setInterval(async () => {
+      try {
+        const data = await messagesApi.getThread(activeThreadId);
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id));
+          const incoming = data.messages.filter((m) => !existingIds.has(m.id));
+          if (incoming.length === 0) return prev;
+          return [...prev, ...incoming].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+        });
+      } catch { /* silent */ }
+    }, 3_000);
+    return () => clearInterval(interval);
   }, [activeThreadId]);
 
-  // Real-time messages
+  // WebSocket: register message listener on the live socket instance
+  // Runs whenever `socket` changes (null → connected instance, or reconnect)
   useEffect(() => {
+    if (!socket) return;
     const handleNewMessage = (message: Message) => {
-      if (message.thread_id === activeThreadId) {
-        setMessages((prev) => [...prev, message]);
-      }
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === message.id)) return prev;
+        if (message.thread_id !== activeThreadId) return prev;
+        return [...prev, message].sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+      });
       setThreads((prev) =>
         prev.map((t) =>
           t.id === message.thread_id
@@ -85,9 +124,9 @@ export default function ProjectChatPage() {
         )
       );
     };
-    on('message.created', handleNewMessage);
-    return () => { off('message.created', handleNewMessage); };
-  }, [activeThreadId, on, off]);
+    socket.on('message.created', handleNewMessage);
+    return () => { socket.off('message.created', handleNewMessage); };
+  }, [socket, activeThreadId]);
 
   const handleSendMessage = async (content: string, mentionedUserIds: string[]) => {
     if (!activeThreadId) return;
@@ -116,7 +155,18 @@ export default function ProjectChatPage() {
   const activeThread = threads.find((t) => t.id === activeThreadId);
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] bg-neutral-50">
+    <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+      {/* Back navigation */}
+      <div className="bg-white border-b border-neutral-200 px-4 py-2 shrink-0">
+        <button
+          onClick={() => router.push(`/projects/${projectId}`)}
+          className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back to Project
+        </button>
+      </div>
+      <div className="flex flex-1 bg-neutral-50 overflow-hidden">
       {/* Thread list — left panel */}
       <div className="w-72 border-r border-neutral-200 bg-white shrink-0">
         <ThreadList
@@ -161,6 +211,7 @@ export default function ProjectChatPage() {
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

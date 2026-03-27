@@ -271,11 +271,11 @@ export default function ContractDetailPage() {
         {/* Header */}
         <div className="mb-6">
           <button
-            onClick={() => router.back()}
-            className="flex items-center gap-2 text-gray-500 hover:text-gray-800 mb-4 text-sm"
+            onClick={() => router.push(isStaff ? '/crm' : '/contracts')}
+            className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 mb-4 transition-colors"
           >
-            <ArrowLeft className="h-4 w-4" />
-            Back
+            <ArrowLeft className="h-3.5 w-3.5" />
+            {isStaff ? 'CRM' : 'Contracts'}
           </button>
 
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">

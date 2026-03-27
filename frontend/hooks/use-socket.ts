@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '@/lib/store/auth-store';
 
@@ -16,17 +16,16 @@ export function useSocket(options: UseSocketOptions = {}) {
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  // Buffer thread joins so they can be replayed after a reconnect
+  const joinedThreads = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!isAuthenticated) {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      socketRef.current?.disconnect();
+      socketRef.current = null;
       return;
     }
 
-    // Create socket connection — pass JWT as auth token for cross-origin support
     const token = typeof document !== 'undefined'
       ? document.cookie.match(/app_jwt=([^;]+)/)?.[1]
       : undefined;
@@ -41,6 +40,10 @@ export function useSocket(options: UseSocketOptions = {}) {
 
     socket.on('connect', () => {
       setIsConnected(true);
+      // Re-join any threads that were requested before/during reconnect
+      joinedThreads.current.forEach((threadId) => {
+        socket.emit('thread:join', { threadId });
+      });
       options.onConnect?.();
     });
 
@@ -50,7 +53,6 @@ export function useSocket(options: UseSocketOptions = {}) {
     });
 
     socket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error);
       options.onError?.(error as Error);
     });
 
@@ -60,25 +62,28 @@ export function useSocket(options: UseSocketOptions = {}) {
     };
   }, [isAuthenticated]);
 
-  const joinThread = (threadId: string) => {
+  const joinThread = useCallback((threadId: string) => {
+    joinedThreads.current.add(threadId);
     socketRef.current?.emit('thread:join', { threadId });
-  };
+  }, []);
 
-  const leaveThread = (threadId: string) => {
+  const leaveThread = useCallback((threadId: string) => {
+    joinedThreads.current.delete(threadId);
     socketRef.current?.emit('thread:leave', { threadId });
-  };
+  }, []);
 
-  const sendTyping = (threadId: string) => {
+  const sendTyping = useCallback((threadId: string) => {
     socketRef.current?.emit('message.typing', { threadId });
-  };
+  }, []);
 
-  const on = (event: string, handler: (...args: any[]) => void) => {
+  // Stable references — always operate on the current socket instance
+  const on = useCallback((event: string, handler: (...args: any[]) => void) => {
     socketRef.current?.on(event, handler);
-  };
+  }, []);
 
-  const off = (event: string, handler: (...args: any[]) => void) => {
+  const off = useCallback((event: string, handler: (...args: any[]) => void) => {
     socketRef.current?.off(event, handler);
-  };
+  }, []);
 
   return {
     socket: socketRef.current,

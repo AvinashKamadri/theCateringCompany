@@ -514,59 +514,106 @@ export default function CRMPage() {
 
         {/* ── PIPELINE — Kanban ── */}
         {tab === 'pipeline' && pipelineView === 'kanban' && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-start">
             {STAGES.map(([status, { label, color }]) => {
               const stageLeads = leads.filter((l) => l.status === status);
+              const isEmpty = stageLeads.length === 0;
               return (
-                <div key={status} className="bg-white rounded-xl border border-neutral-200 p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                      <h3 className="text-sm font-semibold text-black">{label}</h3>
-                    </div>
-                    <span className="text-xs text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-full">
-                      {stageLeads.length}
-                    </span>
-                  </div>
-                  <div className="space-y-2">
-                    {stageLeads.length === 0 && (
-                      <p className="text-xs text-neutral-300 text-center py-4">Empty</p>
-                    )}
-                    {stageLeads.map((lead) => (
-                      <Link
-                        key={lead.id}
-                        href={`/projects/${lead.id}`}
-                        className="block bg-neutral-50 border border-neutral-200 rounded-lg p-3 hover:border-black transition-colors group"
+                <div key={status} className="flex flex-col min-h-0">
+                  {/* Column header */}
+                  <div
+                    className="rounded-xl mb-3 px-4 py-3 border border-neutral-200 bg-white"
+                    style={{ borderTop: `3px solid ${color}` }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">{label}</p>
+                      <span
+                        className="text-sm font-bold tabular-nums"
+                        style={{ color: stageLeads.length > 0 ? color === '#e5e5e5' ? '#737373' : color : '#d4d4d4' }}
                       >
-                        <div className="flex items-start justify-between gap-1 mb-1.5">
-                          <h4 className="text-xs font-semibold text-black leading-tight line-clamp-2 group-hover:underline">
+                        {stageLeads.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Cards */}
+                  <div className="space-y-2.5">
+                    {isEmpty && (
+                      <div className="border-2 border-dashed border-neutral-200 rounded-xl py-8 flex flex-col items-center gap-1.5">
+                        <div className="h-6 w-6 rounded-full bg-neutral-100 flex items-center justify-center">
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color === '#e5e5e5' ? '#d4d4d4' : color }} />
+                        </div>
+                        <p className="text-xs text-neutral-300 font-medium">No projects</p>
+                      </div>
+                    )}
+                    {stageLeads.map((lead) => {
+                      const initials = (lead.client_name || lead.client_email || '?')
+                        .split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
+                      return (
+                        <Link
+                          key={lead.id}
+                          href={`/projects/${lead.id}`}
+                          className="block bg-white border border-neutral-200 rounded-xl p-3.5 hover:shadow-md hover:border-neutral-300 transition-all duration-150 group"
+                          style={{ borderLeft: `3px solid ${color}` }}
+                        >
+                          {/* Title */}
+                          <p className="text-xs font-semibold text-black leading-snug line-clamp-2 group-hover:text-neutral-700 mb-2">
                             {lead.title}
-                          </h4>
-                          <ExternalLink className="h-3 w-3 text-neutral-300 shrink-0 mt-0.5" />
-                        </div>
-                        <p className="text-xs text-neutral-500 truncate">
-                          {lead.client_name || lead.client_email}
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1">
-                          {lead.event_date && (
-                            <span className="flex items-center gap-0.5 text-xs text-neutral-400">
-                              <Calendar className="h-3 w-3" />
-                              {new Date(lead.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            </span>
+                          </p>
+
+                          {/* Client row */}
+                          <div className="flex items-center gap-2 mb-2.5">
+                            <div
+                              className="h-5 w-5 rounded-full flex items-center justify-center text-white shrink-0"
+                              style={{ backgroundColor: color === '#e5e5e5' ? '#a3a3a3' : color, fontSize: '8px', fontWeight: 700 }}
+                            >
+                              {initials}
+                            </div>
+                            <p className="text-xs text-neutral-500 truncate">
+                              {lead.client_name || lead.client_email}
+                            </p>
+                          </div>
+
+                          {/* Meta pills */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {lead.event_date && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-neutral-50 border border-neutral-200 rounded-md text-xs text-neutral-500">
+                                <Calendar className="h-2.5 w-2.5" />
+                                {new Date(lead.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              </span>
+                            )}
+                            {lead.guest_count != null && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-neutral-50 border border-neutral-200 rounded-md text-xs text-neutral-500">
+                                <Users className="h-2.5 w-2.5" />
+                                {lead.guest_count}
+                              </span>
+                            )}
+                            {lead.contract_count > 0 && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-neutral-50 border border-neutral-200 rounded-md text-xs text-neutral-500">
+                                <FileText className="h-2.5 w-2.5" />
+                                {lead.contract_count}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Footer */}
+                          {(lead.created_via_ai_intake || lead.paid_amount > 0) && (
+                            <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-neutral-100">
+                              {lead.created_via_ai_intake && (
+                                <span className="inline-flex items-center gap-1 text-xs text-neutral-400">
+                                  <Sparkles className="h-2.5 w-2.5" />AI
+                                </span>
+                              )}
+                              {lead.paid_amount > 0 && (
+                                <span className="text-xs font-semibold text-black ml-auto">
+                                  ${lead.paid_amount.toLocaleString()}
+                                </span>
+                              )}
+                            </div>
                           )}
-                          {lead.guest_count != null && (
-                            <span className="flex items-center gap-0.5 text-xs text-neutral-400">
-                              <Users className="h-3 w-3" />{lead.guest_count}
-                            </span>
-                          )}
-                        </div>
-                        {lead.created_via_ai_intake && (
-                          <span className="mt-1.5 inline-flex items-center gap-1 text-xs text-neutral-400">
-                            <Sparkles className="h-3 w-3" />AI
-                          </span>
-                        )}
-                      </Link>
-                    ))}
+                        </Link>
+                      );
+                    })}
                   </div>
                 </div>
               );

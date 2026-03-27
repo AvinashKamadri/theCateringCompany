@@ -414,9 +414,8 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
 
     # Check if user is trying to skip — main dishes are mandatory
     skip_patterns = r'\b(skip|pass|no|none|next|move on|forget|skip menu|no menu|skip dishes?)\b'
-    is_trying_to_skip = (
+    is_trying_to_skip = bool(
         _re.search(skip_patterns, user_msg, _re.IGNORECASE)
-        and not bare_numbers
     )
 
     # Guard: detect copy-paste (message contains bullet • or numbered list patterns)

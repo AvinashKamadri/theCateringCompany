@@ -570,3 +570,167 @@ After implementing fixes, verify:
 | `tools/fuzzy_match.py` | NEW — fuzzy matching utility |
 | `config/business_rules.py` | Add skip patterns, finalize keywords, attempt limits |
 | `orchestrator.py` | Initialize `node_attempts`, `total_turns` in state |
+
+---
+
+## Phase 3: Architecture Overhaul — Pydantic Structured Output Slot Filling
+
+> **Priority:** HIGH (eliminates ALL loop bugs, reduces LLM calls by 50%+, adds validation)
+> **Effort:** 3-5 days
+> **Risk:** LOW — changes extraction layer only, does NOT touch graph structure, node names, routing edges, or API contract with backend
+
+### Why This Change
+
+The current system uses **string-in/string-out LLM extraction** + **regex-based intent detection** (`is_affirmative`, `is_negative`, `is_done_confirming`). This is fundamentally fragile:
+
+- "yes this works" = affirmative or done? Regex can't tell.
+- "Coffee Bar" = menu item or description text? String matching fails.
+- Every ambiguous phrase needs a new regex pattern added manually.
+
+Production systems (Microsoft Copilot Studio, Rasa, Amazon Lex) solved this years ago with **structured output** — the LLM returns a validated JSON object, not a raw string.
+
+### Industry Research (March 2026)
+
+| Source | Key Insight |
+|---|---|
+| [Instructor Library](https://python.useinstructor.com/) | 3M+ monthly downloads. Pydantic-based structured extraction with auto-retries. Works with OpenAI directly. |
+| [LangGraph Structured Output](https://stuart.mchattie.net/posts/2026/01/31/structured-output-in-langgraph/) | Use `llm.with_structured_output(PydanticModel)` — one call extracts all slots + validates. |
+| [Microsoft Copilot Best Practices](https://learn.microsoft.com/en-us/microsoft-copilot-studio/guidance/slot-filling-best-practices) | Skip questions when info already extracted. Max retry counts. Disambiguation via clarifying questions. |
+| [Pydantic for LLMs Guide](https://pydantic.dev/articles/llm-intro) | Runtime validation ensures LLM outputs match expected schema. Auto type coercion. Clear error messages. |
+| [LangGraph Production Guide 2025](https://blogs.versalence.ai/production-ai-agents-langgraph-complete-guide-2025) | 57% of orgs have AI agents in production. Quality (not cost) is the primary barrier. |
+| [Zero-shot Slot Filling with LLMs](https://arxiv.org/html/2411.18980v1) | LLMs can extract slots zero-shot with structured output, no fine-tuning needed. |
+
+### Current vs Proposed
+
+| Aspect | Current | Proposed |
+|---|---|---|
+| **Extraction** | `llm_extract()` returns raw string | `llm.with_structured_output(SlotModel)` returns validated Pydantic object |
+| **Intent detection** | `is_affirmative()` / `is_negative()` / `is_done_confirming()` regex (100+ patterns) | `user_intent` field in structured output — LLM classifies intent natively |
+| **LLM calls per turn** | 2-3 (extract + respond, sometimes conflict check) | 1 (structured extraction includes intent + validation) |
+| **Validation** | None at extraction time | Pydantic validators (guest_count > 0, date in future, venue not vague) |
+| **Slot values** | Raw strings, inconsistent format | Typed fields (int for count, date for dates, enum for service type) |
+| **Menu matching** | LLM guesses item names → `_resolve_to_db_items()` string match | `rapidfuzz` first (fast, cheap) → LLM fallback only for ambiguous |
+| **Loop prevention** | Manual regex patterns per node | Global: LLM intent field + max attempts config + progressive defaults |
+| **Multi-slot** | One slot per node per turn | Extract ALL mentioned slots in one call, skip already-filled nodes |
+
+### Proposed Pydantic Models
+
+```python
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, Literal
+from datetime import date
+
+class UserIntent(BaseModel):
+    """Classify what the user is doing in their message."""
+    intent: Literal[
+        "answering_question",    # Providing requested info
+        "correcting_previous",   # Changing a previous answer
+        "done_confirming",       # "looks good", "that's all", "correct"
+        "wants_more",            # "yes", "sure", "add more"
+        "declining",             # "no", "skip", "none"
+        "off_topic",             # Unrelated to current question
+        "unclear",               # Can't determine intent
+    ]
+    confidence: float = Field(ge=0.0, le=1.0, description="How confident, 0-1")
+
+class VenueExtraction(BaseModel):
+    venue_name: Optional[str] = Field(None, description="Specific venue name")
+    venue_address: Optional[str] = Field(None, description="Full street address")
+    is_vague: bool = Field(description="True if venue is informal like 'my home', 'a school'")
+    needs_clarification: bool = Field(description="True if we need more specifics")
+
+class MenuSelection(BaseModel):
+    selected_items: list[str] = Field(description="Exact item names from the menu")
+    unmatched_items: list[str] = Field(default_factory=list, description="Items user mentioned not on menu")
+    wants_changes: bool = Field(False)
+
+class GuestCountExtraction(BaseModel):
+    count: Optional[int] = Field(None, ge=1, le=10000)
+    is_approximate: bool = Field(False, description="True if user said 'about' or 'around'")
+
+    @field_validator('count', mode='before')
+    @classmethod
+    def parse_count(cls, v):
+        if isinstance(v, str):
+            import re
+            nums = re.findall(r'\d+', v)
+            return int(nums[0]) if nums else None
+        return v
+
+class SlotExtraction(BaseModel):
+    """Master extraction model — extracts ALL available info from one message."""
+    intent: UserIntent
+    name: Optional[str] = None
+    event_type: Optional[Literal["Wedding", "Corporate", "Birthday", "Social", "Custom"]] = None
+    event_date: Optional[str] = None  # YYYY-MM-DD
+    venue: Optional[VenueExtraction] = None
+    guest_count: Optional[GuestCountExtraction] = None
+    service_type: Optional[Literal["Drop-off", "Full-Service Buffet", "Full-Service On-site"]] = None
+    service_style: Optional[Literal["cocktail hour", "reception", "both"]] = None
+    menu_selections: Optional[MenuSelection] = None
+```
+
+### How It Integrates (Without Breaking Backend)
+
+```
+BEFORE:
+  User msg → node → llm_extract(string) → regex intent check → llm_respond → save state
+
+AFTER:
+  User msg → node → llm.with_structured_output(SlotModel) → Pydantic validates → llm_respond → save state
+```
+
+**What stays the same:**
+- Graph structure (31 nodes, same edges)
+- Node names (same `NODE_MAP`)
+- `ConversationState` TypedDict (slots dict format unchanged)
+- API contract (`/chat` request/response)
+- DB schema (slots stored as JSON, same structure)
+- `orchestrator.py` flow
+
+**What changes:**
+- `helpers.py` — new `extract_structured()` replacing `llm_extract()` + intent helpers
+- Each node's extraction logic — uses Pydantic model instead of raw string
+- `is_affirmative/is_negative/is_done_confirming` — replaced by `intent.intent` field
+- `requirements.txt` — add `instructor>=1.7.0`
+
+### Backend/ML-Agent API Contract (DO NOT BREAK)
+
+The backend calls ml-agent via `/chat` endpoint. The contract:
+
+```
+POST /chat
+Request:  { message, thread_id, author_id?, project_id?, user_id? }
+Response: { content, current_node, slots_filled, total_slots, is_complete,
+            ai_conversation_state_id, project_id, thread_id, slots, contract_data }
+```
+
+The slots dict format stored in DB:
+```json
+{
+  "name": { "value": "John Smith", "filled": true, "modification_history": [] },
+  "event_type": { "value": "Wedding", "filled": true, "modification_history": [] },
+  ...
+}
+```
+
+**CRITICAL:** The structured output refactor changes HOW slots are extracted, not HOW they're stored. The `fill_slot()` function and slot dict format remain identical. Backend never sees the extraction layer.
+
+### Dependencies to Add
+
+```
+# requirements.txt
+instructor>=1.7.0      # Structured LLM outputs with Pydantic
+rapidfuzz>=3.6.0       # Fuzzy matching for menu items
+```
+
+### Implementation Order
+
+1. Add `instructor` to requirements, create `tools/structured_extraction.py` with Pydantic models
+2. Add `extract_structured()` to `helpers.py` that wraps `instructor` + OpenAI
+3. Refactor `_extract_and_respond()` to use structured extraction + intent field
+4. Refactor menu nodes to use `MenuSelection` model + fuzzy matching
+5. Refactor venue node to use `VenueExtraction` model (replaces regex vague detection)
+6. Remove `is_affirmative()`, `is_negative()`, `is_done_confirming()` — replaced by intent
+7. Test full flow end-to-end
+8. Remove dead regex patterns from `helpers.py`

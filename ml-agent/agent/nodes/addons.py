@@ -19,10 +19,24 @@ def _slots_context(state):
 async def ask_utensils_node(state: ConversationState) -> ConversationState:
     """Handle yes/no about utensils."""
     import re as _re
+    from agent.nodes.helpers import is_done_confirming
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
     mentions_utensils = bool(_re.search(r'\butensils?\b', user_msg, _re.IGNORECASE))
+    # Check done/negative first to avoid "yes this is good" being treated as wanting utensils
+    if is_done_confirming(user_msg) and not mentions_utensils:
+        fill_slot(state["slots"], "utensils", "no")
+        context = f"Customer doesn't need utensils.\nSlots: {_slots_context(state)}"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer doesn't need utensils. Acknowledge. "
+            "Ask: What type of service do you prefer? "
+            "Options: Drop-off, Full-Service Buffet, or Full-Service On-site.",
+            context
+        )
+        state["current_node"] = "select_service_type"
+        state["messages"] = add_ai_message(state, response)
+        return state
     if is_affirmative(user_msg) or (mentions_utensils and not is_negative(user_msg)):
         context = f"Customer wants utensils. Event: {_slots_context(state)}"
         response = await llm_respond(

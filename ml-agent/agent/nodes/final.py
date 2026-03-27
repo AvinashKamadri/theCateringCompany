@@ -91,8 +91,12 @@ async def collect_special_requests_node(state: ConversationState) -> Conversatio
             "to dietary concerns?",
             context
         )
-        # Stay here for more requests — but user can exit via done/negative above
-        state["current_node"] = "collect_special_requests"
+        # Ask if they have more — but limit to 5 rounds max to prevent loops
+        request_count = len(combined.split(";"))
+        if request_count >= 5:
+            state["current_node"] = "collect_dietary"
+        else:
+            state["current_node"] = "collect_special_requests"
 
     state["messages"] = add_ai_message(state, response)
     return state
@@ -154,18 +158,32 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
         )
 
         if "YES" in conflict_check.upper():
-            response = await llm_respond(
-                f"{SYSTEM_PROMPT}\n\nThe customer wants: {user_msg}. "
-                f"Their menu includes: {dishes}. "
-                "There may be a conflict (e.g., pork and halal). "
-                "POLITELY point out the potential conflict and ASK the customer "
-                "how they'd like to handle it — keep the dish as-is (as an exception "
-                "for guests who prefer it), or replace it? Do NOT decide for them. "
-                "Let the customer choose.",
-                f"Context: {_slots_context(state)}",
-            )
-            # Stay on collect_dietary so their answer updates the dietary slot
-            state["current_node"] = "collect_dietary"
+            # Track how many times we've asked about conflicts to prevent loops
+            dietary_attempts = state.get("_dietary_conflict_attempts", 0)
+            if dietary_attempts >= 2:
+                # Auto-accept after 2 attempts — note the conflict and move on
+                updated_note = f"{dietary_detail} (menu conflicts noted, customer was informed)"
+                fill_slot(state["slots"], "dietary_concerns", updated_note)
+                response = await llm_respond(
+                    f"{SYSTEM_PROMPT}\n\nDietary concern noted with menu conflicts acknowledged. "
+                    "Move on. Ask: Is there anything else you need for your event?",
+                    f"Context: {_slots_context(state)}",
+                )
+                state["current_node"] = "ask_anything_else"
+            else:
+                state["_dietary_conflict_attempts"] = dietary_attempts + 1
+                response = await llm_respond(
+                    f"{SYSTEM_PROMPT}\n\nThe customer wants: {user_msg}. "
+                    f"Their menu includes: {dishes}. "
+                    "There may be a conflict (e.g., pork and halal). "
+                    "POLITELY point out the potential conflict and ASK the customer "
+                    "how they'd like to handle it — keep the dish as-is (as an exception "
+                    "for guests who prefer it), or replace it? Do NOT decide for them. "
+                    "Let the customer choose.",
+                    f"Context: {_slots_context(state)}",
+                )
+                # Stay on collect_dietary so their answer updates the dietary slot
+                state["current_node"] = "collect_dietary"
         else:
             response = await llm_respond(
                 f"{SYSTEM_PROMPT}\n\nDietary concern noted: {dietary_detail}. "

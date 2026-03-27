@@ -84,8 +84,9 @@ _ADD_TO_PREV_PATTERN = re.compile(
 )
 
 # Remove/delete intent on any previously-collected item → always route to check_modifications
+# Note: "drop" alone is excluded because "drop off" / "drop-off" is a valid service type selection
 _REMOVE_INTENT_PATTERN = re.compile(
-    r'\b(remove|delete|take out|drop|i (added|selected|chose|picked).+by mistake|by mistake.+(remove|delete|take out))\b',
+    r'\b(remove|delete|take out|drop\s+(?!off)(?!-off)\w+|i (added|selected|chose|picked).+by mistake|by mistake.+(remove|delete|take out))\b',
     re.IGNORECASE,
 )
 

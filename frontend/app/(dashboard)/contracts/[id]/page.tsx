@@ -379,146 +379,154 @@ export default function ContractDetailPage() {
                 </p>
                 {/* Pricing Editor */}
                 <div className="mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-semibold text-yellow-900 flex items-center gap-1">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-semibold text-yellow-900 flex items-center gap-1.5">
                       <DollarSign className="h-3.5 w-3.5" /> Pricing
                     </p>
                     <button
                       onClick={handleAutoCalculate}
                       disabled={calculatingPricing}
-                      className="flex items-center gap-1.5 px-2.5 py-1 bg-yellow-900 text-yellow-50 rounded-md hover:bg-yellow-950 disabled:opacity-50 text-xs font-medium"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-yellow-900 text-yellow-50 rounded-md hover:bg-yellow-950 disabled:opacity-50 text-xs font-medium"
                     >
                       {calculatingPricing
                         ? <Loader2 className="h-3 w-3 animate-spin" />
                         : <Calculator className="h-3 w-3" />}
-                      {calculatingPricing ? 'Calculating...' : 'Auto-Calculate'}
+                      {calculatingPricing ? 'Calculating…' : 'Auto-Calculate'}
                     </button>
                   </div>
 
                   {/* Tax / Gratuity rate inputs */}
-                  <div className="flex gap-3 mb-2">
-                    <div className="flex-1">
-                      <label className="block text-xs text-yellow-800 font-medium mb-1">Tax %</label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          min={0}
-                          max={50}
-                          step={0.1}
-                          value={taxRate}
-                          onChange={(e) => setTaxRate(Number(e.target.value) || 0)}
-                          className="w-full border border-yellow-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-yellow-400 pr-6"
-                        />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-yellow-700">%</span>
-                      </div>
-                    </div>
-                    <div className="flex-1">
-                      <label className="block text-xs text-yellow-800 font-medium mb-1">Gratuity %</label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          min={0}
-                          max={50}
-                          step={0.5}
-                          value={gratuityRate}
-                          onChange={(e) => setGratuityRate(Number(e.target.value) || 0)}
-                          className="w-full border border-yellow-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-yellow-400 pr-6"
-                        />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-yellow-700">%</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Pricing breakdown — shown whenever line items exist */}
-                  {lineItems.length > 0 && (
-                    <div className="bg-white border border-yellow-200 rounded-lg p-3 mb-2 text-xs text-yellow-900 space-y-1">
-                      {pricingBreakdown?.packageName && (
-                        <div className="flex justify-between">
-                          <span className="text-yellow-700">Package</span>
-                          <span>{pricingBreakdown.packageName} (${pricingBreakdown.packagePerPersonRate}/pp)</span>
+                  <div className="flex gap-3 mb-3">
+                    {[
+                      { label: 'Tax %', value: taxRate, setter: setTaxRate, step: 0.1 },
+                      { label: 'Gratuity %', value: gratuityRate, setter: setGratuityRate, step: 0.5 },
+                    ].map(({ label, value, setter, step }) => (
+                      <div key={label} className="flex-1">
+                        <label className="block text-xs text-yellow-800 font-medium mb-1">{label}</label>
+                        <div className="relative">
+                          <input
+                            type="number" min={0} max={50} step={step} value={value}
+                            onChange={(e) => setter(Number(e.target.value) || 0)}
+                            className="w-full border border-yellow-300 rounded-md px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-yellow-500 pr-7"
+                          />
+                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-yellow-600">%</span>
                         </div>
-                      )}
-                      <div className="flex justify-between">
-                        <span className="text-yellow-700">Subtotal</span>
-                        <span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-yellow-700">Tax ({taxRate}%)</span>
-                        <span>${pricingTax.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-yellow-700">Gratuity ({gratuityRate}%)</span>
-                        <span>${pricingGratuity.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between font-semibold border-t border-yellow-200 pt-1 mt-1">
-                        <span>Grand Total</span>
-                        <span>${pricingGrandTotal.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between text-yellow-700">
-                        <span>50% Deposit Due</span>
-                        <span>${pricingDeposit.toLocaleString()}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    {lineItems.map((item, idx) => (
-                      <div key={idx} className="flex gap-2 items-center">
-                        <input
-                          type="text"
-                          placeholder="Description"
-                          value={item.description}
-                          onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
-                          className="flex-1 border border-yellow-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-yellow-400"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Qty"
-                          min={1}
-                          value={item.quantity}
-                          onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, quantity: Number(e.target.value) || 1 } : li))}
-                          className="w-14 border border-yellow-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-yellow-400"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Price"
-                          min={0}
-                          value={item.unitPrice}
-                          onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, unitPrice: Number(e.target.value) || 0 } : li))}
-                          className="w-20 border border-yellow-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-yellow-400"
-                        />
-                        <button
-                          onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))}
-                          className="text-red-400 hover:text-red-600"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
                       </div>
                     ))}
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setLineItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }])}
-                        className="flex items-center gap-1 text-xs text-yellow-800 hover:text-yellow-900 font-medium"
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Add item
-                      </button>
+                  </div>
+
+                  {/* Line items table */}
+                  <div className="border border-yellow-200 rounded-xl overflow-hidden bg-white mb-2">
+                    <table className="w-full text-xs">
+                      <thead className="bg-yellow-50 border-b border-yellow-200">
+                        <tr>
+                          <th className="px-3 py-2.5 text-left font-semibold text-yellow-900">Description</th>
+                          <th className="px-3 py-2.5 text-center font-semibold text-yellow-900 w-14">Qty</th>
+                          <th className="px-3 py-2.5 text-right font-semibold text-yellow-900 w-24">Unit $</th>
+                          <th className="px-3 py-2.5 text-right font-semibold text-yellow-900 w-24">Total</th>
+                          <th className="w-8" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-yellow-50">
+                        {lineItems.map((item, idx) => (
+                          <tr key={idx} className="group">
+                            <td className="px-2 py-2">
+                              <input
+                                type="text"
+                                value={item.description}
+                                placeholder="Item description"
+                                onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
+                                className="w-full border-0 bg-transparent focus:bg-yellow-50 rounded px-1 py-0.5 focus:outline-none text-yellow-900"
+                              />
+                            </td>
+                            <td className="px-2 py-2">
+                              <input
+                                type="number" min={1} value={item.quantity}
+                                onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, quantity: Number(e.target.value) || 1 } : li))}
+                                className="w-full border-0 bg-transparent focus:bg-yellow-50 rounded px-1 py-0.5 focus:outline-none text-center text-yellow-900"
+                              />
+                            </td>
+                            <td className="px-2 py-2">
+                              <input
+                                type="number" min={0} value={item.unitPrice}
+                                onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, unitPrice: Number(e.target.value) || 0 } : li))}
+                                className="w-full border-0 bg-transparent focus:bg-yellow-50 rounded px-1 py-0.5 focus:outline-none text-right text-yellow-900"
+                              />
+                            </td>
+                            <td className="px-3 py-2 text-right font-semibold text-yellow-900 whitespace-nowrap">
+                              ${(item.quantity * item.unitPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td className="px-2 py-2">
+                              <button
+                                onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))}
+                                className="text-yellow-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {lineItems.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-3 py-6 text-center text-yellow-400/60 text-xs">
+                              No items yet — click Auto-Calculate or add manually
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+
+                    {/* Table footer: add item + totals */}
+                    <div className="border-t border-yellow-200 bg-yellow-50/60">
+                      <div className="px-3 py-2.5">
+                        <button
+                          onClick={() => setLineItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }])}
+                          className="flex items-center gap-1.5 text-xs text-yellow-700 hover:text-yellow-900 font-medium"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add line item
+                        </button>
+                      </div>
                       {lineItems.length > 0 && (
-                        <span className="ml-auto text-xs font-semibold text-yellow-900">
-                          Subtotal: ${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
+                        <div className="border-t border-yellow-200 px-3 py-3 space-y-1.5">
+                          {pricingBreakdown?.packageName && (
+                            <div className="flex justify-between text-xs text-yellow-700 pb-1.5 mb-0.5">
+                              <span>Package</span>
+                              <span>{pricingBreakdown.packageName} (${pricingBreakdown.packagePerPersonRate}/pp)</span>
+                            </div>
+                          )}
+                          {[
+                            { label: 'Subtotal', value: pricingTotal },
+                            { label: `Tax (${taxRate}%)`, value: pricingTax },
+                            { label: `Gratuity (${gratuityRate}%)`, value: pricingGratuity },
+                          ].map(({ label, value }) => (
+                            <div key={label} className="flex justify-between text-xs text-yellow-800">
+                              <span>{label}</span>
+                              <span>${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between text-sm font-bold text-yellow-950 border-t border-yellow-300 pt-2 mt-1">
+                            <span>Grand Total</span>
+                            <span>${pricingGrandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-yellow-700">
+                            <span>50% Deposit Due</span>
+                            <span>${pricingDeposit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                        </div>
                       )}
                     </div>
-                    {lineItems.length > 0 && (
-                      <button
-                        onClick={handleSavePricing}
-                        disabled={savingPricing}
-                        className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-yellow-700 text-white rounded-lg hover:bg-yellow-800 disabled:opacity-50 text-xs font-medium"
-                      >
-                        {savingPricing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DollarSign className="h-3.5 w-3.5" />}
-                        {savingPricing ? 'Saving...' : 'Save Pricing'}
-                      </button>
-                    )}
                   </div>
+
+                  {lineItems.length > 0 && (
+                    <button
+                      onClick={handleSavePricing}
+                      disabled={savingPricing}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-yellow-800 text-white rounded-lg hover:bg-yellow-900 disabled:opacity-50 text-xs font-semibold"
+                    >
+                      {savingPricing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DollarSign className="h-3.5 w-3.5" />}
+                      {savingPricing ? 'Saving…' : 'Save Pricing'}
+                    </button>
+                  )}
                 </div>
 
                 {/* Preview PDF */}

@@ -54,9 +54,11 @@ export default function ContractsPage() {
 
   useEffect(() => {
     if (!isAuthenticated) { router.push('/signin'); return; }
+    // Staff manage contracts from the CRM dashboard
+    if (isStaff) { router.replace('/crm'); return; }
 
     const controller = new AbortController();
-    const endpoint = isStaff ? '/staff/contracts' : '/contracts';
+    const endpoint = '/contracts';
     apiClient.get(endpoint, { signal: controller.signal })
       .then((data: any) => setContracts(data))
       .catch(() => { if (!controller.signal.aborted) toast.error('Failed to load contracts'); })

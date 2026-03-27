@@ -192,7 +192,63 @@ async def wedding_message_node(state: ConversationState) -> ConversationState:
 
 
 async def collect_venue_node(state: ConversationState) -> ConversationState:
-    return await _extract_and_respond(state, "venue", "collect_guest_count", "collect_venue")
+    """Collect venue with fallback: short non-question answers are used as-is."""
+    from prompts.system_prompts import EXTRACTION_PROMPTS
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+    t = user_msg.strip().lower()
+
+    # Inline mapping for common informal venues
+    _INFORMAL = {
+        "home": "Customer's Home", "my home": "Customer's Home",
+        "my house": "Customer's Home", "my place": "Customer's Home",
+        "my gome": "Customer's Home", "my hme": "Customer's Home",
+        "my backyard": "Customer's Backyard", "backyard": "Customer's Backyard",
+        "my garden": "Customer's Garden", "my office": "Customer's Office",
+        "my apartment": "Customer's Apartment", "my flat": "Customer's Apartment",
+    }
+
+    extracted = _INFORMAL.get(t)
+
+    # If not in inline map, try LLM extraction
+    if not extracted:
+        extracted = (await llm_extract(EXTRACTION_PROMPTS["venue"], user_msg)).strip()
+
+    # Final fallback: if still NONE but message is short (1-5 words) and not a question,
+    # treat the message itself as the venue
+    if not extracted or extracted.upper() == "NONE":
+        words = user_msg.strip().split()
+        if 1 <= len(words) <= 5 and not user_msg.strip().endswith("?"):
+            extracted = user_msg.strip().title()
+
+    slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+
+    if extracted and extracted.upper() != "NONE":
+        fill_slot(state["slots"], "venue", extracted)
+        state["current_node"] = "collect_guest_count"
+        context = (
+            f"Customer said: {user_msg}\n"
+            f"Venue set to: {extracted}\nSlots: {slots_summary}"
+        )
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_venue']}",
+            context,
+        )
+    else:
+        state["current_node"] = "collect_venue"
+        context = (
+            f"Customer said: {user_msg}\n"
+            f"Could not extract a venue. Slots: {slots_summary}"
+        )
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nThe customer's response was unclear for the 'venue' field. "
+            "Politely ask them to share the venue name or address. "
+            "Give an example like 'my backyard', 'The Grand Ballroom', or '123 Main St'.",
+            context,
+        )
+
+    state["messages"] = add_ai_message(state, response)
+    return state
 
 
 async def collect_guest_count_node(state: ConversationState) -> ConversationState:
@@ -203,26 +259,38 @@ async def collect_guest_count_node(state: ConversationState) -> ConversationStat
     extracted = await llm_extract(EXTRACTION_PROMPTS["guest_count"], user_msg)
     extracted = extracted.strip()
 
+    guest_extracted = False
     if extracted and extracted.upper() != "NONE":
         try:
             extracted = int("".join(c for c in extracted if c.isdigit()))
         except ValueError:
             pass
         fill_slot(state["slots"], "guest_count", extracted)
+        guest_extracted = True
 
     event_type = get_slot_value(state["slots"], "event_type")
     is_wedding = event_type and "wedding" in str(event_type).lower()
-    next_node = "select_service_style" if is_wedding else "ask_appetizers"
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
     context = (
         f"Customer said: {user_msg}\nExtracted guest_count: {extracted}\n"
         f"Event type: {event_type}\nCURRENT slot values: {slots_summary}"
     )
-    response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_guest_count']}",
-        context,
-    )
+
+    if guest_extracted:
+        next_node = "select_service_style" if is_wedding else "ask_appetizers"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_guest_count']}",
+            context,
+        )
+    else:
+        # No number found — stay on this node and re-ask
+        next_node = "collect_guest_count"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nThe customer's response did not include a number of guests. "
+            "Politely re-ask: Approximately how many guests are you expecting?",
+            context,
+        )
 
     state["current_node"] = next_node
     state["messages"] = add_ai_message(state, response)
@@ -247,7 +315,7 @@ async def present_menu_node(state: ConversationState) -> ConversationState:
     response = await llm_respond(
         f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['present_menu']}\n\n"
         "CRITICAL INSTRUCTION: The database menu is listed above in the context. "
-        "You MUST present ONLY those exact items — numbered exactly as they appear. "
+        "You MUST present ONLY those exact items as a bullet list (use •, NOT numbers). "
         "DO NOT add, rename, substitute, or invent any item not in that list. "
         "DO NOT show appetizers — those have already been selected. "
         "Copy the item names verbatim from the database list.",

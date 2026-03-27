@@ -469,7 +469,7 @@ async def ask_appetizers_node(state: ConversationState) -> ConversationState:
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n"
             "The customer said YES to appetizers. Present the appetizer items from the "
-            "database below as a numbered list. Tell them to select as many as they'd like. "
+            "database below as a bullet list (use •, NOT numbers). Tell them to select as many as they'd like. "
             "Do NOT ask again whether they want appetizers — they already said yes. "
             "Do NOT make up items — use ONLY the exact items listed below.",
             appetizer_context

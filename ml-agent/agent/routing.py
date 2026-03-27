@@ -46,10 +46,14 @@ _NODE_COLLECTS: dict[str, str | None] = {
 # Words/phrases that clearly signal the user wants to correct a PREVIOUS answer.
 _CORRECTION_SIGNALS = re.compile(
     r'\b(actually|wait|i meant|let me change|can you (change|update|fix)|'
-    r'change (my|the)|update (my|the)|i want to (change|update)|'
+    r'change (my|the|guest|event|venue|date|name|service|utensil|rental|dessert)|'
+    r'update (my|the|guest|event|venue|date|name|service)|'
+    r'i want to (change|update)|'
     r'correction|oh wait|no wait|sorry,?\s+i|i made a mistake|'
     r'i forgot to|i need to (change|update|fix)|'
-    r'make that|scratch that)\b',
+    r'make that|scratch that|'
+    r'set (my|the|guest|event|venue|date)|'
+    r'the (guest count|venue|date|name|service type|event type) (is|should be|was|needs to be))\b',
     re.IGNORECASE,
 )
 
@@ -83,28 +87,37 @@ _REMOVE_INTENT_PATTERN = re.compile(
 def _detect_off_topic_correction(msg: str, current_slot: str | None, filled_slots: set[str]) -> bool:
     """Return True if the message looks like a correction targeting a slot OTHER than the current one.
 
-    Criteria (either A or B):
+    Criteria (A, B, or C):
     A) Contains a correction signal + a slot keyword for a different slot
     B) Contains a correction signal + an explicit "add to previous" phrase
        (e.g. "wait let me also add X to the appetizers" — even if slot keyword is missing)
+    C) Starts with "no" + references a different slot (e.g. "no the venue is my home")
+       — user is rejecting the current question and redirecting to a different slot
     """
-    if not _CORRECTION_SIGNALS.search(msg):
-        return False
-
     msg_lower = msg.lower()
 
     # B) "wait/actually" + "also add / let me add / add X to the" — route to check_modifications
-    #    so it can figure out which slot the item belongs to
-    if _ADD_TO_PREV_PATTERN.search(msg_lower):
+    if _CORRECTION_SIGNALS.search(msg) and _ADD_TO_PREV_PATTERN.search(msg_lower):
         return True
 
     # A) Correction signal + explicit slot keyword for a different slot
-    for slot, patterns in _SLOT_KEYWORDS.items():
-        if slot == current_slot:
-            continue  # Talking about the current slot is normal, not an off-topic correction
-        for pattern in patterns:
-            if re.search(pattern, msg_lower):
-                return True
+    if _CORRECTION_SIGNALS.search(msg):
+        for slot, patterns in _SLOT_KEYWORDS.items():
+            if slot == current_slot:
+                continue
+            for pattern in patterns:
+                if re.search(pattern, msg_lower):
+                    return True
+
+    # C) "no [the/my/...] <slot-keyword>" — user correcting/redirecting mid-flow
+    if re.match(r'^no[\s,]', msg_lower):
+        for slot, patterns in _SLOT_KEYWORDS.items():
+            if slot == current_slot:
+                continue
+            for pattern in patterns:
+                if re.search(pattern, msg_lower):
+                    return True
+
     return False
 
 

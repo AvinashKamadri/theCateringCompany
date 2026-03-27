@@ -138,6 +138,12 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
   const lastSlotsFilled = useRef(0);
+  const threadIdRef = useRef<string | undefined>(undefined);
+  const isLoadingRef = useRef(false);
+
+  // Keep refs in sync with state for stable polling closure
+  useEffect(() => { threadIdRef.current = state.threadId; }, [state.threadId]);
+  useEffect(() => { isLoadingRef.current = state.isLoading; }, [state.isLoading]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -155,14 +161,13 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
     }
   }, []);
 
-  // Poll for messages from other participants (collaborators) every 4 seconds
+  // Poll for messages from other participants (collaborators) every 4 seconds.
+  // Uses refs so the interval is stable and never resets due to loading state changes.
   useEffect(() => {
-    if (!state.threadId) return;
     const interval = setInterval(async () => {
-      // Skip while locally processing — avoids overwriting optimistic state
-      if (state.isLoading) return;
+      if (!threadIdRef.current || isLoadingRef.current) return;
       try {
-        const conv = await chatAiApi.getConversation(state.threadId!);
+        const conv = await chatAiApi.getConversation(threadIdRef.current);
         const serverMessages: ChatMessage[] = (conv.messages ?? []).map((m: any) => ({
           role: m.sender_type === 'user' ? 'user' : 'ai',
           content: m.content,
@@ -171,7 +176,7 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
         }));
         setState((prev) => {
           if (prev.isLoading) return prev;
-          // Only update when server has more messages than our local state
+          // Sync whenever server has more messages than local state
           if (serverMessages.length <= prev.messages.length) return prev;
           return {
             ...prev,
@@ -183,7 +188,7 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
       } catch { /* silent — don't disrupt the user */ }
     }, 4_000);
     return () => clearInterval(interval);
-  }, [state.threadId, state.isLoading]);
+  }, []);
 
   // Listen for help requests from sidebar
   useEffect(() => {
@@ -356,9 +361,13 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
               className={`flex ${alignRight ? 'justify-end' : 'justify-start'}`}
             >
               <div className="flex flex-col max-w-[80%]">
-                {/* Sender label for collaborator messages */}
-                {isCollaboratorMsg && (
-                  <span className="text-xs text-neutral-400 mb-1 ml-1">Collaborator</span>
+                {/* Sender label — "You" on right, collaborator id on left */}
+                {msg.role === 'user' && (
+                  <span className={`text-[11px] font-normal text-neutral-400 mb-0.5 ${alignRight ? 'text-right mr-1' : 'ml-1'}`}>
+                    {isCollaboratorMsg
+                      ? (msg.authorId ? `user:${msg.authorId.slice(0, 8)}` : 'Collaborator')
+                      : 'You'}
+                  </span>
                 )}
                 <div
                   className={`rounded-2xl px-4 py-3 ${

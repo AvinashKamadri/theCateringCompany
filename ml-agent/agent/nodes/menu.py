@@ -419,6 +419,24 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
         and not bare_numbers
     )
 
+    # Guard: detect copy-paste (message contains bullet • or numbered list patterns)
+    # If the user pasted the whole menu back, reject it and ask them to type their choices
+    is_copy_paste = bool(
+        _re.search(r'•\s*\w', user_msg) or
+        _re.search(r'\d+\.\s+\w.+\$\d+', user_msg)  # "1. Item Name ($X.XX)"
+    )
+    if is_copy_paste:
+        menu_context = await get_main_dishes_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer appears to have copy-pasted the menu list. "
+            "Politely ask them to type ONLY the names of the 3 to 5 dishes they want, "
+            "separated by commas. Example: 'Southern Comfort, Marsala Menu, Burger Bar'.",
+            menu_context
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
+
     # Resolve ONLY against main-dish categories (prevents appetizer items sneaking in)
     matched_items, resolved_text = await _resolve_to_db_items(extraction, main_dishes_menu)
 
@@ -449,7 +467,9 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
     context = (f"Customer selected dishes: {resolved_text}\n"
                f"Slots: {_slots_context(state)}")
     response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_dishes']}", context
+        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_dishes']}\n\n"
+        "FORMATTING: Present selections as a bullet list (use •). Do NOT use numbered lists.",
+        context
     )
     state["current_node"] = "ask_menu_changes"
 
@@ -542,6 +562,23 @@ async def select_appetizers_node(state: ConversationState) -> ConversationState:
 
     appetizer_names_str = "\n".join(name_lines)
 
+    # Guard: detect copy-paste (message contains bullet • or numbered list format)
+    is_copy_paste = bool(
+        _re.search(r'•\s*\w', user_msg) or
+        _re.search(r'\d+\.\s+\w.+\$\d+', user_msg)
+    )
+    if is_copy_paste:
+        appetizer_context = await get_appetizer_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer appears to have copy-pasted the menu list. "
+            "Politely ask them to type ONLY the names of the appetizers they want, "
+            "separated by commas. Example: 'Chicken Tikka Skewers, Deviled Egg, Bruschetta'.",
+            appetizer_context
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
+
     extraction = await llm_respond(
         "You are a menu selection parser. Extract ONLY appetizer selections from this message.\n"
         "Selections must be by item name only — do NOT accept numbers as selections.\n"
@@ -596,8 +633,8 @@ async def select_appetizers_node(state: ConversationState) -> ConversationState:
     response = await llm_respond(
         f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_appetizers']}\n\n"
         f"{NODE_PROMPTS['present_menu']}\n\n"
-        "First confirm the appetizer selections enthusiastically (list them). "
-        "Then immediately present the main menu from the database context above. "
+        "First confirm the appetizer selections enthusiastically as a bullet list (use •, NOT numbers). "
+        "Then immediately present the main menu from the database context above as a bullet list (use •, NOT numbers). "
         "CRITICAL: Use ONLY the exact items listed in the database context for the main menu. "
         "DO NOT invent, rename, or add any item not in that list.",
         context

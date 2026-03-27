@@ -47,7 +47,7 @@ def _format_menu_for_prompt(
     exclude_categories: list[str] | None = None,
     highlight_tags: list[str] | None = None,
 ) -> str:
-    """Format DB menu items into a numbered list for LLM context.
+    """Format DB menu items as a named list (no numbers) for LLM context.
 
     Args:
         highlight_tags: If provided, items with matching tags get a star marker
@@ -56,7 +56,6 @@ def _format_menu_for_prompt(
     exclude = {c.lower() for c in (exclude_categories or [])}
     hl = {t.lower() for t in (highlight_tags or [])}
     lines = []
-    item_num = 1
     for category, items in menu_by_category.items():
         if category.lower() in exclude:
             continue
@@ -65,22 +64,20 @@ def _format_menu_for_prompt(
             price_str = f" (${item['unit_price']:.2f}/{item['price_type']})" if item.get('unit_price') else ""
             desc_str = f" -- {item['description']}" if item.get('description') else ""
             allergen_str = f" [Allergens: {', '.join(item['allergens'])}]" if item.get('allergens') else ""
-            # Tag-based highlights
             item_tags = {t.lower() for t in (item.get('tags') or [])}
             star = " *" if hl and hl & item_tags else ""
             tag_note = f" [{', '.join(sorted(hl & item_tags))}]" if hl and hl & item_tags else ""
-            lines.append(f"  {item_num}. {item['name']}{price_str}{desc_str}{allergen_str}{star}{tag_note}")
-            item_num += 1
+            lines.append(f"  • {item['name']}{price_str}{desc_str}{allergen_str}{star}{tag_note}")
     return "\n".join(lines) if lines else "No menu items available."
 
 
 def _format_items_list(items: list[dict]) -> str:
-    """Format a flat list of items into a numbered list."""
+    """Format a flat list of items as a named list (no numbers)."""
     lines = []
-    for i, item in enumerate(items, 1):
+    for item in items:
         price_str = f" (${item['unit_price']:.2f})" if item.get('unit_price') else ""
         desc_str = f" -- {item['description']}" if item.get('description') else ""
-        lines.append(f"  {i}. {item['name']}{price_str}{desc_str}")
+        lines.append(f"  • {item['name']}{price_str}{desc_str}")
     return "\n".join(lines) if lines else "No items available."
 
 
@@ -334,59 +331,80 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
     user_msg = get_last_human_message(state["messages"])
     menu = await load_menu_by_category()
 
-    # Build the same numbered list the user saw (excluding appetizers/desserts)
+    # Build name list (no numbers — selections must be by name only)
     exclude_cats = set()
     for cat_name in menu.keys():
         if _is_non_dish_category(cat_name) or _is_appetizer_category(cat_name):
             exclude_cats.add(cat_name.lower())
 
-    number_to_name: dict[str, str] = {}
-    numbered_lines: list[str] = []
-    item_num = 1
+    all_item_names: list[str] = []
+    name_lines: list[str] = []
     for cat_name, items in menu.items():
         if cat_name.lower() in exclude_cats:
             continue
-        numbered_lines.append(f"\n{cat_name}")
+        name_lines.append(f"\n{cat_name}")
         for item in items:
             price_str = f" (${item['unit_price']:.2f}/pp)" if item.get("unit_price") else ""
-            numbered_lines.append(f"  {item_num}. {item['name']}{price_str}")
-            number_to_name[str(item_num)] = item["name"]
-            item_num += 1
+            name_lines.append(f"  • {item['name']}{price_str}")
+            all_item_names.append(item["name"])
 
-    numbered_str = "\n".join(numbered_lines)
+    numbered_str = "\n".join(name_lines)
+
+    # Guard: reject non-food messages (corrections, slot updates) before processing
+    _NON_FOOD_SIGNALS = _re.compile(
+        r'\b(change|update|guest\s+count|guest count|venue|address|event date|service type|'
+        r'actually|wait|correction|i meant|no the|no my)\b',
+        _re.IGNORECASE,
+    )
+    if _NON_FOOD_SIGNALS.search(user_msg):
+        menu_context = await get_main_dishes_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer sent a message that is not a dish selection. "
+            "Politely redirect: remind them we are choosing main dishes right now, "
+            "and ask them to select 3 to 5 dishes by name from the list below.",
+            menu_context
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
 
     # Guard: if user message is too short/vague (e.g. just "entrée", "ok", "yes"),
     # re-present the menu instead of letting the LLM hallucinate all dishes as selected.
     vague_msg = user_msg.strip().lower()
     is_vague = (
         len(vague_msg.split()) <= 2
-        and not _re.search(r'\d', vague_msg)  # no numbers
-        and not any(item_name.lower() in vague_msg for item_name in number_to_name.values())
+        and not any(item_name.lower() in vague_msg for item_name in all_item_names)
     )
     if is_vague and not _re.search(r'\b(skip|pass|none|no)\b', vague_msg):
         menu_context = await get_main_dishes_context(state)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nThe customer hasn't selected specific dishes yet. "
-            "Re-present the main dishes menu below and ask them to choose 3 to 5 dishes by name or number.",
+            "Re-present the main dishes menu below and ask them to choose 3 to 5 dishes by name.",
             menu_context
         )
         state["messages"] = add_ai_message(state, response)
         return state
 
-    # Fast path: user typed numbers → resolve directly without LLM
-    bare_numbers = _re.findall(r"\b(\d+)\b", user_msg)
-    if bare_numbers and all(n in number_to_name for n in bare_numbers):
-        extraction = ", ".join(number_to_name[n] for n in bare_numbers)
-    else:
-        extraction = await llm_respond(
-            "Extract the dish selections from this customer message. "
-            "The customer may refer to items by number or by name. "
-            "Use the numbered list below to map numbers to exact item names. "
-            "Return ONLY a comma-separated list of item names (no numbers, no extra text). "
-            "If the customer selected a whole category, return all item names in that category.\n\n"
-            f"Numbered menu:\n{numbered_str}",
-            f"Customer message: {user_msg}"
+    extraction = await llm_respond(
+        "You are a menu selection parser. Extract ONLY dish selections from this message.\n"
+        "Selections must be by item name only — do NOT accept numbers as selections.\n"
+        "Match customer input to the closest item name from the menu list below.\n"
+        "Return ONLY a comma-separated list of exact item names (no explanation).\n"
+        "If the message is NOT selecting dishes (e.g. it's a correction, question, or "
+        "unrelated topic), return exactly: NONE\n\n"
+        f"Available dishes:\n{numbered_str}",
+        f"Customer message: {user_msg}"
+    )
+    if extraction.strip().upper() == "NONE" or not extraction.strip():
+        menu_context = await get_main_dishes_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer's message did not select any dishes. "
+            "Politely ask them to choose 3 to 5 main dishes by name from the list below.",
+            menu_context
         )
+        state["messages"] = add_ai_message(state, response)
+        return state
 
     # Build a MAIN-DISHES-ONLY menu so appetizer items can't accidentally be selected here
     main_dishes_menu = {
@@ -491,34 +509,59 @@ async def select_appetizers_node(state: ConversationState) -> ConversationState:
     user_msg = get_last_human_message(state["messages"])
     menu = await load_menu_by_category()
 
-    # Build flat numbered list matching what the user sees (numbered 1..N)
+    # Guard: if the message contains non-food slot keywords, it's a correction/modification,
+    # not a menu selection. Reject immediately and ask them to select appetizers properly.
+    _NON_FOOD_SIGNALS = _re.compile(
+        r'\b(change|update|guest\s+count|guest count|venue|address|date|event|name|service type|'
+        r'actually|wait|correction|i meant|no the|no my)\b',
+        _re.IGNORECASE,
+    )
+    if _NON_FOOD_SIGNALS.search(user_msg):
+        appetizer_context = await get_appetizer_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer sent a message that is not an appetizer selection. "
+            "Politely redirect: remind them we are choosing appetizers right now, "
+            "and ask them to select items by name or number from the list below.",
+            appetizer_context
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
+
+    # Build flat name list (no numbers — selections must be by name only)
     appetizer_items_flat = []
     for cat_name, items in menu.items():
         if _is_appetizer_category(cat_name):
             appetizer_items_flat.extend(items)
 
-    number_to_name: dict[str, str] = {}
-    numbered_lines: list[str] = []
-    for i, item in enumerate(appetizer_items_flat, 1):
+    appetizer_names = [item["name"] for item in appetizer_items_flat]
+    name_lines = []
+    for item in appetizer_items_flat:
         price_str = f" (${item['unit_price']:.2f}/pp)" if item.get("unit_price") else ""
-        numbered_lines.append(f"  {i}. {item['name']}{price_str}")
-        number_to_name[str(i)] = item["name"]
+        name_lines.append(f"  • {item['name']}{price_str}")
 
-    numbered_str = "\n".join(numbered_lines)
+    appetizer_names_str = "\n".join(name_lines)
 
-    # Fast path: user typed numbers → resolve directly without LLM
-    bare_numbers = _re.findall(r"\b(\d+)\b", user_msg)
-    if bare_numbers and all(n in number_to_name for n in bare_numbers):
-        extraction = ", ".join(number_to_name[n] for n in bare_numbers)
-    else:
-        extraction = await llm_respond(
-            "Extract the appetizer selections from this customer message. "
-            "The customer may refer to items by number or by name. "
-            "Use the numbered list below to map numbers to exact item names. "
-            "Return ONLY a comma-separated list of item names (no numbers).\n\n"
-            f"Numbered appetizer menu:\n{numbered_str}",
-            f"Customer message: {user_msg}"
+    extraction = await llm_respond(
+        "You are a menu selection parser. Extract ONLY appetizer selections from this message.\n"
+        "Selections must be by item name only — do NOT accept numbers as selections.\n"
+        "Match customer input to the closest item name from the list below.\n"
+        "Return ONLY a comma-separated list of exact item names (no explanation).\n"
+        "If the message is NOT selecting appetizers (e.g. it's a correction, question, or "
+        "unrelated topic), return exactly: NONE\n\n"
+        f"Available appetizers:\n{appetizer_names_str}",
+        f"Customer message: {user_msg}"
+    )
+    if extraction.strip().upper() == "NONE" or not extraction.strip():
+        appetizer_context = await get_appetizer_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer's message did not select any appetizers. "
+            "Politely ask them to choose appetizers by name from the list below.",
+            appetizer_context
         )
+        state["messages"] = add_ai_message(state, response)
+        return state
 
     matched_items, resolved_text = await _resolve_to_db_items(extraction, menu)
 

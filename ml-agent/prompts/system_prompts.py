@@ -217,8 +217,12 @@ EXTRACTION_PROMPTS = {
         "Return ONLY the event type. If unclear, return NONE."
     ),
     "venue": (
-        "Extract the venue name/location from this message. "
-        "Return the venue details. If you can't find venue info, return NONE."
+        "Extract the venue name or location from this message. "
+        "Accept informal locations like 'home', 'my home', 'my house', 'my backyard', 'my place', "
+        "'my garden', 'our office', 'my apartment', or any specific place name or address. "
+        "If the user says something like 'home' or 'my house', return 'Customer's Home'. "
+        "If the user says 'my backyard', return 'Customer's Backyard'. "
+        "Only return NONE if the message has absolutely no location reference at all."
     ),
     "guest_count": (
         "Extract the number of guests from this message. "

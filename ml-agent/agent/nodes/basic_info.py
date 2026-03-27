@@ -229,8 +229,9 @@ async def wedding_message_node(state: ConversationState) -> ConversationState:
 async def collect_venue_node(state: ConversationState) -> ConversationState:
     """Collect venue — requires a proper venue name or address.
 
-    Informal/vague answers like 'my home', 'my backyard' are NOT accepted.
-    The bot asks for clarification with a specific address or venue name.
+    - Inappropriate venues (airport, bus stand, etc.) get a polite "not suitable" message.
+    - Informal/vague answers (my home, the park) trigger a followup echoing the word back:
+      "Could you please specify where your home is located?"
     """
     import re as _re
     from prompts.system_prompts import EXTRACTION_PROMPTS
@@ -238,16 +239,42 @@ async def collect_venue_node(state: ConversationState) -> ConversationState:
     user_msg = get_last_human_message(state["messages"])
     t = user_msg.strip().lower()
 
-    # --- Vague venue detection ---
-    # Category 1: Informal/personal places (my home, backyard, etc.)
+    # --- 1. Inappropriate venue detection ---
+    _INAPPROPRIATE_VENUES = [
+        r'\b(airport|airfield|airstrip|air\s*port)\b',
+        r'\b(bus\s*(stand|station|stop|terminal|depot))\b',
+        r'\b(train\s*(station|terminal|depot)|railway\s*station|railroad)\b',
+        r'\b(subway\s*station|metro\s*station|underground\s*station)\b',
+        r'\b(highway|freeway|motorway|expressway|overpass|underpass)\b',
+        r'\b(gas\s*station|petrol\s*station|fuel\s*station|rest\s*stop|truck\s*stop)\b',
+    ]
+    is_inappropriate = any(_re.search(p, t) for p in _INAPPROPRIATE_VENUES)
+
+    if is_inappropriate:
+        slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            f"The customer suggested '{user_msg}' as their event venue. "
+            "This is not a suitable location for a catering event. "
+            "Politely explain that unfortunately we are unable to cater at that type of location. "
+            "Then kindly ask them to share a more appropriate venue — such as a home, "
+            "banquet hall, restaurant, park, event space, or any private/semi-private location. "
+            "Keep it warm and brief.",
+            f"Customer said: {user_msg}\nSlots: {slots_summary}",
+        )
+        state["current_node"] = "collect_venue"
+        state["messages"] = add_ai_message(state, response)
+        return state
+
+    # --- 2. Vague venue detection ---
+    # Category A: Informal/personal places (my home, backyard, etc.)
     _VAGUE_PERSONAL = [
         r'\b(my\s+)?(home|house|place|gome|hme|apartment|flat|condo)\b',
         r'\b(my\s+)?(backyard|garden|yard|patio|garage|driveway|rooftop)\b',
         r'\b(my\s+)?(office|workplace|work)\b',
         r'\b(here|there|somewhere|tbd|not sure|undecided|idk|dunno)\b',
     ]
-    # Category 2: Generic place TYPES without a specific name/address
-    # e.g. "public school", "a church", "the park" — need to know WHICH one
+    # Category B: Generic place TYPES without a specific name/address
     _GENERIC_PLACE_TYPES = [
         r'\b(school|church|mosque|temple|synagogue)\b',
         r'\b(park|beach|lake|field|playground|community center)\b',
@@ -259,19 +286,14 @@ async def collect_venue_node(state: ConversationState) -> ConversationState:
     is_vague_personal = any(_re.search(p, t) for p in _VAGUE_PERSONAL)
     is_generic_type = any(_re.search(p, t) for p in _GENERIC_PLACE_TYPES)
 
-    # Check if user included a specific name or address detail that makes it acceptable
-    # e.g. "Lincoln Public School", "the park on 5th Ave", "Hilton Hotel, downtown"
     has_address_detail = bool(_re.search(
         r'(\d+\s+\w+\s+(st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|way|ct|court|pl|place))'
-        r'|(\b\d{5}\b)'  # zip code
-        r'|(\w+,\s*\w+)'  # City, State pattern
-        , t, _re.IGNORECASE
+        r'|(\b\d{5}\b)'
+        r'|(\w+,\s*\w+)',
+        t, _re.IGNORECASE
     ))
-    # A proper name before the generic type (e.g. "Lincoln School", "Riverside Park")
-    # Excludes generic qualifiers like "public", "local", "the", "a", "my", "nearby"
     _GENERIC_QUALIFIERS = r'^(a|an|the|my|our|some|local|public|private|nearby|big|small|old|new)\s+'
     venue_stripped = _re.sub(_GENERIC_QUALIFIERS, '', user_msg.strip(), flags=_re.IGNORECASE).strip()
-    # After stripping qualifiers, if it's JUST the place type word, it's generic
     _PLACE_TYPE_WORDS = {'school', 'church', 'mosque', 'temple', 'park', 'beach', 'lake',
                          'field', 'restaurant', 'hotel', 'motel', 'hall', 'banquet', 'club',
                          'bar', 'pub', 'cafe', 'library', 'museum', 'gallery', 'theater',
@@ -282,7 +304,6 @@ async def collect_venue_node(state: ConversationState) -> ConversationState:
         and venue_stripped.lower() not in _PLACE_TYPE_WORDS
         and len(venue_stripped.split()) >= 2
     )
-    # More than 3 words usually means it's specific enough (e.g. "the public school near downtown")
     is_descriptive_enough = len(user_msg.strip().split()) > 3
 
     needs_clarification = False
@@ -299,23 +320,24 @@ async def collect_venue_node(state: ConversationState) -> ConversationState:
         slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
         context = (
             f"Customer said: {user_msg}\n"
-            f"This is too vague for a venue (reason: {clarification_reason}). Slots: {slots_summary}"
+            f"Venue is too vague (reason: {clarification_reason}). Slots: {slots_summary}"
         )
         if clarification_reason == "personal":
             prompt_detail = (
-                "The customer gave a vague personal venue like 'my home' or 'my backyard'. "
-                "We need a proper address for the catering contract. "
-                "Politely ask: 'I appreciate that! For the catering contract, "
-                "could you provide the full address? "
-                "For example: \"123 Oak Street, Springfield\" or \"The Grand Ballroom at Hilton Downtown\".'"
+                f"The customer said '{user_msg}' as their venue. "
+                "Find the exact informal word they used (e.g. 'home', 'backyard', 'office', 'place'). "
+                "Ask a short, warm follow-up question echoing that word back — for example: "
+                "'Could you please specify where your home is located? Could you share the address or city?' "
+                "Use the customer's exact word in the question (not a synonym). "
+                "Do NOT ask for a 'full address' in formal language — keep it conversational."
             )
         else:
             prompt_detail = (
-                f"The customer said '{user_msg}' which is a type of place but not a specific venue. "
-                "We need to know exactly which one — the name and/or address. "
-                "Politely ask: 'That sounds great! Could you tell me the specific name or address "
-                "of the venue? For example: \"Springfield Community Center, 456 Elm Road\" "
-                "or \"St. Mary\\'s Church on 3rd Avenue\".'"
+                f"The customer said '{user_msg}' as their venue — it names a type of place but not a specific one. "
+                "Find the exact place word they used (e.g. 'park', 'church', 'restaurant', 'hall'). "
+                "Ask a short follow-up echoing that word: "
+                "'Could you please specify where the park is located? What\\'s the name or address?' "
+                "Use their exact word. Keep it brief and friendly."
             )
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{prompt_detail}",

@@ -155,6 +155,36 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
     }
   }, []);
 
+  // Poll for messages from other participants (collaborators) every 4 seconds
+  useEffect(() => {
+    if (!state.threadId) return;
+    const interval = setInterval(async () => {
+      // Skip while locally processing — avoids overwriting optimistic state
+      if (state.isLoading) return;
+      try {
+        const conv = await chatAiApi.getConversation(state.threadId!);
+        const serverMessages: ChatMessage[] = (conv.messages ?? []).map((m: any) => ({
+          role: m.sender_type === 'user' ? 'user' : 'ai',
+          content: m.content,
+          timestamp: m.created_at ? new Date(m.created_at) : new Date(),
+          authorId: m.author_id,
+        }));
+        setState((prev) => {
+          if (prev.isLoading) return prev;
+          // Only update when server has more messages than our local state
+          if (serverMessages.length <= prev.messages.length) return prev;
+          return {
+            ...prev,
+            messages: serverMessages,
+            progress: { filled: conv.slots_filled ?? prev.progress.filled, total: 20 },
+            isComplete: conv.is_completed ?? prev.isComplete,
+          };
+        });
+      } catch { /* silent — don't disrupt the user */ }
+    }, 4_000);
+    return () => clearInterval(interval);
+  }, [state.threadId, state.isLoading]);
+
   // Listen for help requests from sidebar
   useEffect(() => {
     const handleHelp = () => {
@@ -171,7 +201,8 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
       const messages: ChatMessage[] = (conv.messages ?? []).map((m: any) => ({
         role: m.sender_type === 'user' ? 'user' : 'ai',
         content: m.content,
-        timestamp: new Date(m.created_at),
+        timestamp: m.created_at ? new Date(m.created_at) : new Date(),
+        authorId: m.author_id,
       }));
       setState((prev) => ({
         ...prev,
@@ -221,6 +252,7 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
       role: 'user',
       content,
       timestamp: new Date(),
+      authorId: authorId,
     };
 
     setState((prev) => ({
@@ -314,32 +346,41 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
       <div className="flex flex-col h-full bg-white">
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          {state.messages.map((msg, idx) => (
+          {state.messages.map((msg, idx) => {
+            // A "user" message is from the current user if authorId matches, or if it was sent this session without an authorId from server yet
+            const isCollaboratorMsg = msg.role === 'user' && msg.authorId && msg.authorId !== authorId;
+            const alignRight = msg.role === 'user' && !isCollaboratorMsg;
+            return (
             <div
               key={idx}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex ${alignRight ? 'justify-end' : 'justify-start'}`}
             >
-              <div
-                className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                  msg.role === 'user'
-                    ? 'bg-black text-white'
-                    : 'bg-neutral-100 text-neutral-900'
-                }`}
-              >
-                {msg.role === 'user'
-                  ? <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                  : <MarkdownMessage content={msg.content} />
-                }
-                <span
-                  className={`text-xs mt-1 block ${
-                    msg.role === 'user' ? 'text-neutral-400' : 'text-neutral-400'
+              <div className="flex flex-col max-w-[80%]">
+                {/* Sender label for collaborator messages */}
+                {isCollaboratorMsg && (
+                  <span className="text-xs text-neutral-400 mb-1 ml-1">Collaborator</span>
+                )}
+                <div
+                  className={`rounded-2xl px-4 py-3 ${
+                    isCollaboratorMsg
+                      ? 'bg-neutral-200 text-neutral-900'
+                      : msg.role === 'user'
+                        ? 'bg-black text-white'
+                        : 'bg-neutral-100 text-neutral-900'
                   }`}
                 >
-                  {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                  {msg.role === 'user'
+                    ? <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    : <MarkdownMessage content={msg.content} />
+                  }
+                  <span className="text-xs mt-1 block text-neutral-400">
+                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {state.isLoading && (
             <div className="flex justify-start">

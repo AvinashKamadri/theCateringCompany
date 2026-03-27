@@ -8,25 +8,29 @@ import { useAuthStore } from '@/lib/store/auth-store';
 import { apiClient } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
-const STAFF_DOMAINS = ['@catering-company.com'];
-
 const ALL_NAVIGATION = [
-  { name: 'Projects',   href: '/projects',   icon: FolderKanban, hideForStaff: false },
-  { name: 'Contracts',  href: '/contracts',  icon: FileText,     hideForStaff: true },
-  { name: 'CRM',        href: '/crm',        icon: Users,        hideForStaff: false },
-  { name: 'AI Intake',  href: '/chat',       icon: Sparkles,     hideForStaff: true },
+  { name: 'Projects',  href: '/projects', icon: FolderKanban, staffOnly: false, clientOnly: false },
+  { name: 'Contracts', href: '/contracts', icon: FileText,    staffOnly: false, clientOnly: true  },
+  { name: 'CRM',       href: '/crm',      icon: Users,        staffOnly: true,  clientOnly: false },
+  { name: 'AI Intake', href: '/chat',     icon: Sparkles,     staffOnly: false, clientOnly: true  },
 ];
 
 export function AppNav() {
   const router = useRouter();
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
-  const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));
-  const navigation = ALL_NAVIGATION.filter((item) => !(item.hideForStaff && isStaff));
+  const isStaff = user?.role === 'staff' || user?.email?.toLowerCase().endsWith('@catering-company.com');
+  const navigation = ALL_NAVIGATION.filter((item) => {
+    if (item.staffOnly && !isStaff) return false;
+    if (item.clientOnly && isStaff) return false;
+    return true;
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const handleLogout = async () => {
     try { await apiClient.post('/auth/logout', {}); } catch { /* continue */ }
+    // Clear the JWT cookie so middleware stops treating this session as authenticated
+    document.cookie = 'app_jwt=; path=/; max-age=0; SameSite=Lax';
     logout();
     router.push('/signin');
   };

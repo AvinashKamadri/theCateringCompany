@@ -64,13 +64,19 @@ export interface ConversationState {
   is_completed: boolean;
   slots_filled: number;
   slots: ContractData;
-  messages: Array<{ sender_type: 'user' | 'ai'; content: string }>;
+  messages: Array<{
+    sender_type: 'user' | 'ai';
+    content: string;
+    author_id?: string;
+    created_at?: string;
+  }>;
 }
 
 export interface ChatMessage {
   role: 'user' | 'ai';
   content: string;
   timestamp: Date;
+  authorId?: string;   // undefined = AI, set = the user who sent it
 }
 
 export interface ChatState {

@@ -5,14 +5,27 @@ import type { Message } from '@/types/messages.types';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { cn } from '@/lib/utils';
 
+interface SimpleCollaborator {
+  id: string;
+  email: string;
+  role?: string;
+}
+
 interface MessageListProps {
   messages: Message[];
   isLoading?: boolean;
+  collaborators?: SimpleCollaborator[];
 }
 
-export function MessageList({ messages, isLoading }: MessageListProps) {
+export function MessageList({ messages, isLoading, collaborators = [] }: MessageListProps) {
   const currentUser = useAuthStore((state) => state.user);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const getSenderLabel = (message: Message): string => {
+    if (message.author_id === currentUser?.id) return 'You';
+    const collab = collaborators.find((c) => c.id === message.author_id);
+    return collab ? collab.email.split('@')[0] : 'Member';
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -77,12 +90,21 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
                       : 'bg-gray-200 text-gray-900'
               )}
             >
-              {isAI && (
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-6 h-6 rounded-full bg-purple-600 flex items-center justify-center text-white text-xs font-bold">
-                    AI
-                  </div>
-                  <span className="text-xs font-medium">AI Assistant</span>
+              {/* Sender label — always shown except for own messages */}
+              {!isOwnMessage && !isSystem && (
+                <div className="flex items-center gap-1.5 mb-1">
+                  {isAI ? (
+                    <div className="w-4 h-4 rounded-full bg-purple-600 flex items-center justify-center text-white text-[9px] font-bold shrink-0">
+                      AI
+                    </div>
+                  ) : (
+                    <div className="w-4 h-4 rounded-full bg-neutral-400 flex items-center justify-center text-white text-[9px] font-bold shrink-0">
+                      {getSenderLabel(message).charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <span className="text-xs font-medium opacity-70">
+                    {isAI ? 'AI Assistant' : getSenderLabel(message)}
+                  </span>
                 </div>
               )}
               <div

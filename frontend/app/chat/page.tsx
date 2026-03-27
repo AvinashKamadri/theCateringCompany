@@ -11,7 +11,6 @@ import { chatAiApi } from '@/lib/api/chat-ai';
 import { Plus, MessageSquare, ChevronRight, Loader2 } from 'lucide-react';
 import { AppNav } from '@/components/layout/app-nav';
 
-const STAFF_DOMAINS = ['@catering-company.com'];
 const STORAGE_KEY = 'tc_chat_sessions';
 
 interface StoredSession {
@@ -61,7 +60,7 @@ function AiIntakeContent() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
 
-  const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));
+  const isStaff = user?.role === 'staff' || user?.email?.toLowerCase().endsWith('@catering-company.com');
 
   useEffect(() => {
     if (!isAuthenticated) { router.push('/signin'); return; }

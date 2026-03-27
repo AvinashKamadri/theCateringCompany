@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Calendar, Users, MapPin, FileText,
   Clock, CheckCircle2, AlertCircle, Loader2, Building2,
-  ThumbsUp, ThumbsDown, X, Plus, Trash2, DollarSign, Calculator,
+  ThumbsUp, ThumbsDown, X,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
@@ -85,22 +85,11 @@ export default function ContractDetailPage() {
   const [previewing, setPreviewing] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
-  const [savingPricing, setSavingPricing] = useState(false);
-  const [calculatingPricing, setCalculatingPricing] = useState(false);
-  const [pricingBreakdown, setPricingBreakdown] = useState<any>(null);
-  const [lineItems, setLineItems] = useState<Array<{ description: string; quantity: number; unitPrice: number }>>([]);
-  const [taxRate, setTaxRate] = useState(9.4);
-  const [gratuityRate, setGratuityRate] = useState(20);
-
   useEffect(() => {
     const controller = new AbortController();
     apiClient.get(`/contracts/${contractId}`, { signal: controller.signal })
       .then((data: any) => {
         setContract(data);
-        const pricing = (data.body as any)?.pricing;
-        if (Array.isArray(pricing?.lineItems) && pricing.lineItems.length > 0) setLineItems(pricing.lineItems);
-        if (pricing?.taxRate != null) setTaxRate(Number(pricing.taxRate));
-        if (pricing?.gratuityRate != null) setGratuityRate(Number(pricing.gratuityRate));
       })
       .catch((err: any) => {
         if (controller.signal.aborted) return;
@@ -160,56 +149,6 @@ export default function ContractDetailPage() {
     }
   };
 
-  const pricingTotal = lineItems.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
-  const pricingTax = Math.round(pricingTotal * (taxRate / 100));
-  const pricingGratuity = Math.round(pricingTotal * (gratuityRate / 100));
-  const pricingGrandTotal = pricingTotal + pricingTax + pricingGratuity;
-  const pricingDeposit = Math.round(pricingGrandTotal * 0.50);
-
-  const handleAutoCalculate = async () => {
-    setCalculatingPricing(true);
-    try {
-      const result: any = await apiClient.post(`/staff/contracts/${contractId}/calculate-pricing`, {});
-      setPricingBreakdown(result);
-      // Pre-fill line items from server calculation — staff can adjust before saving
-      if (Array.isArray(result.lineItems) && result.lineItems.length > 0) {
-        const items = result.lineItems.map((li: any) => ({
-          description: li.description,
-          quantity: li.quantity,
-          unitPrice: li.unitPrice,
-        }));
-        // Add service surcharge as a line item if on-site labor applies
-        if (result.serviceSurcharge > 0) {
-          items.push({ description: 'On-site Service & Labor', quantity: 1, unitPrice: result.serviceSurcharge });
-        }
-        setLineItems(items);
-        toast.success(`Calculated: $${Number(result.grandTotal).toLocaleString()} total — review and save`);
-      } else {
-        toast.info('No menu items matched in pricing database. Add items manually.');
-      }
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to calculate pricing');
-    } finally {
-      setCalculatingPricing(false);
-    }
-  };
-
-  const handleSavePricing = async () => {
-    setSavingPricing(true);
-    try {
-      const grandTotal = pricingGrandTotal;
-      await apiClient.patch(`/staff/contracts/${contractId}/pricing`, {
-        pricing: { lineItems, subtotal: pricingTotal, total: grandTotal, taxRate, gratuityRate },
-      });
-      toast.success('Pricing saved');
-      const updated: any = await apiClient.get(`/contracts/${contractId}`);
-      setContract(updated);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to save pricing');
-    } finally {
-      setSavingPricing(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -284,7 +223,6 @@ export default function ContractDetailPage() {
   const specialRequests: string[] = body.additional?.modifications || [];
 
   const isPending = contract.status === 'pending_staff_approval';
-  const hasPricingSaved = !!(contract.total_amount && Number(contract.total_amount) > 0);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -377,158 +315,6 @@ export default function ContractDetailPage() {
                 <p className="text-sm text-yellow-700 mb-4">
                   Review the contract details below. Preview the PDF first, then approve to send to the client for signature, or reject with a reason.
                 </p>
-                {/* Pricing Editor */}
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-semibold text-yellow-900 flex items-center gap-1.5">
-                      <DollarSign className="h-3.5 w-3.5" /> Pricing
-                    </p>
-                    <button
-                      onClick={handleAutoCalculate}
-                      disabled={calculatingPricing}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-yellow-900 text-yellow-50 rounded-md hover:bg-yellow-950 disabled:opacity-50 text-xs font-medium"
-                    >
-                      {calculatingPricing
-                        ? <Loader2 className="h-3 w-3 animate-spin" />
-                        : <Calculator className="h-3 w-3" />}
-                      {calculatingPricing ? 'Calculating…' : 'Auto-Calculate'}
-                    </button>
-                  </div>
-
-                  {/* Tax / Gratuity rate inputs */}
-                  <div className="flex gap-3 mb-3">
-                    {[
-                      { label: 'Tax %', value: taxRate, setter: setTaxRate, step: 0.1 },
-                      { label: 'Gratuity %', value: gratuityRate, setter: setGratuityRate, step: 0.5 },
-                    ].map(({ label, value, setter, step }) => (
-                      <div key={label} className="flex-1">
-                        <label className="block text-xs text-yellow-800 font-medium mb-1">{label}</label>
-                        <div className="relative">
-                          <input
-                            type="number" min={0} max={50} step={step} value={value}
-                            onChange={(e) => setter(Number(e.target.value) || 0)}
-                            className="w-full border border-yellow-300 rounded-md px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-yellow-500 pr-7"
-                          />
-                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-yellow-600">%</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Line items table */}
-                  <div className="border border-yellow-200 rounded-xl overflow-hidden bg-white mb-2">
-                    <table className="w-full text-xs">
-                      <thead className="bg-yellow-50 border-b border-yellow-200">
-                        <tr>
-                          <th className="px-3 py-2.5 text-left font-semibold text-yellow-900">Description</th>
-                          <th className="px-3 py-2.5 text-center font-semibold text-yellow-900 w-14">Qty</th>
-                          <th className="px-3 py-2.5 text-right font-semibold text-yellow-900 w-24">Unit $</th>
-                          <th className="px-3 py-2.5 text-right font-semibold text-yellow-900 w-24">Total</th>
-                          <th className="w-8" />
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-yellow-50">
-                        {lineItems.map((item, idx) => (
-                          <tr key={idx} className="group">
-                            <td className="px-2 py-2">
-                              <input
-                                type="text"
-                                value={item.description}
-                                placeholder="Item description"
-                                onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
-                                className="w-full border-0 bg-transparent focus:bg-yellow-50 rounded px-1 py-0.5 focus:outline-none text-yellow-900"
-                              />
-                            </td>
-                            <td className="px-2 py-2">
-                              <input
-                                type="number" min={1} value={item.quantity}
-                                onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, quantity: Number(e.target.value) || 1 } : li))}
-                                className="w-full border-0 bg-transparent focus:bg-yellow-50 rounded px-1 py-0.5 focus:outline-none text-center text-yellow-900"
-                              />
-                            </td>
-                            <td className="px-2 py-2">
-                              <input
-                                type="number" min={0} value={item.unitPrice}
-                                onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, unitPrice: Number(e.target.value) || 0 } : li))}
-                                className="w-full border-0 bg-transparent focus:bg-yellow-50 rounded px-1 py-0.5 focus:outline-none text-right text-yellow-900"
-                              />
-                            </td>
-                            <td className="px-3 py-2 text-right font-semibold text-yellow-900 whitespace-nowrap">
-                              ${(item.quantity * item.unitPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-2">
-                              <button
-                                onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))}
-                                className="text-yellow-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {lineItems.length === 0 && (
-                          <tr>
-                            <td colSpan={5} className="px-3 py-6 text-center text-yellow-400/60 text-xs">
-                              No items yet — click Auto-Calculate or add manually
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-
-                    {/* Table footer: add item + totals */}
-                    <div className="border-t border-yellow-200 bg-yellow-50/60">
-                      <div className="px-3 py-2.5">
-                        <button
-                          onClick={() => setLineItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }])}
-                          className="flex items-center gap-1.5 text-xs text-yellow-700 hover:text-yellow-900 font-medium"
-                        >
-                          <Plus className="h-3.5 w-3.5" /> Add line item
-                        </button>
-                      </div>
-                      {lineItems.length > 0 && (
-                        <div className="border-t border-yellow-200 px-3 py-3 space-y-1.5">
-                          {pricingBreakdown?.packageName && (
-                            <div className="flex justify-between text-xs text-yellow-700 pb-1.5 mb-0.5">
-                              <span>Package</span>
-                              <span>{pricingBreakdown.packageName} (${pricingBreakdown.packagePerPersonRate}/pp)</span>
-                            </div>
-                          )}
-                          {[
-                            { label: 'Subtotal', value: pricingTotal },
-                            { label: `Tax (${taxRate}%)`, value: pricingTax },
-                            { label: `Gratuity (${gratuityRate}%)`, value: pricingGratuity },
-                          ].map(({ label, value }) => (
-                            <div key={label} className="flex justify-between text-xs text-yellow-800">
-                              <span>{label}</span>
-                              <span>${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                          ))}
-                          <div className="flex justify-between text-sm font-bold text-yellow-950 border-t border-yellow-300 pt-2 mt-1">
-                            <span>Grand Total</span>
-                            <span>${pricingGrandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                          </div>
-                          <div className="flex justify-between text-xs text-yellow-700">
-                            <span>50% Deposit Due</span>
-                            <span>${pricingDeposit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {lineItems.length > 0 && (
-                    <button
-                      onClick={handleSavePricing}
-                      disabled={savingPricing}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-yellow-800 text-white rounded-lg hover:bg-yellow-900 disabled:opacity-50 text-xs font-semibold"
-                    >
-                      {savingPricing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DollarSign className="h-3.5 w-3.5" />}
-                      {savingPricing ? 'Saving…' : 'Save Pricing'}
-                    </button>
-                  )}
-                </div>
-
                 {/* Preview PDF */}
                 <button
                   onClick={handlePreviewPdf}
@@ -541,16 +327,10 @@ export default function ContractDetailPage() {
                   {previewing ? 'Generating PDF...' : contract.pdf_path ? 'Regenerate & View PDF' : 'Preview PDF'}
                 </button>
                 {/* Approve / Reject */}
-                {!hasPricingSaved && (
-                  <p className="text-xs text-yellow-700 font-medium mb-2 flex items-center gap-1">
-                    <AlertCircle className="h-3.5 w-3.5" /> Save pricing above before approving.
-                  </p>
-                )}
                 <div className="flex gap-3">
                   <button
                     onClick={handleApprove}
-                    disabled={approving || !hasPricingSaved}
-                    title={!hasPricingSaved ? 'Save pricing first' : undefined}
+                    disabled={approving}
                     className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
                   >
                     {approving
@@ -734,37 +514,14 @@ export default function ContractDetailPage() {
                     {new Date(contract.created_at).toLocaleDateString()}
                   </span>
                 </div>
-                {lineItems.length > 0 ? (
-                  <>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Subtotal</span>
-                      <span className="text-gray-700">${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Tax ({taxRate}%)</span>
-                      <span className="text-gray-700">${pricingTax.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Gratuity ({gratuityRate}%)</span>
-                      <span className="text-gray-700">${pricingGratuity.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between border-t border-gray-100 pt-2">
-                      <span className="font-semibold text-gray-900">Grand Total</span>
-                      <span className="font-semibold text-gray-900">${pricingGrandTotal.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">50% Deposit Due</span>
-                      <span className="text-gray-700">${pricingDeposit.toLocaleString()}</span>
-                    </div>
-                  </>
-                ) : contract.total_amount != null ? (
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Grand Total</span>
+                {contract.total_amount != null && (
+                  <div className="flex justify-between border-t border-gray-100 pt-2">
+                    <span className="font-semibold text-gray-900">Grand Total</span>
                     <span className="font-semibold text-gray-900">
                       ${Number(contract.total_amount).toLocaleString()}
                     </span>
                   </div>
-                ) : null}
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-500">Contract ID</span>
                   <span className="font-mono text-xs text-gray-500 truncate max-w-[120px]">{contract.id}</span>

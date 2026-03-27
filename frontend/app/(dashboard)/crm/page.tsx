@@ -816,14 +816,17 @@ export default function CRMPage() {
                                   <tbody className="divide-y divide-neutral-100">
                                     {lineItems.map((item, idx) => (
                                       <tr key={idx} className="group">
-                                        <td className="px-2 py-2">
-                                          <input
-                                            type="text"
-                                            value={item.description}
-                                            placeholder="Item description"
-                                            onChange={(e) => setLineItems((prev) => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
-                                            className="w-full border-0 bg-transparent focus:bg-neutral-50 rounded px-1 py-0.5 focus:outline-none"
-                                          />
+                                        <td className="px-2 py-1.5">
+                                          {item.description
+                                            ? <span className="px-1 text-xs text-neutral-800">{item.description}</span>
+                                            : <input
+                                                type="text"
+                                                autoFocus
+                                                placeholder="Description"
+                                                onChange={(e) => setLineItems((prev) => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
+                                                className="w-full border border-neutral-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-black"
+                                              />
+                                          }
                                         </td>
                                         <td className="px-2 py-2">
                                           <input

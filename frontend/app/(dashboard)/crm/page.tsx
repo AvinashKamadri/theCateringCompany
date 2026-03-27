@@ -239,7 +239,7 @@ export default function CRMPage() {
 
   const handleTabChange = (t: Tab) => {
     setTab(t);
-    if (t === 'contracts' && !contractsFetched) loadContracts();
+    if (t === 'contracts') loadContracts();
   };
 
   const toggleExpand = (contract: PendingContract) => {

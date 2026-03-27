@@ -53,14 +53,20 @@ _CORRECTION_SIGNALS = re.compile(
     r'i forgot to|i need to (change|update|fix)|'
     r'make that|scratch that|'
     r'set (my|the|guest|event|venue|date)|'
-    r'the (guest count|venue|date|name|service type|event type) (is|should be|was|needs to be))\b',
+    r'the (guest count|venue|date|name|service type|event type) (is|should be|was|needs to be)|'
+    r'is (the\s+)?\d+(st|nd|rd|th)?\s+not|'  # "is 4th not 2nd"
+    r'not\s+\d+(st|nd|rd|th)?|'  # "not 2nd", "not the 2nd"
+    r'\bwrong\s+(date|day|venue|name|number|count)\b)\b',
     re.IGNORECASE,
 )
 
 # Keyword sets per slot for detecting which slot the user is talking about.
 _SLOT_KEYWORDS: dict[str, list[str]] = {
     "name":          [r'\bmy name\b', r'\bname is\b', r'\bcall me\b'],
-    "event_date":    [r'\bthe date\b', r'\bmy date\b', r'\bevent date\b', r'\bdate is\b', r'\bdate to\b'],
+    "event_date":    [r'\bthe date\b', r'\bmy date\b', r'\bevent date\b', r'\bdate is\b', r'\bdate to\b',
+                      r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
+                      r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\b',
+                      r'\bnext\s+(week|month|saturday|sunday|monday|friday)\b'],
     "guest_count":   [r'\bguests?\b', r'\bguest count\b', r'\bpeople\b', r'\battendees?\b'],
     "venue":         [r'\bvenue\b', r'\blocation\b', r'\bplace\b', r'\baddress\b', r'\bheld at\b'],
     "service_type":  [r'\bdrop.?off\b', r'\bon.?site\b', r'\bservice type\b'],
@@ -117,6 +123,17 @@ def _detect_off_topic_correction(msg: str, current_slot: str | None, filled_slot
             for pattern in patterns:
                 if re.search(pattern, msg_lower):
                     return True
+
+    # D) Message contains "not [number]" or "is [date] not" → date correction without signal word
+    #    e.g. "next saturday is 4th not 2nd", "its the 4th not the 2nd"
+    if re.search(r'\bnot\s+\d+|\bis\s+\w*\d+\w*\s+not\b', msg_lower):
+        if current_slot != "event_date":
+            for pattern in _SLOT_KEYWORDS.get("event_date", []):
+                if re.search(pattern, msg_lower):
+                    return True
+            # Also catch plain number corrections at date collection stage when a date is already filled
+            if "event_date" in filled_slots:
+                return True
 
     return False
 

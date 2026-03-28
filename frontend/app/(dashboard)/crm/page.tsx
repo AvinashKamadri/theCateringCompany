@@ -200,13 +200,14 @@ export default function CRMPage() {
   const [savingPricing, setSavingPricing] = useState(false);
 
   // UI
-  const [tab, setTab] = useState<Tab>('pipeline');
+  const [tab, setTab] = useState<Tab>('contracts');
   const [pipelineView, setPipelineView] = useState<PipelineView>('kanban');
 
   useEffect(() => {
     if (!isAuthenticated) { router.push('/signin'); return; }
     if (user && user.role !== 'staff') { router.push('/projects'); return; }
     loadDashboard();
+    loadContracts();
   }, [isAuthenticated, user, router]);
 
   const loadDashboard = async () => {
@@ -459,8 +460,8 @@ export default function CRMPage() {
           {/* Tab nav */}
           <div className="flex items-center gap-1">
             {([
-              { key: 'pipeline',  label: 'Pipeline',   icon: LayoutGrid },
               { key: 'contracts', label: 'Contracts',  icon: FileText,  badge: contractsFetched ? contracts.length : undefined },
+              { key: 'pipeline',  label: 'Pipeline',   icon: LayoutGrid },
               { key: 'analytics', label: 'Analytics',  icon: BarChart2 },
             ] as const).map(({ key, label, icon: Icon, badge }: any) => (
               <button

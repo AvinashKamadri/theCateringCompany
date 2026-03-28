@@ -9,10 +9,10 @@ import { apiClient } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
 const ALL_NAVIGATION = [
-  { name: 'Projects',  href: '/projects', icon: FolderKanban, staffOnly: false, clientOnly: false },
-  { name: 'Contracts', href: '/contracts', icon: FileText,    staffOnly: false, clientOnly: true  },
   { name: 'CRM',       href: '/crm',      icon: Users,        staffOnly: true,  clientOnly: false },
   { name: 'AI Intake', href: '/chat',     icon: Sparkles,     staffOnly: false, clientOnly: true  },
+  { name: 'Projects',  href: '/projects', icon: FolderKanban, staffOnly: false, clientOnly: false },
+  { name: 'Contracts', href: '/contracts', icon: FileText,    staffOnly: false, clientOnly: true  },
 ];
 
 export function AppNav() {

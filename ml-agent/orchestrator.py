@@ -105,6 +105,7 @@ class AgentOrchestrator:
             "error": None,
             "contract_data": None,
             "is_complete": False,
+            "dietary_conflict_attempts": 0,
         }
 
         try:

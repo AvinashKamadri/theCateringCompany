@@ -9,7 +9,7 @@ from datetime import datetime
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
     get_last_human_message, add_ai_message, llm_extract, llm_respond,
-    is_affirmative, is_negative,
+    llm_extract_structured, is_null_extraction, is_affirmative, is_negative,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 from tools.pricing import calculate_event_pricing
@@ -102,8 +102,31 @@ async def collect_special_requests_node(state: ConversationState) -> Conversatio
     return state
 
 
+_DIETARY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "note": {
+            "type": "string",
+            "description": "Dietary note as a clear kitchen instruction",
+        },
+        "has_conflict": {
+            "type": "boolean",
+            "description": "True if any menu item conflicts with the dietary requirement",
+        },
+    },
+    "required": ["note", "has_conflict"],
+    "additionalProperties": False,
+}
+
+
 async def collect_dietary_node(state: ConversationState) -> ConversationState:
-    """Record dietary/health concerns — flags conflicts for user to decide."""
+    """Record dietary/health concerns — flags conflicts for user to decide.
+
+    Uses a single structured LLM call to extract both the dietary note and
+    conflict flag simultaneously, halving latency vs. two serial calls.
+    The conflict-attempt counter lives in state["dietary_conflict_attempts"]
+    (a proper schema field) so it persists correctly across turns.
+    """
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
     slots = _slots_context(state)
@@ -123,6 +146,8 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
             "Return ONLY the updated dietary note as a clear kitchen instruction.",
             user_msg,
         )
+        if is_null_extraction(updated):
+            updated = user_msg.strip()
         fill_slot(state["slots"], "dietary_concerns", updated)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nDietary note updated to: \"{updated}\". "
@@ -131,37 +156,29 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
         )
         state["current_node"] = "ask_anything_else"
     else:
-        # First time — store what user said, flag any conflict for the user to decide
-        dietary_detail = await llm_extract(
+        # Single structured call: extract note + conflict flag together
+        result = await llm_extract_structured(
             "You are recording dietary concerns for a catering event.\n"
             f"Customer said: {user_msg}\n"
             f"Current menu: {dishes}\n\n"
-            "Write a dietary note capturing EXACTLY what the customer requested. "
-            "Do NOT assume any dishes need replacing — just note the dietary requirement. "
-            "If there's a potential conflict (e.g., halal + pork dish on menu), "
-            "note the conflict but do NOT decide for the customer.\n"
-            "Return ONLY the dietary note as a clear kitchen instruction.",
+            "Return a JSON object with:\n"
+            "  note: dietary note as a clear kitchen instruction capturing EXACTLY what "
+            "the customer requested. Do NOT assume any dishes need replacing.\n"
+            "  has_conflict: true if any menu item conflicts with the requirement "
+            "(e.g. halal requirement + pork dish on menu), false otherwise.",
             user_msg,
+            _DIETARY_SCHEMA,
         )
-        if dietary_detail.strip().upper() == "NONE":
-            dietary_detail = user_msg.strip()
+
+        dietary_detail = result.get("note", "").strip() or user_msg.strip()
+        has_conflict = result.get("has_conflict", False)
 
         fill_slot(state["slots"], "dietary_concerns", dietary_detail)
 
-        # Check if there's a menu conflict to flag
-        conflict_check = await llm_extract(
-            "Does this menu have any items that conflict with the dietary requirement?\n"
-            f"Dietary requirement: {user_msg}\n"
-            f"Menu items: {dishes}\n\n"
-            "Return YES if there's a conflict, NO if there isn't. Just YES or NO.",
-            user_msg,
-        )
-
-        if "YES" in conflict_check.upper():
-            # Track how many times we've asked about conflicts to prevent loops
-            dietary_attempts = state.get("_dietary_conflict_attempts", 0)
+        if has_conflict:
+            dietary_attempts = state.get("dietary_conflict_attempts", 0)
             if dietary_attempts >= 2:
-                # Auto-accept after 2 attempts — note the conflict and move on
+                # Auto-accept after 2 re-asks — note conflict and move on
                 updated_note = f"{dietary_detail} (menu conflicts noted, customer was informed)"
                 fill_slot(state["slots"], "dietary_concerns", updated_note)
                 response = await llm_respond(
@@ -171,7 +188,7 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
                 )
                 state["current_node"] = "ask_anything_else"
             else:
-                state["_dietary_conflict_attempts"] = dietary_attempts + 1
+                state["dietary_conflict_attempts"] = dietary_attempts + 1
                 response = await llm_respond(
                     f"{SYSTEM_PROMPT}\n\nThe customer wants: {user_msg}. "
                     f"Their menu includes: {dishes}. "
@@ -182,7 +199,6 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
                     "Let the customer choose.",
                     f"Context: {_slots_context(state)}",
                 )
-                # Stay on collect_dietary so their answer updates the dietary slot
                 state["current_node"] = "collect_dietary"
         else:
             response = await llm_respond(

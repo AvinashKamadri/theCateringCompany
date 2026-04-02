@@ -34,6 +34,7 @@ class ConversationState(TypedDict):
     error: str | None
     contract_data: dict | None
     is_complete: bool
+    dietary_conflict_attempts: int  # tracks conflict re-asks to cap the loop at 2
 
 
 # All slots in the full catering flow
@@ -79,7 +80,24 @@ def fill_slot(slots: dict, name: str, value: Any) -> dict:
     """
     Fill a slot with a value and timestamp.
     If the slot already had a value, record it in modification_history.
+
+    Guards: silently rejects None, empty string, and LLM null-string variants
+    (e.g. "null", "N/A", "undefined") so a bad extraction can never mark a
+    slot as filled with a garbage value.
     """
+    # Inline null guard — mirrors is_null_extraction() without creating a
+    # circular import between state.py and helpers.py.
+    _NULL_STRINGS = {
+        "none", "null", "nil", "n/a", "na", "undefined",
+        "not found", "not available", "unknown", "not specified",
+        "not provided", "not mentioned", "not given", "not stated",
+        "-", "--", "—",
+    }
+    if value is None:
+        return slots
+    if isinstance(value, str) and (not value.strip() or value.strip().lower() in _NULL_STRINGS):
+        return slots
+
     now = datetime.now().isoformat()
     existing = slots.get(name, {})
     old_value = existing.get("value") if existing.get("filled") else None

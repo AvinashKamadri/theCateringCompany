@@ -46,7 +46,7 @@ def _adjust_node_for_slot_change(node: str, slots: dict) -> str:
     current_value = slot_data.get("value")
 
     if not condition_fn(current_value):
-        print(f"[CHECK_MODIFICATIONS] Rerouting {node} -> {fallback} (slot '{slot_name}' = '{current_value}')")
+        logger.debug("[CHECK_MODIFICATIONS] Rerouting %s -> %s (slot '%s' = '%s')", node, fallback, slot_name, current_value)
         return fallback
 
     return node
@@ -91,11 +91,11 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
     so the conversation never jumps ahead.
     """
     state = dict(state)
-    print(f"\n[CHECK_MODIFICATIONS {_MOD_VERSION}] Entered check_modifications_node")
+    logger.debug("[CHECK_MODIFICATIONS %s] Entered check_modifications_node", _MOD_VERSION)
 
     # Remember where we were before the @AI interrupt
     previous_node = state.get("current_node", "start")
-    print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] previous_node = {previous_node}")
+    logger.debug("[CHECK_MODIFICATIONS %s] previous_node = %s", _MOD_VERSION, previous_node)
 
     # Extract the pending question BEFORE we process (from the last AI message)
     pending_question = _extract_pending_question(state)
@@ -236,11 +236,11 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
         else:
             # ── Scalar slots: use standard date-resolve + validate path ──
             resolved_value = str(new_value)
-            print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] target_slot={target_slot}, raw new_value={new_value}")
+            logger.debug("[CHECK_MODIFICATIONS %s] target_slot=%s, raw new_value=%s", _MOD_VERSION, target_slot, new_value)
             if target_slot == "event_date" and _contains_relative_date(resolved_value):
-                print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Resolving relative date: {resolved_value}")
+                logger.debug("[CHECK_MODIFICATIONS %s] Resolving relative date: %s", _MOD_VERSION, resolved_value)
                 resolved_value = await _resolve_relative_date(resolved_value)
-                print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Resolved to: {resolved_value}")
+                logger.debug("[CHECK_MODIFICATIONS %s] Resolved to: %s", _MOD_VERSION, resolved_value)
 
             validation_result = await validate_slot.ainvoke({
                 "slot_name": target_slot,
@@ -291,5 +291,5 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
     else:
         restored_node = _adjust_node_for_slot_change(previous_node, state["slots"])
     state["current_node"] = restored_node
-    print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Exiting. current_node: {restored_node} (previous: {previous_node})")
+    logger.debug("[CHECK_MODIFICATIONS %s] Exiting. current_node: %s (previous: %s)", _MOD_VERSION, restored_node, previous_node)
     return state

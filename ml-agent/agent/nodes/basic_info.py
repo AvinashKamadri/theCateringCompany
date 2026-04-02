@@ -8,6 +8,7 @@ from datetime import datetime
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
     get_last_human_message, add_ai_message, llm_extract, llm_respond,
+    llm_extract_enum, llm_extract_integer, is_null_extraction,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS, EXTRACTION_PROMPTS
 from agent.nodes.menu import get_main_dishes_context
@@ -29,7 +30,7 @@ async def _extract_and_respond(state, slot_name, next_node, node_key):
     extracted = await llm_extract(prompt, user_msg)
     extracted = extracted.strip()
 
-    extraction_succeeded = extracted and extracted.upper() != "NONE"
+    extraction_succeeded = not is_null_extraction(extracted)
 
     if extraction_succeeded:
         # Normalize guest_count to int
@@ -82,7 +83,81 @@ async def collect_name_node(state: ConversationState) -> ConversationState:
 
 
 async def collect_event_date_node(state: ConversationState) -> ConversationState:
-    return await _extract_and_respond(state, "event_date", "collect_venue", "collect_event_date")
+    """Collect event date with past-date rejection.
+
+    Extraction uses today's date injected at runtime so the LLM normalises
+    relative phrases ("next Saturday", "in June") correctly.  After extraction
+    we do a hard Python-side check — if the resolved date is today or earlier
+    we stay on the node and tell the customer why instead of silently accepting
+    a booking that is already in the past.
+    """
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+
+    today = datetime.now()
+    today_str = today.strftime("%Y-%m-%d")
+    prompt = EXTRACTION_PROMPTS["event_date"].format(today=today_str)
+    extracted = (await llm_extract(prompt, user_msg)).strip()
+
+    slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+
+    # -- Validate extracted date --
+    is_past_date = False
+    extraction_succeeded = not is_null_extraction(extracted)
+
+    if extraction_succeeded:
+        try:
+            event_date = datetime.strptime(extracted, "%Y-%m-%d")
+            if event_date.date() <= today.date():
+                is_past_date = True
+                extraction_succeeded = False
+        except ValueError:
+            # LLM returned something that isn't a valid YYYY-MM-DD date
+            extraction_succeeded = False
+
+    if is_past_date:
+        context = (
+            f"Customer said: {user_msg}\n"
+            f"Extracted date: {extracted} — this date is in the past.\n"
+            f"Today: {today_str}\nSlots: {slots_summary}"
+        )
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer provided an event date that has already passed. "
+            "Politely explain that we can only book events for future dates. "
+            "Acknowledge the date they mentioned, then ask them to provide a future date. "
+            "Keep it warm and brief — do not lecture.",
+            context,
+        )
+        # Stay on collect_event_date
+    elif extraction_succeeded:
+        fill_slot(state["slots"], "event_date", extracted)
+        slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+        context = (
+            f"Customer said: {user_msg}\nExtracted event_date: {extracted}\n"
+            f"CURRENT slot values (use THESE): {slots_summary}"
+        )
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_event_date']}",
+            context,
+        )
+        state["current_node"] = "collect_venue"
+    else:
+        context = (
+            f"Customer said: {user_msg}\n"
+            f"Could not extract a valid date. Today: {today_str}\nSlots: {slots_summary}"
+        )
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer's response did not include a clear event date. "
+            "Politely re-ask for the date of their event. "
+            "Give an example of a valid answer, e.g. 'June 15th, 2026'.",
+            context,
+        )
+        # Stay on collect_event_date
+
+    state["messages"] = add_ai_message(state, response)
+    return state
 
 
 async def select_service_type_node(state: ConversationState) -> ConversationState:
@@ -90,10 +165,13 @@ async def select_service_type_node(state: ConversationState) -> ConversationStat
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extracted = await llm_extract(EXTRACTION_PROMPTS["service_type"], user_msg)
+    extracted = await llm_extract_enum(
+        EXTRACTION_PROMPTS["service_type"], user_msg,
+        ["Drop-off", "Full-Service Buffet", "Full-Service On-site"],
+    )
     extracted = extracted.strip()
 
-    if extracted and extracted.upper() != "NONE":
+    if not is_null_extraction(extracted):
         fill_slot(state["slots"], "service_type", extracted)
         slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
         # Directly confirm and ask about rentals — do NOT mention service type options
@@ -128,7 +206,10 @@ async def select_event_type_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extracted = await llm_extract(EXTRACTION_PROMPTS["event_type"], user_msg)
+    extracted = await llm_extract_enum(
+        EXTRACTION_PROMPTS["event_type"], user_msg,
+        ["Wedding", "Corporate", "Birthday", "Social", "Custom"],
+    )
     extracted = extracted.strip()
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
@@ -160,9 +241,9 @@ async def select_event_type_node(state: ConversationState) -> ConversationState:
             "Return ONLY the event description, max 5 words.",
             user_msg,
         )
-        extracted = event_description.strip() if event_description.strip().upper() != "NONE" else user_msg.strip()
+        extracted = event_description.strip() if not is_null_extraction(event_description.strip()) else user_msg.strip()
 
-    if extracted and extracted.upper() != "NONE":
+    if not is_null_extraction(extracted):
         fill_slot(state["slots"], "event_type", extracted)
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
@@ -192,7 +273,7 @@ async def wedding_message_node(state: ConversationState) -> ConversationState:
 
     # Try to extract venue if they gave it along with event type
     extracted = await llm_extract(EXTRACTION_PROMPTS["venue"], user_msg)
-    if extracted and extracted.upper() != "NONE":
+    if not is_null_extraction(extracted.strip()):
         fill_slot(state["slots"], "venue", extracted.strip())
         next_node = "collect_guest_count"
     else:
@@ -359,7 +440,7 @@ async def collect_venue_node(state: ConversationState) -> ConversationState:
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
 
-    if extracted and extracted.upper() != "NONE":
+    if not is_null_extraction(extracted):
         fill_slot(state["slots"], "venue", extracted)
         state["current_node"] = "collect_guest_count"
         context = (
@@ -392,17 +473,24 @@ async def collect_guest_count_node(state: ConversationState) -> ConversationStat
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extracted = await llm_extract(EXTRACTION_PROMPTS["guest_count"], user_msg)
+    extracted = await llm_extract_integer(EXTRACTION_PROMPTS["guest_count"], user_msg)
     extracted = extracted.strip()
 
+    # llm_extract_integer guarantees the value is a valid integer string or "NONE".
+    # The digit-scraping fallback is no longer needed — a plain int() is safe here.
     guest_extracted = False
-    if extracted and extracted.upper() != "NONE":
+    invalid_count = False
+    if not is_null_extraction(extracted):
         try:
-            extracted = int("".join(c for c in extracted if c.isdigit()))
+            count = int(extracted)
+            if count > 0:
+                extracted = count
+                fill_slot(state["slots"], "guest_count", extracted)
+                guest_extracted = True
+            else:
+                invalid_count = True
         except ValueError:
             pass
-        fill_slot(state["slots"], "guest_count", extracted)
-        guest_extracted = True
 
     event_type = get_slot_value(state["slots"], "event_type")
     is_wedding = event_type and "wedding" in str(event_type).lower()
@@ -417,6 +505,14 @@ async def collect_guest_count_node(state: ConversationState) -> ConversationStat
         next_node = "select_service_style" if is_wedding else "ask_appetizers"
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_guest_count']}",
+            context,
+        )
+    elif invalid_count:
+        # Extracted a number but it was zero or negative — stay and re-ask
+        next_node = "collect_guest_count"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nThe customer provided a guest count that is not valid (must be at least 1). "
+            "Politely ask them to confirm how many guests they are expecting.",
             context,
         )
     else:
@@ -468,10 +564,13 @@ async def select_service_style_node(state: ConversationState) -> ConversationSta
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extracted = await llm_extract(EXTRACTION_PROMPTS["service_style"], user_msg)
+    extracted = await llm_extract_enum(
+        EXTRACTION_PROMPTS["service_style"], user_msg,
+        ["cocktail hour", "reception", "both"],
+    )
     extracted = extracted.strip()
 
-    if extracted and extracted.upper() != "NONE":
+    if not is_null_extraction(extracted):
         fill_slot(state["slots"], "service_style", extracted)
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}

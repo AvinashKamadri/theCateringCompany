@@ -5,7 +5,7 @@ Add-on nodes: utensils, desserts, rentals, florals.
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
     get_last_human_message, add_ai_message, llm_respond, llm_extract,
-    is_affirmative, is_negative,
+    is_affirmative, is_negative, is_null_extraction,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 from agent.nodes.menu import get_dessert_context, _resolve_to_db_items
@@ -69,7 +69,7 @@ async def select_utensils_node(state: ConversationState) -> ConversationState:
         "Return NONE if no clear selection is made.",
         user_msg
     )
-    utensil_value = extraction.strip() if extraction.strip().upper() != "NONE" else user_msg.strip()
+    utensil_value = extraction.strip() if not is_null_extraction(extraction.strip()) else user_msg.strip()
     fill_slot(state["slots"], "utensils", utensil_value)
 
     context = f"Utensils selected: {extraction}\nSlots: {_slots_context(state)}"

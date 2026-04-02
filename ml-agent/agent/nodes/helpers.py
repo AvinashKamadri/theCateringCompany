@@ -168,6 +168,113 @@ async def llm_extract(system_prompt: str, user_message: str) -> str:
     return text
 
 
+async def llm_extract_enum(system_prompt: str, user_message: str, options: list[str]) -> str:
+    """Structured extraction constrained to a fixed set of options.
+
+    Uses OpenAI JSON schema mode with an enum constraint so the model can ONLY
+    return one of `options` or null — it physically cannot hallucinate a value
+    outside the list.  Return type is still ``str`` (or ``"NONE"``) so all
+    downstream node logic is unchanged.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "value": {
+                "anyOf": [
+                    {"type": "string", "enum": options},
+                    {"type": "null"},
+                ]
+            }
+        },
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+    start = time.monotonic()
+    try:
+        structured_llm = llm.with_structured_output(schema, method="json_schema", strict=True)
+        result = await structured_llm.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ])
+        value = result.get("value") if isinstance(result, dict) else None
+        text = str(value) if value is not None else "NONE"
+    except Exception:
+        # Structured output unavailable (model/version limitation) — fall back
+        # to plain extraction so the flow is never blocked.
+        response = await llm.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ])
+        text = response.content
+    latency_ms = int((time.monotonic() - start) * 1000)
+    await _log_generation(system_prompt, user_message, text, latency_ms, "intake_parse_structured")
+    return text
+
+
+async def llm_extract_structured(system_prompt: str, user_message: str, schema: dict) -> dict:
+    """Structured extraction returning a dict matching the provided JSON schema.
+
+    Use this when a single LLM call needs to return multiple typed fields at once
+    (e.g. dietary note + conflict flag).  Falls back to an empty dict on failure
+    so callers must handle the missing-key case.
+    """
+    start = time.monotonic()
+    try:
+        structured_llm = llm.with_structured_output(schema, method="json_schema", strict=True)
+        result = await structured_llm.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ])
+        text = str(result)
+        data = result if isinstance(result, dict) else {}
+    except Exception:
+        data = {}
+        text = "{}"
+    latency_ms = int((time.monotonic() - start) * 1000)
+    await _log_generation(system_prompt, user_message, text, latency_ms, "intake_parse_structured")
+    return data
+
+
+async def llm_extract_integer(system_prompt: str, user_message: str) -> str:
+    """Structured extraction that returns a positive integer or ``"NONE"``.
+
+    Guarantees the model returns an integer (not "fifty", "~50", "around 50").
+    Return type is ``str`` to stay compatible with existing node code — callers
+    can safely do ``int(extracted)`` after an ``is_null_extraction`` check.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "value": {
+                "anyOf": [
+                    {"type": "integer", "minimum": 1},
+                    {"type": "null"},
+                ]
+            }
+        },
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+    start = time.monotonic()
+    try:
+        structured_llm = llm.with_structured_output(schema, method="json_schema", strict=True)
+        result = await structured_llm.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ])
+        value = result.get("value") if isinstance(result, dict) else None
+        text = str(value) if value is not None else "NONE"
+    except Exception:
+        response = await llm.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ])
+        text = response.content
+    latency_ms = int((time.monotonic() - start) * 1000)
+    await _log_generation(system_prompt, user_message, text, latency_ms, "intake_parse_structured")
+    return text
+
+
 async def llm_respond(system_prompt: str, context: str) -> str:
     """Generate a friendly agent response given context.
 
@@ -194,3 +301,25 @@ async def llm_respond(system_prompt: str, context: str) -> str:
 def add_ai_message(state: dict, content: str) -> list:
     """Append an AI message to the state's message list and return new list."""
     return list(state["messages"]) + [AIMessage(content=content)]
+
+
+# All string variants an LLM may return to indicate "nothing extracted".
+_NULL_EXTRACTION_VALUES = frozenset({
+    "none", "null", "nil", "n/a", "na", "undefined",
+    "not found", "not available", "unknown", "not specified",
+    "not provided", "not mentioned", "not given", "not stated",
+    "no date", "no name", "no venue", "no count",
+    "-", "--", "—",
+})
+
+
+def is_null_extraction(value: str) -> bool:
+    """Return True if the LLM extraction result represents a null / not-found value.
+
+    Centralises the null-check so every node uses identical logic instead of
+    each independently checking ``extracted.upper() != "NONE"``, which misses
+    variants like "null", "N/A", "undefined", etc.
+    """
+    if not value or not value.strip():
+        return True
+    return value.strip().lower() in _NULL_EXTRACTION_VALUES

@@ -149,18 +149,6 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state.messages]);
 
-  // Load existing conversation or start fresh
-  useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-
-    if (initialThreadId) {
-      loadConversationHistory(initialThreadId);
-    } else {
-      handleSendMessage('Hello! I need help planning my event.');
-    }
-  }, []);
-
   // Poll for messages from other participants (collaborators) every 4 seconds.
   // Uses refs so the interval is stable and never resets due to loading state changes.
   useEffect(() => {
@@ -188,15 +176,6 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
       } catch { /* silent — don't disrupt the user */ }
     }, 4_000);
     return () => clearInterval(interval);
-  }, []);
-
-  // Listen for help requests from sidebar
-  useEffect(() => {
-    const handleHelp = () => {
-      handleSendMessage('/help - I need assistance from your team');
-    };
-    window.addEventListener('chat:help', handleHelp);
-    return () => window.removeEventListener('chat:help', handleHelp);
   }, []);
 
   async function loadConversationHistory(threadId: string) {
@@ -328,6 +307,27 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
       toast.error('Failed to send message');
     }
   };
+
+  // Load existing conversation or start fresh
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+
+    if (initialThreadId) {
+      loadConversationHistory(initialThreadId);
+    } else {
+      handleSendMessage('Hello! I need help planning my event.');
+    }
+  }, []);
+
+  // Listen for help requests from sidebar
+  useEffect(() => {
+    const handleHelp = () => {
+      handleSendMessage('/help - I need assistance from your team');
+    };
+    window.addEventListener('chat:help', handleHelp);
+    return () => window.removeEventListener('chat:help', handleHelp);
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

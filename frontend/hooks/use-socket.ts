@@ -85,8 +85,10 @@ export function useSocket(options: UseSocketOptions = {}) {
     socketRef.current?.off(event, handler);
   }, []);
 
+  const getSocket = useCallback(() => socketRef.current, []);
+
   return {
-    socket: socketRef.current,
+    getSocket,
     isConnected,
     joinThread,
     leaveThread,

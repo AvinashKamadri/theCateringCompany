@@ -85,13 +85,12 @@ function DonutChart({ data }: { data: { label: string; value: number; color: str
   }
   const r = 38;
   const circ = 2 * Math.PI * r;
-  let offset = 0;
-  const segs = data.map((d) => {
+  const segs = data.reduce<Array<typeof data[number] & { offset: number; dash: number }>>((acc, d) => {
+    const offset = acc.length > 0 ? acc[acc.length - 1].offset + acc[acc.length - 1].dash : 0;
     const dash = (d.value / total) * circ;
-    const seg = { ...d, offset, dash };
-    offset += dash;
-    return seg;
-  });
+    acc.push({ ...d, offset, dash });
+    return acc;
+  }, []);
   return (
     <div className="relative">
       <svg viewBox="0 0 100 100" className="w-36 h-36 mx-auto -rotate-90">

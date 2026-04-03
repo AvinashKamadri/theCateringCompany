@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 
 // pg-boss CJS compat — the class is exported as a named export `PgBoss`.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+// eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
 const PgBossModule = require('pg-boss');
 const PgBoss = PgBossModule.PgBoss ?? PgBossModule.default ?? PgBossModule;
 

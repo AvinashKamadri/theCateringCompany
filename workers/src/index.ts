@@ -1,4 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+// eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
 const PgBossModule = require('pg-boss');
 const PgBoss = PgBossModule.PgBoss ?? PgBossModule.default ?? PgBossModule;
 import 'dotenv/config';

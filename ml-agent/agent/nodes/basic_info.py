@@ -161,42 +161,35 @@ async def collect_event_date_node(state: ConversationState) -> ConversationState
 
 
 async def select_service_type_node(state: ConversationState) -> ConversationState:
-    """Extract service type and move on. Custom handling to prevent re-asking loop."""
+    """Extract service type (Drop-off or Onsite only) and route to ask_cocktail_hour."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
     extracted = await llm_extract_enum(
         EXTRACTION_PROMPTS["service_type"], user_msg,
-        ["Drop-off", "Full-Service Buffet", "Full-Service On-site"],
+        ["Drop-off", "Onsite"],
     )
     extracted = extracted.strip()
 
     if not is_null_extraction(extracted):
         fill_slot(state["slots"], "service_type", extracted)
         slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
-        # Directly confirm and ask about rentals — do NOT mention service type options
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            f"The customer selected '{extracted}' as their service type. "
-            "Confirm this in ONE short sentence. "
-            "Then ask: Do you need any rentals for your event? "
-            "We offer linens, tables, and chairs — you can select multiple or none. "
-            "CRITICAL: Do NOT ask about service type again. It is already set.",
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_service_type']}\n\n"
+            f"The customer selected '{extracted}'. Confirm briefly and move on to cocktail hour/appetizers.",
             f"Service type: {extracted}\nSlots: {slots_summary}",
         )
-        state["current_node"] = "ask_rentals"
+        state["current_node"] = "ask_cocktail_hour"
     else:
         slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n"
             "The customer's response was unclear for service type. "
-            "Ask them to choose one: Drop-off, Full-Service Buffet, or Full-Service On-site. "
-            "Briefly explain: Drop-off means we deliver and set up, "
-            "Full-Service Buffet means staff serves buffet-style, "
-            "Full-Service On-site means full plated/attended service.",
+            "Ask them to choose: Drop-off or Onsite. "
+            "Drop-off = we deliver, set up, and leave. "
+            "Onsite = our team stays to serve throughout the event.",
             f"Customer said: {user_msg}\nSlots: {slots_summary}",
         )
-        # Stay on same node
 
     state["messages"] = add_ai_message(state, response)
     return state
@@ -257,52 +250,77 @@ async def select_event_type_node(state: ConversationState) -> ConversationState:
         context,
     )
 
-    state["current_node"] = "collect_event_date"
+    # Wedding, Corporate, Birthday → followup node for fiancé/company/birthday person
+    # Social, Custom → skip directly to event date
+    event_lower = extracted.lower() if not is_null_extraction(extracted) else ""
+    if any(kw in event_lower for kw in ["wedding", "corporate", "birthday"]):
+        state["current_node"] = "collect_event_type_followup"
+    else:
+        state["current_node"] = "collect_event_date"
+
     state["messages"] = add_ai_message(state, response)
     return state
 
 
-async def wedding_message_node(state: ConversationState) -> ConversationState:
-    """Special heartfelt message for weddings, then collect venue.
-
-    Defensive: if event_type was changed away from Wedding (via @AI),
-    falls back to a generic venue collection prompt.
-    """
+async def collect_event_type_followup_node(state: ConversationState) -> ConversationState:
+    """Collect event-type-specific followup: fiancé name (wedding), company (corporate), birthday person."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
-
-    # Try to extract venue if they gave it along with event type
-    extracted = await llm_extract(EXTRACTION_PROMPTS["venue"], user_msg)
-    if not is_null_extraction(extracted.strip()):
-        fill_slot(state["slots"], "venue", extracted.strip())
-        next_node = "collect_guest_count"
-    else:
-        next_node = "collect_venue"
-
-    # Check if event_type is still a wedding (may have changed via @AI)
-    event_type = get_slot_value(state["slots"], "event_type")
-    is_wedding = event_type and "wedding" in str(event_type).lower()
+    event_type = get_slot_value(state["slots"], "event_type") or ""
+    event_lower = event_type.lower()
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
 
-    if is_wedding:
-        context = f"Customer said: {user_msg}\nThis is a WEDDING.\nCURRENT slot values: {slots_summary}"
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['wedding_message']}",
-            context,
-        )
+    if "wedding" in event_lower:
+        extracted = await llm_extract(EXTRACTION_PROMPTS["fiance_name"], user_msg)
+        extracted = extracted.strip()
+        if not is_null_extraction(extracted):
+            fill_slot(state["slots"], "fiance_name", extracted)
+    elif "corporate" in event_lower:
+        extracted = await llm_extract(EXTRACTION_PROMPTS["company_name"], user_msg)
+        extracted = extracted.strip()
+        if not is_null_extraction(extracted):
+            fill_slot(state["slots"], "company_name", extracted)
+    elif "birthday" in event_lower:
+        extracted = await llm_extract(EXTRACTION_PROMPTS["birthday_person"], user_msg)
+        extracted = extracted.strip()
+        if not is_null_extraction(extracted):
+            fill_slot(state["slots"], "birthday_person", extracted)
     else:
-        # Event type changed — use generic venue prompt instead
+        extracted = ""
+
+    slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+
+    if is_null_extraction(extracted) if extracted else True:
+        # Could not extract — re-ask
+        if "wedding" in event_lower:
+            prompt_detail = "Could not extract fiancé name. Ask again warmly: 'What's your fiancé's name?'"
+        elif "corporate" in event_lower:
+            prompt_detail = "Could not extract company name. Ask: 'What company is this event for?'"
+        elif "birthday" in event_lower:
+            prompt_detail = "Could not extract birthday person. Ask: 'Whose birthday are we celebrating?'"
+        else:
+            prompt_detail = "Ask for the event date."
+
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{prompt_detail}",
+            f"Customer said: {user_msg}\nSlots: {slots_summary}",
+        )
+        # Stay on this node unless we can't extract for non-wedding/corporate/birthday
+        if "wedding" not in event_lower and "corporate" not in event_lower and "birthday" not in event_lower:
+            state["current_node"] = "collect_event_date"
+    else:
         context = (
-            f"Customer said: {user_msg}\n"
-            f"Event type: {event_type}\nCURRENT slot values: {slots_summary}"
+            f"Customer said: {user_msg}\nExtracted followup: {extracted}\n"
+            f"Event type: {event_type}\nSlots: {slots_summary}"
         )
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_venue']}",
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_event_type_followup']}\n\n"
+            "The followup info has been collected. Acknowledge briefly and ask for the event date.",
             context,
         )
+        state["current_node"] = "collect_event_date"
 
-    state["current_node"] = next_node
     state["messages"] = add_ai_message(state, response)
     return state
 
@@ -348,12 +366,32 @@ async def collect_venue_node(state: ConversationState) -> ConversationState:
         return state
 
     # --- 2. Vague venue detection ---
+    # --- 2a. No venue yet / TBD — accept gracefully ---
+    _NO_VENUE_PATTERNS = [
+        r'\b(tbd|not sure|undecided|idk|dunno|don\'t know|no venue|haven\'t decided|'
+        r'not yet|still looking|figuring it out|no idea|working on it)\b',
+    ]
+    is_no_venue = any(_re.search(p, t) for p in _NO_VENUE_PATTERNS)
+    if is_no_venue:
+        fill_slot(state["slots"], "venue", "TBD")
+        slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer doesn't have a venue yet. That's totally fine. "
+            "Say something like 'No problem — we can circle back to that!' "
+            "Then ask about the guest count.",
+            f"Slots: {slots_summary}",
+        )
+        state["current_node"] = "collect_guest_count"
+        state["messages"] = add_ai_message(state, response)
+        return state
+
     # Category A: Informal/personal places (my home, backyard, etc.)
     _VAGUE_PERSONAL = [
         r'\b(my\s+)?(home|house|place|gome|hme|apartment|flat|condo)\b',
         r'\b(my\s+)?(backyard|garden|yard|patio|garage|driveway|rooftop)\b',
         r'\b(my\s+)?(office|workplace|work)\b',
-        r'\b(here|there|somewhere|tbd|not sure|undecided|idk|dunno)\b',
+        r'\b(here|there|somewhere)\b',
     ]
     # Category B: Generic place TYPES without a specific name/address
     _GENERIC_PLACE_TYPES = [
@@ -469,15 +507,13 @@ async def collect_venue_node(state: ConversationState) -> ConversationState:
 
 
 async def collect_guest_count_node(state: ConversationState) -> ConversationState:
-    """Collect guest count only. Route to present_menu (non-wedding) or select_service_style (wedding)."""
+    """Collect guest count. Always routes to select_service_type next."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
     extracted = await llm_extract_integer(EXTRACTION_PROMPTS["guest_count"], user_msg)
     extracted = extracted.strip()
 
-    # llm_extract_integer guarantees the value is a valid integer string or "NONE".
-    # The digit-scraping fallback is no longer needed — a plain int() is safe here.
     guest_extracted = False
     invalid_count = False
     if not is_null_extraction(extracted):
@@ -492,17 +528,14 @@ async def collect_guest_count_node(state: ConversationState) -> ConversationStat
         except ValueError:
             pass
 
-    event_type = get_slot_value(state["slots"], "event_type")
-    is_wedding = event_type and "wedding" in str(event_type).lower()
-
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
     context = (
         f"Customer said: {user_msg}\nExtracted guest_count: {extracted}\n"
-        f"Event type: {event_type}\nCURRENT slot values: {slots_summary}"
+        f"CURRENT slot values: {slots_summary}"
     )
 
     if guest_extracted:
-        next_node = "select_service_style" if is_wedding else "ask_appetizers"
+        next_node = "select_service_type"
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_guest_count']}",
             context,
@@ -559,30 +592,3 @@ async def present_menu_node(state: ConversationState) -> ConversationState:
     return state
 
 
-async def select_service_style_node(state: ConversationState) -> ConversationState:
-    """Extract service style (wedding only). Route to present_menu."""
-    state = dict(state)
-    user_msg = get_last_human_message(state["messages"])
-
-    extracted = await llm_extract_enum(
-        EXTRACTION_PROMPTS["service_style"], user_msg,
-        ["cocktail hour", "reception", "both"],
-    )
-    extracted = extracted.strip()
-
-    if not is_null_extraction(extracted):
-        fill_slot(state["slots"], "service_style", extracted)
-
-    slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
-    context = (
-        f"Customer said: {user_msg}\nExtracted service_style: {extracted}\n"
-        f"CURRENT slot values: {slots_summary}"
-    )
-    response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_service_style']}",
-        context,
-    )
-
-    state["current_node"] = "ask_appetizers"
-    state["messages"] = add_ai_message(state, response)
-    return state

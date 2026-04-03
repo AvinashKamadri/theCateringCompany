@@ -252,7 +252,7 @@ async def validate_slot(slot_name: str, value: str) -> dict:
     elif slot_name == "service_type":
         return validate_enum(
             value,
-            allowed_values=['drop-off', 'on-site'],
+            allowed_values=['Drop-off', 'Onsite'],
             field_name="Service type"
         )
     
@@ -263,14 +263,34 @@ async def validate_slot(slot_name: str, value: str) -> dict:
             field_name="Event type"
         )
     
-    # For other slots (name, venue, special_requests), basic validation
-    elif slot_name in ["name", "venue", "special_requests"]:
+    elif slot_name == "buffet_or_plated":
+        return validate_enum(
+            value,
+            allowed_values=['Buffet', 'Plated'],
+            field_name="Buffet or plated"
+        )
+
+    elif slot_name == "tableware":
+        return validate_enum(
+            value,
+            allowed_values=['Standard', 'Premium', 'China'],
+            field_name="Tableware"
+        )
+
+    # Free-text slots — accept any non-empty value
+    elif slot_name in [
+        "name", "venue", "special_requests", "dietary_concerns",
+        "fiance_name", "company_name", "birthday_person",
+        "drinks", "bar_service", "labor_services", "desserts",
+        "appetizers", "selected_dishes", "service_style",
+        "rentals",
+    ]:
         return {
             "valid": True,
             "normalized_value": value.strip(),
             "error_message": None
         }
-    
+
     else:
         return {
             "valid": False,

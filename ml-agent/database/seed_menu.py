@@ -1,8 +1,10 @@
 """
 Seed menu_categories, menu_items, and pricing_packages.
 Run once: python database/seed_menu.py
+Use --reseed to clear and re-populate all menu data.
 """
 
+import sys
 import asyncio
 from prisma import Prisma
 
@@ -100,68 +102,45 @@ MENU_DATA = [
             {"name": "Charcuterie Boards", "unit_price": 4.25, "price_type": "per_person"},
         ],
     },
+    # ─── MAIN COURSES ───
     {
         "name": "Signature Combinations",
         "sort_order": 8,
         "items": [
             {"name": "Prime Rib & Salmon", "unit_price": 39.99, "price_type": "per_person",
-             "description": "Carved Prime Rib w/ Horseradish Cream & Aju, Roasted Salmon w/ Dill Cream Sauce, Roasted Potatoes, Wild Rice, Glazed Carrots, Grilled Asparagus, Dinner Rolls"},
-            {"name": "Chicken & Ham", "unit_price": 27.99, "price_type": "per_person",
-             "description": "Grilled Chicken Breast, Mango Glazed Ham Carved, Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, Dinner Rolls"},
-            {"name": "Chicken Piccata", "unit_price": 29.49, "price_type": "per_person",
-             "description": "Chicken Piccata, Red Wine Braised Beef Roast, Long Grain Buttered Rice, Vegetable Farfalle, Roasted Mixed Veggies, Green Beans, Dinner Rolls"},
+             "description": "Carved Prime Rib (Horseradish Cream and Au Jus), Roasted Salmon (Dill Sauce), Roasted Potatoes, Wild Rice, Glazed Carrots, Roasted Asparagus, Dinner Rolls"},
+            {"name": "Grilled Chicken and Ham", "unit_price": 27.99, "price_type": "per_person",
+             "description": "Grilled Chicken Breast, Mango Glazed Ham, Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, Dinner Rolls"},
+            {"name": "Chicken Piccata and Red Wine Braised Beef", "unit_price": 29.49, "price_type": "per_person",
+             "description": "Chicken Piccata, Red Wine Braised Beef, Vegetable Farfalle, Long Grain Rice, Roasted Mixed Veggies, Green Beans, Dinner Rolls"},
         ],
     },
     {
-        "name": "BBQ Menus",
+        "name": "Tasty & Casual",
         "sort_order": 9,
         "items": [
             {"name": "Beef Brisket & Chicken", "unit_price": 25.99, "price_type": "per_person",
              "description": "BBQ Beef Brisket (sliced), Beer Can Chicken. Includes: Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad"},
             {"name": "Pork & Chicken", "unit_price": 23.99, "price_type": "per_person",
              "description": "Pulled BBQ Pork, Pulled BBQ Chicken. Includes: Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad"},
-        ],
-    },
-    {
-        "name": "Casual Fare - Burger Bar",
-        "sort_order": 10,
-        "items": [
             {"name": "Burger Bar", "unit_price": 23.99, "price_type": "per_person",
              "description": "Burgers (handmade) w/ Brioche Buns, Beer Can Chicken Breast. Toppings Bar: Mushrooms, Grilled Peppers and Onion, Pickles, Lettuce, Tomato, Bacon, Assorted Sauces and Cheese, Mac & Cheese, Roasted Red Potato"},
-        ],
-    },
-    {
-        "name": "Casual Fare - Southern Comfort",
-        "sort_order": 11,
-        "items": [
             {"name": "Southern Comfort", "unit_price": 27.95, "price_type": "per_person",
              "description": "Garden Salad, Crispy Fried Chicken, Smoked Sausage, Mac and Cheese, Mashed Potatoes, Southern Style Green Beans, Buttered Corn Kernel, Corn Bread w/ Butter"},
         ],
     },
     {
-        "name": "Mexican",
-        "sort_order": 12,
+        "name": "Global Inspirations",
+        "sort_order": 10,
         "items": [
-            {"name": "Char Grilled", "unit_price": 27.99, "price_type": "per_person",
+            {"name": "Char Grilled Mexican", "unit_price": 27.99, "price_type": "per_person",
              "description": "Carne Asada, Chili Lime Chicken, Spanish Rice, Bandito Black Beans, Peppers & Onions, Pico De Gallo, Sour Cream, Tortilla Shells"},
             {"name": "Fiesta Taco Bar", "unit_price": 23.99, "price_type": "per_person",
              "description": "Braised Spanish Beef, Braised Chili Chicken, Pinto Beans, Cilantro Lime Rice, Full Toppings Bar"},
-        ],
-    },
-    {
-        "name": "Mediterranean Bars",
-        "sort_order": 13,
-        "items": [
             {"name": "Mediterranean Bar", "unit_price": 23.49, "price_type": "per_person",
              "description": "Hummus Bar (all homemade), Roasted Garlic Hummus, Sundried Tomato Hummus, Original Hummus. Toppings: Grilled Marinated Chicken, Roasted Vegetables, Feta Cheese, Roasted Chickpeas, Olives, Fresh Diced Tomato, Pickled Onions"},
             {"name": "Souvlaki Bar", "unit_price": 21.49, "price_type": "per_person",
              "description": "Chicken Souvlaki, Tzatziki Sauce, Roasted Greek Potatoes, Roasted Mixed Vegetables, Green Beans, Pita Bread"},
-        ],
-    },
-    {
-        "name": "Italian Bars",
-        "sort_order": 14,
-        "items": [
             {"name": "Marsala Menu", "unit_price": 25.99, "price_type": "per_person",
              "description": "Chicken Marsala, Roasted Cod in Peperonata Sauce, Vegetable Farfalle, Fettuccini, Roasted Mixed Veggies, Green Beans, Dinner Rolls"},
             {"name": "Ravioli Menu", "unit_price": 31.99, "price_type": "per_person",
@@ -170,55 +149,30 @@ MENU_DATA = [
              "description": "Caesar Salad w/ Croutons, Grilled Chicken Breast, Sliced Italian Sausage, Pesto Penne Alfredo, Green Beans, Honey Glazed Carrots, Dinner Rolls"},
         ],
     },
+    # ─── DESSERTS ───
     {
-        "name": "Soup/Salad/Sandwich",
-        "sort_order": 15,
-        "items": [
-            {"name": "Soup Pick 2", "unit_price": 21.95, "price_type": "per_person",
-             "description": "Choose from: Broccoli Cheddar, Loaded Potato, Tomato Basil Bisque, Chicken Tortilla, Vegetable Minestrone, Clam Chowder, French Onion, Chicken Noodle, Chicken Chili"},
-            {"name": "Salad Pick 2", "unit_price": 21.95, "price_type": "per_person",
-             "description": "Choose from: Seasonal Greens Salad, Bacon and Blue Cheese Salad, Garden Salad, Southwest Salad, Pasta Salad, Potato Salad, Coleslaw"},
-            {"name": "Sandwich Pick 2", "unit_price": 21.95, "price_type": "per_person",
-             "description": "Choose from: Gourmet Grilled Cheese, Corned Beef and Reuben, Grilled Chicken, Avocado BLT, Pesto Chicken, Turkey Club, Philly Cheese Steaks"},
-        ],
-    },
-    {
-        "name": "Potato Bar",
-        "sort_order": 16,
-        "items": [
-            {"name": "Potato Bar", "unit_price": 19.95, "price_type": "per_person",
-             "description": "Choose Your Potato: Baked Idaho, Roasted Garlic Mashed, Sour Cream and Chive Mashed. Choose 2 Proteins and 8 Toppings from our selection"},
-        ],
-    },
-    {
-        "name": "Coffee and Desserts",
-        "sort_order": 17,
+        "name": "Desserts",
+        "sort_order": 11,
         "items": [
             {"name": "Mini Desserts - Select 4", "unit_price": 5.25, "price_type": "per_person",
              "description": "Flavored Mousse Cup, Lemon Bars, Blondies, 7-Layer Bars, Brownies, Chocolate Chip Cookie Bars, Mini Assorted Cheesecakes, Fruit Tarts"},
-            {"name": "Coffee Bar", "unit_price": 2.75, "price_type": "per_person",
-             "description": "Brewed Dunkin Donuts Coffee with Sugar, Half & Half & Flavor Shots (Caramel, Hazelnut, French Vanilla)"},
         ],
     },
     {
         "name": "Wedding Cakes",
-        "sort_order": 18,
+        "sort_order": 12,
         "items": [
             {"name": "Wedding/Tiered Cakes", "unit_price": 275.00, "price_type": "flat", "tags": ["wedding"],
              "description": "2 Tier 6\" & 8\" (Serves 25). Available: Yellow, White, Almond, Chocolate, Carrot, Red Velvet. Multiple filling and frosting options. Cupcakes $3.50 ea."},
         ],
     },
+    # ─── DRINKS ───
     {
-        "name": "Floral Arrangements",
-        "sort_order": 19,
+        "name": "Drinks",
+        "sort_order": 13,
         "items": [
-            {"name": "Bridal Bouquets", "unit_price": 75.00, "price_type": "flat", "tags": ["wedding", "flowers"]},
-            {"name": "Bridesmaids Bouquets", "unit_price": 40.00, "price_type": "flat", "tags": ["wedding", "flowers"]},
-            {"name": "Corsages", "unit_price": 20.00, "price_type": "flat", "tags": ["wedding", "flowers"]},
-            {"name": "Boutonnieres", "unit_price": 15.00, "price_type": "flat", "tags": ["wedding", "flowers"]},
-            {"name": "Arbor Spray", "unit_price": 150.00, "price_type": "flat", "tags": ["wedding", "flowers"]},
-            {"name": "Table Runners", "unit_price": 50.00, "price_type": "flat", "tags": ["wedding", "flowers"]},
-            {"name": "Center Pieces", "unit_price": 40.00, "price_type": "flat", "tags": ["wedding", "flowers"]},
+            {"name": "Coffee Bar", "unit_price": 2.75, "price_type": "per_person",
+             "description": "Brewed Dunkin Donuts Coffee with Sugar, Half & Half & Flavor Shots (Caramel, Hazelnut, French Vanilla)"},
         ],
     },
 ]
@@ -233,16 +187,22 @@ PRICING_PACKAGES = [
 ]
 
 
-async def seed():
+async def seed(reseed: bool = False):
     client = Prisma()
     await client.connect()
 
-    # Check existing data
-    cat_count = await client.menu_categories.count()
-    if cat_count > 0:
-        print(f"Already seeded ({cat_count} categories). Skipping.")
-        await client.disconnect()
-        return
+    if reseed:
+        print("Reseeding: clearing existing menu data...")
+        await client.menu_items.delete_many()
+        await client.menu_categories.delete_many()
+        await client.pricing_packages.delete_many()
+        print("  Cleared.")
+    else:
+        cat_count = await client.menu_categories.count()
+        if cat_count > 0:
+            print(f"Already seeded ({cat_count} categories). Use --reseed to re-populate.")
+            await client.disconnect()
+            return
 
     items_created = 0
 
@@ -289,4 +249,5 @@ async def seed():
 
 
 if __name__ == "__main__":
-    asyncio.run(seed())
+    reseed_flag = "--reseed" in sys.argv
+    asyncio.run(seed(reseed=reseed_flag))

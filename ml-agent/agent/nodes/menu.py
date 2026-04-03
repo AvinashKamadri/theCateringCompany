@@ -29,17 +29,22 @@ def _is_appetizer_category(cat_name: str) -> bool:
 
 
 def _is_non_dish_category(cat_name: str) -> bool:
-    """Check if a category is NOT a selectable food dish (desserts, floral, cakes, coffee, etc.).
+    """Check if a category is NOT a selectable food dish (desserts, drinks, cakes, etc.).
 
     These categories are handled by their own dedicated nodes or are non-food items.
     """
     cat_lower = cat_name.lower()
     return any(kw in cat_lower for kw in [
-        "dessert", "cake", "floral", "flower", "bouquet", "boutonniere",
-        "corsage", "arbor", "center piece", "centerpiece", "table runner",
-        "coffee", "beverage", "drink", "bar setup",
-        "utensil", "rental", "linen", "chair", "table",
+        "dessert", "cake",
+        "coffee", "beverage", "drink", "bar",
+        "rental", "linen", "chair", "table",
     ])
+
+
+def _is_drink_category(cat_name: str) -> bool:
+    """Check if a category is a drink/beverage category."""
+    cat_lower = cat_name.lower()
+    return any(kw in cat_lower for kw in ["drink", "beverage", "coffee", "bar"])
 
 
 def _format_menu_for_prompt(
@@ -259,7 +264,7 @@ async def get_appetizer_context(state) -> str:
 
 
 async def get_dessert_context(state) -> str:
-    """Fetch dessert items from DB — includes Coffee and Desserts + Wedding Cakes for weddings."""
+    """Fetch dessert items from DB — excludes coffee/drinks. Includes Wedding Cakes for weddings."""
     menu = await load_menu_by_category()
     slots = _slots_context(state)
     event_type = (slots.get("event_type") or "").lower()
@@ -268,7 +273,8 @@ async def get_dessert_context(state) -> str:
     dessert_items = []
     for cat_name, items in menu.items():
         cat_lower = cat_name.lower()
-        if any(kw in cat_lower for kw in ["dessert", "coffee"]):
+        # Include dessert categories but NOT coffee/drinks (those are in drinks node now)
+        if "dessert" in cat_lower and not _is_drink_category(cat_name):
             dessert_items.extend(items)
         elif is_wedding and "cake" in cat_lower:
             dessert_items.extend(items)
@@ -277,6 +283,25 @@ async def get_dessert_context(state) -> str:
     return (
         f"REAL DESSERT MENU FROM DATABASE (present these exact items):\n"
         f"{formatted}\n\n"
+        f"Event: {slots}"
+    )
+
+
+async def get_drink_context(state) -> str:
+    """Fetch drink/coffee items from DB for the drinks node."""
+    menu = await load_menu_by_category()
+    slots = _slots_context(state)
+
+    drink_items = []
+    for cat_name, items in menu.items():
+        if _is_drink_category(cat_name):
+            drink_items.extend(items)
+
+    formatted = _format_items_list(drink_items) if drink_items else "No drink items available."
+    return (
+        f"DRINK OPTIONS FROM DATABASE (present these exact items):\n"
+        f"{formatted}\n\n"
+        f"Note: Water, iced tea, and lemonade are included with every package.\n"
         f"Event: {slots}"
     )
 
@@ -496,26 +521,13 @@ async def ask_appetizers_node(state: ConversationState) -> ConversationState:
         state["current_node"] = "select_appetizers"
     else:
         fill_slot(state["slots"], "appetizers", "none")
-        # Immediately fetch and present the real main menu so the LLM
-        # doesn't fabricate dishes when told "show them the menu".
-        menu_context = await get_main_dishes_context(state)
-        event_slots = {
-            k: v["value"] for k, v in state["slots"].items()
-            if v.get("filled") and k in ("name", "event_type", "event_date", "guest_count", "venue")
-        }
-        context = (
-            f"Customer skipped appetizers.\n"
-            f"Event details: {event_slots}\n\n"
-            f"{menu_context}"
-        )
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['present_menu']}\n\n"
-            "Briefly acknowledge they've skipped appetizers (one sentence), then present the menu. "
-            "CRITICAL: Use ONLY the exact items listed in the database context. "
-            "DO NOT invent, rename, or add any item not in that list.",
-            context
+            f"{SYSTEM_PROMPT}\n\n"
+            "The customer skipped appetizers. Acknowledge briefly. "
+            "Ask: 'Would you like buffet style or plated service for the main course?'",
+            f"Event details: {_slots_context(state)}"
         )
-        state["current_node"] = "select_dishes"
+        state["current_node"] = "ask_buffet_or_plated"
 
     state["messages"] = add_ai_message(state, response)
     return state
@@ -639,7 +651,7 @@ async def select_appetizers_node(state: ConversationState) -> ConversationState:
         context
     )
 
-    state["current_node"] = "select_dishes"
+    state["current_node"] = "ask_buffet_or_plated"
     state["messages"] = add_ai_message(state, response)
     return state
 
@@ -831,8 +843,15 @@ async def collect_menu_changes_node(state: ConversationState) -> ConversationSta
             existing_lower = {name.lower() for name in current_items}
             new_names = [item["name"] for item in matched_new if item["name"].lower() not in existing_lower]
             merged = current_items + new_names
-            if merged:
-                _, resolved_text = await _resolve_to_db_items(", ".join(merged), menu)
+            # Deduplicate while preserving order
+            seen_lower: set[str] = set()
+            deduped: list[str] = []
+            for name in merged:
+                if name.lower() not in seen_lower:
+                    seen_lower.add(name.lower())
+                    deduped.append(name)
+            if deduped:
+                _, resolved_text = await _resolve_to_db_items(", ".join(deduped), menu)
             else:
                 resolved_text = current_value
         else:

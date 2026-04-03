@@ -32,7 +32,7 @@ class ConversationState(TypedDict):
     slots: dict[str, SlotData]
     next_action: str
     error: str | None
-    contract_data: dict | None
+    summary_data: dict | None
     is_complete: bool
     dietary_conflict_attempts: int  # tracks conflict re-asks to cap the loop at 2
 
@@ -41,25 +41,30 @@ class ConversationState(TypedDict):
 SLOT_NAMES = [
     # Basic info
     "name",              # First and last name
-    "event_date",        # Event date
-    "service_type",      # drop-off or on-site
     "event_type",        # Wedding, Corporate, Birthday, Social, Custom
+    "fiance_name",       # Fiancé name (wedding only)
+    "company_name",      # Company name (corporate only)
+    "birthday_person",   # Birthday person name (birthday only)
+    "event_date",        # Event date
     "venue",             # Venue details
     "guest_count",       # Approximate guest count
-    "service_style",     # cocktail hour, reception, both
+    "service_type",      # Drop-off or Onsite
     # Menu building
-    "selected_dishes",   # List of 3-5 main dishes
+    "service_style",     # cocktail hour: passed / station / both
     "appetizers",        # List of appetizers or None
+    "buffet_or_plated",  # Buffet or Plated
+    "selected_dishes",   # List of main dishes
     "menu_notes",        # Special menu design notes
     # Add-ons
-    "utensils",          # Utensil selections or "no"
     "desserts",          # Dessert selections or "no"
+    "drinks",            # Coffee / drink selections or "no"
+    "bar_service",       # Bar package selections or "no"
+    "tableware",         # Standard disposable / premium / china
     "rentals",           # linen/table/chair selections or "no"
-    "florals",           # Floral arrangement selections or "no" (wedding only)
     # Final details
     "special_requests",  # Special requests or "none"
+    "labor_services",    # Setup/cleanup/travel selections or "no"
     "dietary_concerns",  # Health and dietary concerns
-    "additional_notes",  # Anything else
 ]
 
 
@@ -130,33 +135,32 @@ def get_slot_value(slots: dict, name: str) -> Any:
 NODE_SEQUENCE = [
     "start",
     "collect_name",
-    "collect_event_date",
-    "select_service_type",
     "select_event_type",
-    "wedding_message",       # conditional: only for weddings
+    "collect_event_type_followup",  # conditional: wedding→fiancé, corporate→company, birthday→person
+    "collect_event_date",
     "collect_venue",
     "collect_guest_count",
-    "select_service_style",
+    "select_service_type",          # Drop-off or Onsite only
     # Menu building
+    "ask_cocktail_hour",
+    "select_appetizers",
+    "ask_buffet_or_plated",
+    "present_menu",
     "select_dishes",
-    "ask_appetizers",
-    "select_appetizers",     # conditional: only if yes
-    "menu_design",
     "ask_menu_changes",
-    "collect_menu_changes",  # conditional: only if yes
+    "collect_menu_changes",         # conditional: only if yes
     # Add-ons
-    "ask_utensils",
-    "select_utensils",       # conditional: only if yes
     "ask_desserts",
-    "select_desserts",       # conditional: only if yes
-    "ask_more_desserts",     # conditional: only if yes
+    "select_desserts",              # conditional: only if yes
+    "ask_drinks",
+    "ask_bar_service",              # conditional: only if wants bar
+    "ask_tableware",
     "ask_rentals",
-    "ask_florals",           # conditional: only for weddings
     # Final
     "ask_special_requests",
-    "collect_special_requests",  # conditional: only if yes
+    "collect_special_requests",     # conditional: only if yes
+    "ask_labor_services",
     "collect_dietary",
-    "ask_anything_else",
-    "collect_anything_else",     # conditional: only if yes
-    "generate_contract",
+    "generate_summary",
+    "offer_followup_call",
 ]

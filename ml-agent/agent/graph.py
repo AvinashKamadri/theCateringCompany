@@ -10,9 +10,9 @@ from agent.routing import route_message
 
 def build_conversation_graph():
     """
-    Build the LangGraph state machine with all 27 conversation nodes.
+    Build the LangGraph state machine with all conversation nodes.
 
-    Flow: start -> basic info -> menu building -> add-ons -> final -> contract
+    Flow: start -> basic info -> menu building -> add-ons -> final -> summary
     Each node processes ONE user message then routes to END.
     The router uses current_node to determine which node runs next.
     """

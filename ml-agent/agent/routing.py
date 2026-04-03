@@ -14,40 +14,38 @@ from agent.state import ConversationState
 # Used to detect when the user is talking about a DIFFERENT slot than the current one.
 _NODE_COLLECTS: dict[str, str | None] = {
     "collect_name": "name",
-    "collect_event_date": "event_date",
-    "select_service_type": "service_type",
     "select_event_type": "event_type",
-    "wedding_message": None,
+    "collect_event_type_followup": "event_type",
+    "collect_event_date": "event_date",
     "collect_venue": "venue",
     "collect_guest_count": "guest_count",
-    "select_service_style": "service_style",
-    "ask_appetizers": "appetizers",
+    "select_service_type": "service_type",
+    "ask_cocktail_hour": "service_style",
     "select_appetizers": "appetizers",
+    "ask_buffet_or_plated": "buffet_or_plated",
     "present_menu": "selected_dishes",
     "select_dishes": "selected_dishes",
-    "menu_design": None,
     "ask_menu_changes": "selected_dishes",
     "collect_menu_changes": "selected_dishes",
-    "ask_utensils": "utensils",
-    "select_utensils": "utensils",
     "ask_desserts": "desserts",
     "select_desserts": "desserts",
-    "ask_more_desserts": "desserts",
+    "ask_drinks": "drinks",
+    "ask_bar_service": "bar_service",
+    "ask_tableware": "tableware",
     "ask_rentals": "rentals",
-    "ask_florals": "florals",
     "ask_special_requests": "special_requests",
     "collect_special_requests": "special_requests",
+    "ask_labor_services": "labor_services",
     "collect_dietary": "dietary_concerns",
-    "ask_anything_else": "additional_notes",
-    "collect_anything_else": "additional_notes",
-    "generate_contract": None,
+    "generate_summary": None,
+    "offer_followup_call": None,
 }
 
 # Words/phrases that clearly signal the user wants to correct a PREVIOUS answer.
 _CORRECTION_SIGNALS = re.compile(
     r'\b(actually|wait|i meant|let me change|can you (change|update|fix)|'
-    r'change (my|the|guest|event|venue|date|name|service|utensil|rental|dessert)|'
-    r'update (my|the|guest|event|venue|date|name|service)|'
+    r'change (my|the|guest|event|venue|date|name|service|rental|dessert|drink|bar|tableware)|'
+    r'update (my|the|guest|event|venue|date|name|service|drink|bar)|'
     r'i want to (change|update)|'
     r'correction|oh wait|no wait|sorry,?\s+i|i made a mistake|'
     r'i forgot to|i need to (change|update|fix)|'
@@ -62,19 +60,26 @@ _CORRECTION_SIGNALS = re.compile(
 
 # Keyword sets per slot for detecting which slot the user is talking about.
 _SLOT_KEYWORDS: dict[str, list[str]] = {
-    "name":          [r'\bmy name\b', r'\bname is\b', r'\bcall me\b'],
-    "event_date":    [r'\bthe date\b', r'\bmy date\b', r'\bevent date\b', r'\bdate is\b', r'\bdate to\b',
-                      r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
-                      r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\b',
-                      r'\bnext\s+(week|month|saturday|sunday|monday|friday)\b'],
-    "guest_count":   [r'\bguests?\b', r'\bguest count\b', r'\bpeople\b', r'\battendees?\b'],
-    "venue":         [r'\bvenue\b', r'\blocation\b', r'\bplace\b', r'\baddress\b', r'\bheld at\b'],
-    "service_type":  [r'\bdrop.?off\b', r'\bon.?site\b', r'\bservice type\b'],
-    "event_type":    [r'\bwedding\b', r'\bcorporate\b', r'\bbirthday\b', r'\bevent type\b'],
+    "name":             [r'\bmy name\b', r'\bname is\b', r'\bcall me\b'],
+    "event_date":       [r'\bthe date\b', r'\bmy date\b', r'\bevent date\b', r'\bdate is\b', r'\bdate to\b',
+                         r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
+                         r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\b',
+                         r'\bnext\s+(week|month|saturday|sunday|monday|friday)\b'],
+    "guest_count":      [r'\bguests?\b', r'\bguest count\b', r'\bpeople\b', r'\battendees?\b'],
+    "venue":            [r'\bvenue\b', r'\blocation\b', r'\bplace\b', r'\baddress\b', r'\bheld at\b'],
+    "service_type":     [r'\bdrop.?off\b', r'\bonsite\b', r'\bservice type\b'],
+    "event_type":       [r'\bwedding\b', r'\bcorporate\b', r'\bbirthday\b', r'\bevent type\b'],
+    "fiance_name":      [r'\bfianc[eé]\b', r'\bpartner\b', r'\bspouse\b'],
+    "buffet_or_plated": [r'\bbuffet\b', r'\bplated\b'],
     "dietary_concerns": [r'\bdiet\b', r'\ballerg\b', r'\bvegan\b', r'\bvegetarian\b', r'\bhalal\b', r'\bkosher\b'],
     "special_requests": [r'\bspecial request\b', r'\bnote\b'],
     "appetizers":       [r'appetizers?', r'hors\s*d\'?oeuvres?', r'starters?'],
     "selected_dishes":  [r'\bdishes?\b', r'\bentr[eé]es?\b', r'\bmain\s+courses?\b', r'\bfood\s+selection\b'],
+    "desserts":         [r'\bdesserts?\b', r'\bcake\b', r'\bcupcakes?\b', r'\bcookies?\b', r'\bsweets?\b'],
+    "drinks":           [r'\bdrinks?\b', r'\bcoffee\b', r'\bbeverage\b'],
+    "bar_service":      [r'\bbar\b', r'\bcocktails?\b', r'\bbeer\b', r'\bwine\b', r'\bliquor\b'],
+    "tableware":        [r'\btableware\b', r'\bchina\b', r'\bdisposable\b', r'\bplates?\b', r'\bsilverware\b'],
+    "labor_services":   [r'\bsetup\b', r'\bcleanup\b', r'\btravel\b', r'\blabor\b'],
 }
 
 
@@ -175,23 +180,25 @@ def route_message(state: ConversationState) -> str:
 
 
     valid_nodes = {
-        "start", "collect_name", "collect_event_date", "select_service_type",
-        "select_event_type", "wedding_message", "collect_venue",
-        "collect_guest_count", "present_menu", "select_service_style",
-        "select_dishes", "ask_appetizers", "select_appetizers",
-        "menu_design", "ask_menu_changes", "collect_menu_changes",
-        "ask_utensils", "select_utensils",
-        "ask_desserts", "select_desserts", "ask_more_desserts",
-        "ask_rentals", "ask_florals",
+        "start", "collect_name", "select_event_type", "collect_event_type_followup",
+        "collect_event_date", "collect_venue", "collect_guest_count",
+        "select_service_type",
+        "ask_cocktail_hour", "select_appetizers",
+        "ask_buffet_or_plated", "present_menu", "select_dishes",
+        "ask_menu_changes", "collect_menu_changes",
+        "ask_desserts", "select_desserts",
+        "ask_drinks", "ask_bar_service",
+        "ask_tableware", "ask_rentals",
         "ask_special_requests", "collect_special_requests",
-        "collect_dietary", "ask_anything_else", "collect_anything_else",
-        "generate_contract", "check_modifications",
+        "ask_labor_services", "collect_dietary",
+        "generate_summary", "offer_followup_call",
+        "check_modifications",
     }
 
-    # "complete" means contract was already generated — stay at generate_contract
-    # so post-contract messages don't restart the flow
+    # "complete" means summary was already generated — stay at offer_followup_call
+    # so post-summary messages don't restart the flow
     if current == "complete":
-        return "generate_contract"
+        return "offer_followup_call"
 
     if current in valid_nodes:
         return current

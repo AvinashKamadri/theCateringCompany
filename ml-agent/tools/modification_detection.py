@@ -24,11 +24,23 @@ SLOT_KEYWORDS = {
     "event_date": ["date", "when", "day", "schedule"],
     "guest_count": ["guest", "people", "count", "attendee", "guests"],
     "venue": ["venue", "location", "place", "address"],
-    "service_type": ["service", "drop-off", "on-site"],
+    "service_type": ["service", "drop-off", "onsite", "drop off"],
     "event_type": ["wedding", "corporate", "birthday", "event type"],
-    "special_requests": ["dietary", "halal", "vegan", "allergy", "allergies", "restrictions"],
+    "special_requests": ["special request", "special requests", "accommodation"],
     "appetizers": ["appetizer", "hors d'oeuvres", "hors doeuvres", "starter", "starters"],
     "selected_dishes": ["dish", "dishes", "entree", "entrees", "main course", "main dish", "food selection"],
+    "desserts": ["dessert", "desserts", "cake", "cookie", "brownie", "sweet"],
+    "fiance_name": ["fiance", "fiancé", "fiancée", "partner"],
+    "company_name": ["company", "organization", "business"],
+    "birthday_person": ["birthday person", "birthday boy", "birthday girl", "celebrant"],
+    "buffet_or_plated": ["buffet", "plated"],
+    "drinks": ["drink", "drinks", "beverage", "coffee", "bar"],
+    "bar_service": ["bar service", "bar package", "open bar", "beer", "wine", "cocktail bar"],
+    "tableware": ["tableware", "china", "disposable", "plates", "silverware", "utensils"],
+    "labor_services": ["labor", "setup", "cleanup", "travel", "staff"],
+    "dietary_concerns": ["dietary", "halal", "vegan", "allergy", "allergies", "restrictions", "gluten"],
+    "service_style": ["cocktail hour", "passed", "station", "cocktail style"],
+    "rentals": ["rental", "rentals", "tent", "chair", "table rental"],
 }
 
 
@@ -41,7 +53,14 @@ SLOT_IDENTIFICATION_FUNCTION = {
         "properties": {
             "target_slot": {
                 "type": "string",
-                "enum": ["name", "phone", "event_date", "service_type", "event_type", "venue", "guest_count", "special_requests", "appetizers", "selected_dishes"],
+                "enum": [
+                    "name", "phone", "event_date", "service_type", "event_type",
+                    "venue", "guest_count", "special_requests", "appetizers",
+                    "selected_dishes", "desserts", "fiance_name", "company_name",
+                    "birthday_person", "buffet_or_plated", "drinks", "bar_service",
+                    "tableware", "labor_services", "dietary_concerns",
+                    "service_style", "rentals"
+                ],
                 "description": "The slot/field the user wants to modify"
             },
             "new_value": {
@@ -155,15 +174,27 @@ The user is trying to modify one of these fields:
 - name: Client's name
 - phone: Phone number
 - event_date: Date of the event
-- service_type: Service type (drop-off or on-site)
+- service_type: Service type (Drop-off or Onsite)
 - event_type: Event category (Wedding, Corporate, Birthday, Social, Custom)
 - venue: Venue details (address, location)
 - guest_count: Number of guests
-- special_requests: Dietary restrictions, allergies, special requests
+- special_requests: Special requests or accommodations
 - appetizers: Appetizer / hors d'oeuvres selections (add or remove specific items)
 - selected_dishes: Main dish / entrée selections (add or remove specific items)
+- desserts: Dessert selections (add or remove specific items)
+- fiance_name: Fiancé/fiancée name (wedding events)
+- company_name: Company/organization name (corporate events)
+- birthday_person: Birthday person's name (birthday events)
+- buffet_or_plated: Buffet or Plated service choice
+- drinks: Drink selections (coffee, bar service, etc.)
+- bar_service: Bar package selection
+- tableware: Tableware choice (Standard, Premium, China)
+- labor_services: Labor services (setup, cleanup, travel)
+- dietary_concerns: Dietary restrictions, allergies
+- service_style: Cocktail hour style (passed, station, both)
+- rentals: Rental equipment needs
 
-For appetizers and selected_dishes, the new_value should be a comma-separated list of the item names the user wants to ADD or the full instruction (e.g. "add Spanakopita" or "remove Chicken Satay").
+For appetizers, selected_dishes, and desserts, the new_value should be a comma-separated list of the item names the user wants to ADD or the full instruction (e.g. "add Spanakopita" or "remove Chicken Satay").
 
 Analyze the user's message and identify:
 1. Which field they want to modify

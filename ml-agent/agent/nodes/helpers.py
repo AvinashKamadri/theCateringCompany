@@ -6,6 +6,7 @@ Includes AI generation audit logging on every LLM call.
 import os
 import re
 import time
+import random
 import logging
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from agent.llm import llm
@@ -311,6 +312,11 @@ _NULL_EXTRACTION_VALUES = frozenset({
     "no date", "no name", "no venue", "no count",
     "-", "--", "—",
 })
+
+
+def pick_variation(variations: list[str]) -> str:
+    """Pick a random phrasing variation to avoid repetitive responses."""
+    return random.choice(variations)
 
 
 def is_null_extraction(value: str) -> bool:

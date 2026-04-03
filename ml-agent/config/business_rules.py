@@ -63,26 +63,97 @@ class BusinessConfig:
     MARGIN_EXCELLENT_THRESHOLD = 40.0  # Above this is excellent
     
     # ============================================================================
+    # SERVICE TYPE
+    # ============================================================================
+
+    VALID_SERVICE_TYPES = ["Drop-off", "Onsite"]
+
+    # ============================================================================
     # PRICING PACKAGE SELECTION RULES
     # ============================================================================
-    
+
     # Guest count threshold for package selection
     PREMIUM_PACKAGE_GUEST_THRESHOLD = 75  # Above this, select higher-tier packages
-    
+
+    # ============================================================================
+    # BAR SERVICE PRICING
+    # ============================================================================
+
+    BARTENDER_RATE = 50.00       # per hour
+    BARTENDER_MIN_HOURS = 5      # minimum 5-hour booking
+
+    BAR_PACKAGES = {
+        "beer_wine": {
+            "label": "Beer & Wine",
+            "description": "Selection of domestic/imported beers and house wines",
+            "price_pp": 15.00,
+        },
+        "beer_wine_signatures": {
+            "label": "Beer, Wine & Signature Cocktails",
+            "description": "Beer & wine plus 2 signature cocktails of your choice",
+            "price_pp": 22.00,
+        },
+        "full_open_bar": {
+            "label": "Full Open Bar",
+            "description": "Full liquor, beer, wine, and mixers",
+            "price_pp": 30.00,
+        },
+    }
+
+    # ============================================================================
+    # TABLEWARE
+    # ============================================================================
+
+    PREMIUM_DISPOSABLE_PP = 1.00   # gold/silver upgrade per person
+
+    # China staffing tiers (guest count → staffing cost)
+    CHINA_STAFFING = {
+        50: 175,
+        75: 250,
+        100: 325,
+        125: 425,
+        150: 550,
+    }
+
+    # ============================================================================
+    # LABOR SERVICES
+    # ============================================================================
+
+    # Setup
+    CEREMONY_SETUP_PP = 1.50
+    TABLE_CHAIR_SETUP_PP = 2.00
+    TABLE_PRESET_PP = 1.75
+
+    # Cleanup
+    RECEPTION_CLEANUP_PP = 3.75
+    TRASH_REMOVAL_FLAT = 175
+
+    # Travel fees
+    TRAVEL_FEES = {
+        "30_min": 150,
+        "1_hour": 250,
+        "extended": 375,
+    }
+
+    # ============================================================================
+    # GRATUITY & SERVICE FEES
+    # ============================================================================
+
+    GRATUITY_STANDARD = 0.15       # 15% standard gratuity
+    GRATUITY_CHINA_STATION = 0.18  # 18% for china / station service
+    ONSITE_SERVICE_FEE = 0.065     # 6.5% onsite service fee
+
     # ============================================================================
     # ADD-ON PRICING (fallback estimates when not in DB)
     # ============================================================================
-    
-    # Utensils
-    UTENSIL_PACKAGE_PER_PERSON = 2.50
-    
+
     # Rentals (per unit)
     RENTAL_RATES = {
         "linens": 8.00,
         "tables": 15.00,
         "chairs": 5.00,
     }
-    
+
     # Rental quantity calculations
     GUESTS_PER_TABLE = 8
     CHAIRS_PER_GUEST = 1
@@ -161,7 +232,7 @@ class BusinessConfig:
     @classmethod
     def calculate_service_surcharge(cls, guest_count: int, service_type: str) -> float:
         """Calculate service surcharge for on-site events."""
-        if not service_type or "on-site" not in service_type.lower():
+        if not service_type or "onsite" not in service_type.lower():
             return 0.0
         
         servers = max(cls.MIN_SERVERS, (guest_count // cls.GUESTS_PER_SERVER) + 1)

@@ -245,14 +245,14 @@ async function seedMenu() {
           itemsCreated++;
         } catch (error) {
           errors++;
-          console.error(`  Error creating item "${itemData.name}":`, error.message);
+          console.error(`  Error creating item "${itemData.name}":`, (error as Error).message);
         }
       }
 
       console.log(`  Created ${categoryData.items.length} items`);
     } catch (error) {
       errors++;
-      console.error(`Error creating category "${categoryData.name}":`, error.message);
+      console.error(`Error creating category "${categoryData.name}":`, (error as Error).message);
     }
   }
 
@@ -354,7 +354,7 @@ async function seedPricingPackages() {
       packagesCreated++;
       console.log(`  Created: ${pkg.name}`);
     } catch (error) {
-      console.error(`  Error creating "${pkg.name}":`, error.message);
+      console.error(`  Error creating "${pkg.name}":`, (error as Error).message);
     }
   }
 

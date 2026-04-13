@@ -72,7 +72,7 @@ const menuData: MenuCategory[] = [
     items: [
       {
         name: 'Prime Rib & Salmon',
-        description: 'Slow-Roasted Prime Rib (Au Jus/Horseradish) & Grilled Atlantic Salmon (Lemon Dill). Includes Garlic Mashed Potatoes, Roasted Vegetables, Caesar Salad, and Rolls.',
+        description: 'Carved Prime Rib (Horseradish Cream and Au Jus), Roasted Salmon (Dill Sauce). Includes Roasted Potatoes, Wild Rice, Glazed Carrots, Roasted Asparagus, and Dinner Rolls.',
         unit_price: 39.99,
         price_type: 'per_person',
       },
@@ -84,7 +84,7 @@ const menuData: MenuCategory[] = [
       },
       {
         name: 'Chicken & Ham',
-        description: 'Herb-Roasted Chicken & Honey Glazed Spiral Ham. Includes Scalloped Potatoes, Green Bean Almondine, Garden Salad, and Rolls.',
+        description: 'Grilled Chicken Breast & Mango Glazed Ham. Includes Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, and Dinner Rolls.',
         unit_price: 27.99,
         price_type: 'per_person',
       },
@@ -136,12 +136,6 @@ const menuData: MenuCategory[] = [
         unit_price: 21.95,
         price_type: 'per_person',
       },
-      {
-        name: 'Potato Bar',
-        description: 'Baked Potatoes with all toppings (Chili, Broccoli, Bacon, etc.), Garden Salad, and Rolls.',
-        unit_price: 19.95,
-        price_type: 'per_person',
-      },
     ],
   },
 
@@ -172,35 +166,20 @@ const menuData: MenuCategory[] = [
       {
         name: '2-Tier Cake',
         description: '6" and 8" tiers. Serves approximately 25 guests. Includes choice of flavor and buttercream frosting.',
-        unit_price: 275.00,
+        unit_price: 295.00,
         price_type: 'flat',
         tags: ['wedding'],
       },
       {
         name: 'Cupcakes',
         description: 'Custom colors and flavors available.',
-        unit_price: 3.50,
+        unit_price: 3.60,
         price_type: 'per_unit',
         tags: ['wedding'],
       },
     ],
   },
 
-  // ── IV. Rachel's Bloomers (Floral) ─────────────────────────────────────
-
-  {
-    name: 'Floral Arrangements - Rachel\'s Bloomers',
-    sort_order: 10,
-    items: [
-      { name: 'Bridal Bouquet', description: 'Starting at $75', unit_price: 75.00, price_type: 'flat', tags: ['wedding', 'flowers'] },
-      { name: 'Bridesmaid Bouquet', description: 'Starting at $40', unit_price: 40.00, price_type: 'flat', tags: ['wedding', 'flowers'] },
-      { name: 'Boutonniere', description: 'Starting at $15', unit_price: 15.00, price_type: 'flat', tags: ['wedding', 'flowers'] },
-      { name: 'Corsage', description: 'Starting at $25', unit_price: 25.00, price_type: 'flat', tags: ['wedding', 'flowers'] },
-      { name: 'Centerpiece', description: 'Starting at $40', unit_price: 40.00, price_type: 'flat', tags: ['wedding', 'flowers'] },
-      { name: 'Arbor Spray', description: 'Starting at $150', unit_price: 150.00, price_type: 'flat', tags: ['wedding', 'flowers'] },
-      { name: 'Table Runner (Greenery)', description: 'Starting at $50', unit_price: 50.00, price_type: 'flat', tags: ['wedding', 'flowers'] },
-    ],
-  },
 ];
 
 async function seedMenu() {

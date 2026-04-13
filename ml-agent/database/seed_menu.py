@@ -162,8 +162,8 @@ MENU_DATA = [
         "name": "Wedding Cakes",
         "sort_order": 12,
         "items": [
-            {"name": "Wedding/Tiered Cakes", "unit_price": 275.00, "price_type": "flat", "tags": ["wedding"],
-             "description": "2 Tier 6\" & 8\" (Serves 25). Available: Yellow, White, Almond, Chocolate, Carrot, Red Velvet. Multiple filling and frosting options. Cupcakes $3.50 ea."},
+            {"name": "Wedding/Tiered Cakes", "unit_price": 295.00, "price_type": "flat", "tags": ["wedding"],
+             "description": "2 Tier 6\" & 8\" (Serves 25). Available: Yellow, White, Almond, Chocolate, Carrot, Red Velvet. Multiple filling and frosting options. Cupcakes $3.60 ea."},
         ],
     },
     # ─── DRINKS ───

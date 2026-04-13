@@ -102,7 +102,7 @@ export default function ProjectDetailPage() {
     }
     pollRef.current = setInterval(() => {
       fetchProject(true);
-    }, 5000);
+    }, 60000);
     return () => clearInterval(pollRef.current);
   }, [project?.status, (project?.ai_event_summary as any)?.thread_id ?? (typeof project?.ai_event_summary === 'string' ? '' : '')]);
 

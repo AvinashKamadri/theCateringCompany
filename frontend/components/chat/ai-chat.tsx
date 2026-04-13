@@ -149,7 +149,7 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state.messages]);
 
-  // Poll for messages from other participants (collaborators) every 4 seconds.
+  // Poll for messages from other participants (collaborators) every 60 seconds.
   // Uses refs so the interval is stable and never resets due to loading state changes.
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -174,7 +174,7 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
           };
         });
       } catch { /* silent — don't disrupt the user */ }
-    }, 4_000);
+    }, 60_000);
     return () => clearInterval(interval);
   }, []);
 

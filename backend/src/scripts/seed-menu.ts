@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 interface MenuItem {
-  name: string;
+  name: string; 
   description?: string;
   unit_price: number;
   price_type: 'per_person' | 'flat' | 'per_unit' | 'per_hour';

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, Fragment } from 'react';
-import { Send, Loader2, CheckCircle2, Sparkles } from 'lucide-react';
+import { Send, Loader2, CheckCircle2, Sparkles, Check } from 'lucide-react';
 import { chatAiApi } from '@/lib/api/chat-ai';
 import type { ChatMessage, ChatState, ContractData } from '@/types/chat-ai.types';
 import { toast } from 'sonner';
@@ -20,7 +20,112 @@ interface AiChatProps {
 
 const STORAGE_KEY = 'tc_chat_sessions';
 
-/** Render AI message content with basic markdown support */
+// ─── Menu item parsing ────────────────────────────────────────────────────────
+
+interface MenuItem {
+  name: string;
+  price: string;
+}
+
+function parseMenuItems(content: string): MenuItem[] | null {
+  const lines = content.split('\n');
+  const items: MenuItem[] = [];
+  for (const line of lines) {
+    // Match: "1. Item Name ($3.50)" or "1. Item Name ($3.50/per_person)"
+    const m = line.match(/^\d+\.\s+(.+?)\s+\((\$[\d.,]+[^)]*)\)/);
+    if (m) items.push({ name: m[1].trim(), price: m[2].trim() });
+  }
+  return items.length >= 4 ? items : null;
+}
+
+function splitMessageAndList(content: string): { intro: string; rest: string } {
+  const firstListLine = content.search(/^\d+\.\s+/m);
+  if (firstListLine === -1) return { intro: content, rest: '' };
+  return {
+    intro: content.slice(0, firstListLine).trimEnd(),
+    rest: content.slice(firstListLine),
+  };
+}
+
+// ─── Menu item card ───────────────────────────────────────────────────────────
+
+function MenuItemCard({
+  item,
+  selected,
+  onToggle,
+}: {
+  item: MenuItem;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className={`relative flex flex-col rounded-xl border-2 overflow-hidden text-left transition-all focus:outline-none ${
+        selected
+          ? 'border-black bg-black/5 shadow-sm'
+          : 'border-neutral-200 bg-white hover:border-neutral-400'
+      }`}
+    >
+      {/* Placeholder image / skeleton */}
+      <div className="w-full h-16 bg-linear-to-br from-neutral-100 to-neutral-200 animate-pulse" />
+
+      {/* Checkmark badge */}
+      {selected && (
+        <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black rounded-full flex items-center justify-center shadow">
+          <Check className="w-3 h-3 text-white" strokeWidth={3} />
+        </div>
+      )}
+
+      <div className="p-2 flex-1">
+        <p className="text-xs font-semibold text-neutral-900 leading-tight line-clamp-2">{item.name}</p>
+        <p className="text-xs text-neutral-500 mt-0.5">{item.price}</p>
+      </div>
+    </button>
+  );
+}
+
+// ─── Menu grid ────────────────────────────────────────────────────────────────
+
+function MenuGrid({
+  items,
+  selected,
+  onSelectionChange,
+}: {
+  items: MenuItem[];
+  selected: string[];
+  onSelectionChange: (names: string[]) => void;
+}) {
+  const toggle = (name: string) => {
+    const next = selected.includes(name)
+      ? selected.filter((n) => n !== name)
+      : [...selected, name];
+    onSelectionChange(next);
+  };
+
+  return (
+    <div className="mt-3 w-full">
+      <div className="grid grid-cols-4 gap-2">
+        {items.map((item) => (
+          <MenuItemCard
+            key={item.name}
+            item={item}
+            selected={selected.includes(item.name)}
+            onToggle={() => toggle(item.name)}
+          />
+        ))}
+      </div>
+      {selected.length > 0 && (
+        <p className="text-xs text-neutral-500 mt-2">
+          <span className="font-medium text-neutral-800">{selected.length}</span> selected — hit Send to confirm
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+
 function MarkdownMessage({ content }: { content: string }) {
   const lines = content.split('\n');
   const elements: React.ReactNode[] = [];
@@ -29,7 +134,6 @@ function MarkdownMessage({ content }: { content: string }) {
   while (i < lines.length) {
     const line = lines[i];
 
-    // Heading
     const headingMatch = line.match(/^(#{1,3})\s+(.+)/);
     if (headingMatch) {
       const level = headingMatch[1].length;
@@ -40,7 +144,6 @@ function MarkdownMessage({ content }: { content: string }) {
       i++; continue;
     }
 
-    // Numbered list item
     const numMatch = line.match(/^(\d+)\.\s+(.*)/);
     if (numMatch) {
       const listItems: React.ReactNode[] = [];
@@ -59,7 +162,6 @@ function MarkdownMessage({ content }: { content: string }) {
       continue;
     }
 
-    // Bullet list item
     const bulletMatch = line.match(/^[-*•]\s+(.*)/);
     if (bulletMatch) {
       const listItems: React.ReactNode[] = [];
@@ -78,13 +180,11 @@ function MarkdownMessage({ content }: { content: string }) {
       continue;
     }
 
-    // Blank line
     if (line.trim() === '') {
       elements.push(<div key={i} className="h-1" />);
       i++; continue;
     }
 
-    // Regular paragraph
     elements.push(<p key={i} className="text-sm">{inlineFormat(line)}</p>);
     i++;
   }
@@ -93,7 +193,6 @@ function MarkdownMessage({ content }: { content: string }) {
 }
 
 function inlineFormat(text: string): React.ReactNode {
-  // Handle **bold**, *italic*, and `code`
   const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**'))
@@ -105,6 +204,8 @@ function inlineFormat(text: string): React.ReactNode {
     return <Fragment key={i}>{part}</Fragment>;
   });
 }
+
+// ─── Session storage ──────────────────────────────────────────────────────────
 
 function saveSessionToStorage(threadId: string) {
   try {
@@ -124,6 +225,8 @@ function saveSessionToStorage(threadId: string) {
   }
 }
 
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export function AiChat({ projectId, authorId, userId, initialThreadId, onComplete, onThreadStart, onSlotsUpdate, onProgressUpdate }: AiChatProps) {
   const [state, setState] = useState<ChatState>({
     messages: [],
@@ -132,11 +235,14 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
     isComplete: false,
   });
   const [input, setInput] = useState('');
+  const [menuSelections, setMenuSelections] = useState<string[]>([]);
+  const [activeMenuMsgIdx, setActiveMenuMsgIdx] = useState<number | null>(null);
   const [commandDialog, setCommandDialog] = useState<{ isOpen: boolean; command: 'menu' | 'events' | null }>({
     isOpen: false,
     command: null,
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const startedRef = useRef(false);
   const lastSlotsFilled = useRef(0);
 
@@ -144,11 +250,37 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state.messages]);
 
-  // Load existing conversation or start fresh
+  // Keep input focused after every message
+  useEffect(() => {
+    if (!state.isLoading) inputRef.current?.focus();
+  }, [state.isLoading, state.messages]);
+
+  // When messages change, find the last AI message with menu items and activate it
+  useEffect(() => {
+    let lastMenuIdx: number | null = null;
+    state.messages.forEach((msg, idx) => {
+      if (msg.role === 'ai' && parseMenuItems(msg.content)) {
+        lastMenuIdx = idx;
+      }
+    });
+    // Only activate if it's the very last message (user hasn't responded yet)
+    const lastMsgIdx = state.messages.length - 1;
+    if (lastMenuIdx !== null && lastMenuIdx === lastMsgIdx) {
+      setActiveMenuMsgIdx(lastMenuIdx);
+    } else {
+      setActiveMenuMsgIdx(null);
+    }
+  }, [state.messages]);
+
+  // Sync menu selections to input
+  const handleMenuSelectionChange = (names: string[]) => {
+    setMenuSelections(names);
+    setInput(names.join(', '));
+  };
+
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-
     if (initialThreadId) {
       loadConversationHistory(initialThreadId);
     } else {
@@ -156,7 +288,6 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
     }
   }, []);
 
-  // Listen for help requests from sidebar
   useEffect(() => {
     const handleHelp = () => {
       handleSendMessage('/help - I need assistance from your team');
@@ -184,11 +315,7 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
       }));
       saveSessionToStorage(threadId);
       onThreadStart?.(threadId);
-
-      // Restore slots and progress for parent panel
-      if (conv.slots) {
-        onSlotsUpdate?.(conv.slots);
-      }
+      if (conv.slots) onSlotsUpdate?.(conv.slots);
       onProgressUpdate?.({ filled: conv.slots_filled ?? 0, total: 20 });
       if (conv.is_completed && conv.slots) {
         setState((prev) => ({ ...prev, contractData: { ...conv.slots, thread_id: threadId } as any }));
@@ -221,6 +348,8 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
     }
 
     setInput('');
+    setMenuSelections([]);
+    setActiveMenuMsgIdx(null);
 
     const userMessage: ChatMessage = {
       role: 'user',
@@ -254,23 +383,15 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
         ...prev,
         messages: [...prev.messages, aiMessage],
         threadId: response.thread_id,
-        progress: {
-          filled: response.slots_filled,
-          total: response.total_slots,
-        },
+        progress: { filled: response.slots_filled, total: response.total_slots },
         isComplete: response.is_complete,
         isLoading: false,
       }));
 
       onProgressUpdate?.({ filled: response.slots_filled, total: response.total_slots });
-
-      // Persist session to localStorage
       saveSessionToStorage(response.thread_id);
-      if (!state.threadId) {
-        onThreadStart?.(response.thread_id);
-      }
+      if (!state.threadId) onThreadStart?.(response.thread_id);
 
-      // Fire slot update when slots increase so parent can update project title
       if (onSlotsUpdate && response.slots_filled > lastSlotsFilled.current) {
         lastSlotsFilled.current = response.slots_filled;
         chatAiApi.getConversation(response.thread_id)
@@ -290,11 +411,7 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
       }
     } catch (error: any) {
       console.error('Failed to send message:', error);
-      setState((prev) => ({
-        ...prev,
-        isLoading: false,
-        error: 'Failed to send message. Please try again.',
-      }));
+      setState((prev) => ({ ...prev, isLoading: false, error: 'Failed to send message. Please try again.' }));
       toast.error('Failed to send message');
     }
   };
@@ -319,7 +436,7 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
         onSelect={handleCommandSelect}
       />
       <div className="flex flex-col h-full bg-white">
-        {/* Header with Progress */}
+        {/* Header */}
         <div className="border-b border-neutral-200 px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
@@ -334,32 +451,53 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-          {state.messages.map((msg, idx) => (
-            <div
-              key={idx}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                  msg.role === 'user'
-                    ? 'bg-black text-white'
-                    : 'bg-neutral-100 text-neutral-900'
-                }`}
-              >
-                {msg.role === 'user'
-                  ? <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                  : <MarkdownMessage content={msg.content} />
-                }
-                <span
-                  className={`text-xs mt-1 block ${
-                    msg.role === 'user' ? 'text-neutral-400' : 'text-neutral-400'
+          {state.messages.map((msg, idx) => {
+            const isActive = idx === activeMenuMsgIdx;
+            const menuItems = isActive ? parseMenuItems(msg.content) : null;
+
+            if (msg.role === 'ai' && menuItems) {
+              const { intro } = splitMessageAndList(msg.content);
+              return (
+                <div key={idx} className="flex justify-start flex-col">
+                  {/* Intro text bubble */}
+                  {intro && (
+                    <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-neutral-100 text-neutral-900 mb-2">
+                      <MarkdownMessage content={intro} />
+                    </div>
+                  )}
+                  {/* Full-width grid */}
+                  <div className="w-full">
+                    <MenuGrid
+                      items={menuItems}
+                      selected={menuSelections}
+                      onSelectionChange={handleMenuSelectionChange}
+                    />
+                    <span className="text-xs text-neutral-400 mt-1 block">
+                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                    msg.role === 'user' ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-900'
                   }`}
                 >
-                  {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                  {msg.role === 'user'
+                    ? <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    : <MarkdownMessage content={msg.content} />
+                  }
+                  <span className="text-xs mt-1 block text-neutral-400">
+                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {state.isLoading && (
             <div className="flex justify-start">
@@ -371,9 +509,7 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
 
           {state.error && (
             <div className="flex justify-center">
-              <div className="bg-red-50 text-red-600 rounded-lg px-4 py-2 text-sm">
-                {state.error}
-              </div>
+              <div className="bg-red-50 text-red-600 rounded-lg px-4 py-2 text-sm">{state.error}</div>
             </div>
           )}
 
@@ -389,28 +525,16 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
                 <h3 className="font-semibold text-neutral-900 mb-2">Event Summary</h3>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   {state.contractData.name && (
-                    <div>
-                      <span className="text-neutral-500 font-medium">Client:</span>
-                      <span className="text-neutral-900 ml-2">{state.contractData.name}</span>
-                    </div>
+                    <div><span className="text-neutral-500 font-medium">Client:</span><span className="text-neutral-900 ml-2">{state.contractData.name}</span></div>
                   )}
                   {state.contractData.event_type && (
-                    <div>
-                      <span className="text-neutral-500 font-medium">Event:</span>
-                      <span className="text-neutral-900 ml-2">{state.contractData.event_type}</span>
-                    </div>
+                    <div><span className="text-neutral-500 font-medium">Event:</span><span className="text-neutral-900 ml-2">{state.contractData.event_type}</span></div>
                   )}
                   {state.contractData.event_date && (
-                    <div>
-                      <span className="text-neutral-500 font-medium">Date:</span>
-                      <span className="text-neutral-900 ml-2">{state.contractData.event_date}</span>
-                    </div>
+                    <div><span className="text-neutral-500 font-medium">Date:</span><span className="text-neutral-900 ml-2">{state.contractData.event_date}</span></div>
                   )}
                   {state.contractData.guest_count && (
-                    <div>
-                      <span className="text-neutral-500 font-medium">Guests:</span>
-                      <span className="text-neutral-900 ml-2">{state.contractData.guest_count}</span>
-                    </div>
+                    <div><span className="text-neutral-500 font-medium">Guests:</span><span className="text-neutral-900 ml-2">{state.contractData.guest_count}</span></div>
                   )}
                 </div>
                 <button
@@ -424,14 +548,19 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
           </div>
         )}
 
-        {/* Input — hidden once contract summary is shown */}
+        {/* Input */}
         <div className={`border-t border-neutral-200 px-6 py-4 bg-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
           <div className="flex items-end gap-3">
             <textarea
+              ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // If user manually edits, clear grid selections
+                if (activeMenuMsgIdx !== null) setMenuSelections([]);
+              }}
               onKeyDown={handleKeyDown}
-              placeholder={state.isComplete ? 'Request changes or ask questions…' : 'Type your message…'}
+              placeholder={activeMenuMsgIdx !== null ? 'Select items above or type here…' : 'Type your message…'}
               className="flex-1 resize-none border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent min-h-[52px] max-h-[120px]"
               rows={1}
               disabled={state.isLoading}
@@ -441,17 +570,14 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
               disabled={!input.trim() || state.isLoading}
               className="bg-black text-white p-3 rounded-xl hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
             >
-              {state.isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Send className="w-5 h-5" />
-              )}
+              {state.isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
             </button>
           </div>
           <p className="text-xs text-neutral-400 mt-2 text-center">
-            Shift+Enter for new line · Use{' '}
-            <span className="font-mono text-neutral-600">@ai</span>{' '}
-            to update previous items
+            {activeMenuMsgIdx !== null
+              ? 'Click cards to select · Send to confirm'
+              : <>Shift+Enter for new line · Use <span className="font-mono text-neutral-600">@ai</span> to update previous items</>
+            }
           </p>
         </div>
       </div>

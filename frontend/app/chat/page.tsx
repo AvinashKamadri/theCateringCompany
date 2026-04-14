@@ -10,7 +10,7 @@ import { useAuthStore } from '@/lib/store/auth-store';
 import { chatAiApi } from '@/lib/api/chat-ai';
 import {
   Plus, MessageSquare, ChevronRight, Loader2,
-  CalendarDays, Users, MapPin, UtensilsCrossed,
+  CalendarDays, Users, MapPin, UtensilsCrossed, ChevronDown,
 } from 'lucide-react';
 import { AppNav } from '@/components/layout/app-nav';
 
@@ -53,6 +53,7 @@ function removeSession(threadId: string) {
 function EventPlanPanel({ slots }: {
   slots: Partial<ContractData>;
 }) {
+  const [itemsOpen, setItemsOpen] = useState(false);
   const hasDate     = !!slots.event_date;
   const hasGuests   = !!slots.guest_count;
   const hasVenue    = !!slots.venue;
@@ -165,28 +166,38 @@ function EventPlanPanel({ slots }: {
               </div>
             )}
 
-            {/* Food items */}
+            {/* Food items — collapsible */}
             {foodItems.length > 0 && (
               <div>
-                <div className="flex items-center justify-between mb-3">
+                <button
+                  onClick={() => setItemsOpen((o) => !o)}
+                  className="w-full flex items-center justify-between mb-2 group"
+                >
                   <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">
                     Selected Items
                   </p>
-                  <span className="text-xs text-neutral-400 tabular-nums">{foodItems.length}</span>
-                </div>
-                <div className="space-y-2">
-                  {foodItems.map((item, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100"
-                    >
-                      <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
-                        <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-neutral-400 tabular-nums">{foodItems.length}</span>
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${itemsOpen ? 'rotate-180' : ''}`}
+                    />
+                  </div>
+                </button>
+                {itemsOpen && (
+                  <div className="space-y-2">
+                    {foodItems.map((item, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100"
+                      >
+                        <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
+                          <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
+                        </div>
+                        <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
                       </div>
-                      <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

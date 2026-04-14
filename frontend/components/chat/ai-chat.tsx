@@ -11,6 +11,7 @@ interface AiChatProps {
   projectId?: string;
   authorId?: string;
   userId?: string;
+  userName?: string;
   initialThreadId?: string;
   onComplete?: (contractData: ContractData) => void;
   onThreadStart?: (threadId: string) => void;
@@ -20,41 +21,78 @@ interface AiChatProps {
 
 const STORAGE_KEY = 'tc_chat_sessions';
 
-// ─── Menu item parsing ────────────────────────────────────────────────────────
+// ─── List parsing ─────────────────────────────────────────────────────────────
 
-interface MenuItem {
+interface ListItem {
   name: string;
-  price: string;
+  price?: string;
 }
 
-function parseMenuItems(content: string): MenuItem[] | null {
+function parseListItems(content: string): ListItem[] | null {
   const lines = content.split('\n');
-  const items: MenuItem[] = [];
+  const items: ListItem[] = [];
   for (const line of lines) {
-    // Match: "1. Item Name ($3.50)" or "1. Item Name ($3.50/per_person)"
-    const m = line.match(/^\d+\.\s+(.+?)\s+\((\$[\d.,]+[^)]*)\)/);
-    if (m) items.push({ name: m[1].trim(), price: m[2].trim() });
+    // With price: "1. Item ($3.50)" or "• Item ($3.50/pp)"
+    const withPrice = line.match(/^(?:\d+\.|[-•*])\s+(.+?)\s+\((\$[\d.,]+[^)]*)\)/);
+    if (withPrice) { items.push({ name: withPrice[1].trim(), price: withPrice[2].trim() }); continue; }
+    // Plain numbered: "1. Option"
+    const plain = line.match(/^(\d+)\.\s+(.{2,60})$/);
+    if (plain) items.push({ name: plain[2].trim() });
   }
-  return items.length >= 4 ? items : null;
+  return items.length >= 2 ? items : null;
 }
 
-function splitMessageAndList(content: string): { intro: string; rest: string } {
-  const firstListLine = content.search(/^\d+\.\s+/m);
-  if (firstListLine === -1) return { intro: content, rest: '' };
-  return {
-    intro: content.slice(0, firstListLine).trimEnd(),
-    rest: content.slice(firstListLine),
-  };
+// Multi-select: many items with prices. Single-select: few options or no prices.
+function isMultiSelect(items: ListItem[]): boolean {
+  const withPrices = items.filter((i) => i.price).length;
+  return withPrices > 0 && items.length > 5;
 }
 
-// ─── Menu item card ───────────────────────────────────────────────────────────
+function splitAtList(content: string): { intro: string } {
+  const firstListLine = content.search(/^(?:\d+\.|[-•*])\s+/m);
+  if (firstListLine === -1) return { intro: content };
+  return { intro: content.slice(0, firstListLine).trimEnd() };
+}
+
+// ─── Option card (single-select) ──────────────────────────────────────────────
+
+function OptionCard({
+  item,
+  selected,
+  onToggle,
+}: {
+  item: ListItem;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className={`relative flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left transition-all focus:outline-none w-full ${
+        selected
+          ? 'border-black bg-black text-white'
+          : 'border-neutral-200 bg-white hover:border-neutral-400 text-neutral-900'
+      }`}
+    >
+      <span className="text-sm font-medium flex-1">{item.name}</span>
+      {item.price && (
+        <span className={`text-xs shrink-0 ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
+          {item.price}
+        </span>
+      )}
+      {selected && <Check className="w-4 h-4 shrink-0" strokeWidth={3} />}
+    </button>
+  );
+}
+
+// ─── Multi-select grid (menu items with prices) ───────────────────────────────
 
 function MenuItemCard({
   item,
   selected,
   onToggle,
 }: {
-  item: MenuItem;
+  item: ListItem;
   selected: boolean;
   onToggle: () => void;
 }) {
@@ -62,63 +100,70 @@ function MenuItemCard({
     <button
       onClick={onToggle}
       className={`relative flex flex-col rounded-xl border-2 overflow-hidden text-left transition-all focus:outline-none ${
-        selected
-          ? 'border-black bg-black/5 shadow-sm'
-          : 'border-neutral-200 bg-white hover:border-neutral-400'
+        selected ? 'border-black bg-black/5 shadow-sm' : 'border-neutral-200 bg-white hover:border-neutral-400'
       }`}
     >
-      {/* Placeholder image / skeleton */}
-      <div className="w-full h-16 bg-linear-to-br from-neutral-100 to-neutral-200 animate-pulse" />
-
-      {/* Checkmark badge */}
+      <div className="w-full h-14 bg-neutral-100" />
       {selected && (
         <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black rounded-full flex items-center justify-center shadow">
           <Check className="w-3 h-3 text-white" strokeWidth={3} />
         </div>
       )}
-
       <div className="p-2 flex-1">
         <p className="text-xs font-semibold text-neutral-900 leading-tight line-clamp-2">{item.name}</p>
-        <p className="text-xs text-neutral-500 mt-0.5">{item.price}</p>
+        {item.price && <p className="text-xs text-neutral-500 mt-0.5">{item.price}</p>}
       </div>
     </button>
   );
 }
 
-// ─── Menu grid ────────────────────────────────────────────────────────────────
+// ─── Unified list UI ──────────────────────────────────────────────────────────
 
-function MenuGrid({
+function ItemSelector({
   items,
   selected,
   onSelectionChange,
+  multi,
 }: {
-  items: MenuItem[];
+  items: ListItem[];
   selected: string[];
   onSelectionChange: (names: string[]) => void;
+  multi: boolean;
 }) {
   const toggle = (name: string) => {
-    const next = selected.includes(name)
-      ? selected.filter((n) => n !== name)
-      : [...selected, name];
-    onSelectionChange(next);
+    if (multi) {
+      const next = selected.includes(name) ? selected.filter((n) => n !== name) : [...selected, name];
+      onSelectionChange(next);
+    } else {
+      // Single-select: toggle off if already selected, else replace
+      onSelectionChange(selected.includes(name) ? [] : [name]);
+    }
   };
 
-  return (
-    <div className="mt-3 w-full">
-      <div className="grid grid-cols-4 gap-2">
-        {items.map((item) => (
-          <MenuItemCard
-            key={item.name}
-            item={item}
-            selected={selected.includes(item.name)}
-            onToggle={() => toggle(item.name)}
-          />
-        ))}
+  if (multi) {
+    return (
+      <div className="mt-2 w-full">
+        <div className="grid grid-cols-4 gap-2">
+          {items.map((item) => (
+            <MenuItemCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
+          ))}
+        </div>
+        {selected.length > 0 && (
+          <p className="text-xs text-neutral-500 mt-2">
+            <span className="font-medium text-neutral-800">{selected.length}</span> selected — hit Send to confirm
+          </p>
+        )}
       </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 w-full space-y-2">
+      {items.map((item) => (
+        <OptionCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
+      ))}
       {selected.length > 0 && (
-        <p className="text-xs text-neutral-500 mt-2">
-          <span className="font-medium text-neutral-800">{selected.length}</span> selected — hit Send to confirm
-        </p>
+        <p className="text-xs text-neutral-500 mt-1">Hit Send to confirm</p>
       )}
     </div>
   );
@@ -227,7 +272,7 @@ function saveSessionToStorage(threadId: string) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function AiChat({ projectId, authorId, userId, initialThreadId, onComplete, onThreadStart, onSlotsUpdate, onProgressUpdate }: AiChatProps) {
+export function AiChat({ projectId, authorId, userId, userName = 'You', initialThreadId, onComplete, onThreadStart, onSlotsUpdate, onProgressUpdate }: AiChatProps) {
   const [state, setState] = useState<ChatState>({
     messages: [],
     isLoading: false,
@@ -255,18 +300,15 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
     if (!state.isLoading) inputRef.current?.focus();
   }, [state.isLoading, state.messages]);
 
-  // When messages change, find the last AI message with menu items and activate it
+  // When messages change, activate last AI message with a list if it's the latest message
   useEffect(() => {
-    let lastMenuIdx: number | null = null;
+    let lastListIdx: number | null = null;
     state.messages.forEach((msg, idx) => {
-      if (msg.role === 'ai' && parseMenuItems(msg.content)) {
-        lastMenuIdx = idx;
-      }
+      if (msg.role === 'ai' && parseListItems(msg.content)) lastListIdx = idx;
     });
-    // Only activate if it's the very last message (user hasn't responded yet)
     const lastMsgIdx = state.messages.length - 1;
-    if (lastMenuIdx !== null && lastMenuIdx === lastMsgIdx) {
-      setActiveMenuMsgIdx(lastMenuIdx);
+    if (lastListIdx !== null && lastListIdx === lastMsgIdx) {
+      setActiveMenuMsgIdx(lastListIdx);
     } else {
       setActiveMenuMsgIdx(null);
     }
@@ -452,48 +494,68 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {state.messages.map((msg, idx) => {
+            const userInitial = userName.charAt(0).toUpperCase();
+            const time = msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             const isActive = idx === activeMenuMsgIdx;
-            const menuItems = isActive ? parseMenuItems(msg.content) : null;
+            const listItems = isActive ? parseListItems(msg.content) : null;
 
-            if (msg.role === 'ai' && menuItems) {
-              const { intro } = splitMessageAndList(msg.content);
+            if (msg.role === 'ai' && listItems) {
+              const { intro } = splitAtList(msg.content);
+              const multi = isMultiSelect(listItems);
               return (
-                <div key={idx} className="flex justify-start flex-col">
-                  {/* Intro text bubble */}
-                  {intro && (
-                    <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-neutral-100 text-neutral-900 mb-2">
-                      <MarkdownMessage content={intro} />
+                <div key={idx} className="flex justify-start gap-2.5">
+                  <div className="flex flex-col items-center gap-1 shrink-0">
+                    <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
+                      <Sparkles className="w-3.5 h-3.5 text-white" />
                     </div>
-                  )}
-                  {/* Full-width grid */}
-                  <div className="w-full">
-                    <MenuGrid
-                      items={menuItems}
+                    <span className="text-[10px] text-neutral-400">AI</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    {intro && (
+                      <div className="rounded-2xl px-4 py-3 bg-neutral-100 text-neutral-900 mb-2 inline-block max-w-[90%]">
+                        <MarkdownMessage content={intro} />
+                      </div>
+                    )}
+                    <ItemSelector
+                      items={listItems}
                       selected={menuSelections}
                       onSelectionChange={handleMenuSelectionChange}
+                      multi={multi}
                     />
-                    <span className="text-xs text-neutral-400 mt-1 block">
-                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+                    <span className="text-xs text-neutral-400 mt-1 block">{time}</span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (msg.role === 'user') {
+              return (
+                <div key={idx} className="flex justify-end gap-2.5">
+                  <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-black text-white">
+                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    <span className="text-xs mt-1 block text-neutral-400">{time}</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1 shrink-0">
+                    <div className="w-7 h-7 rounded-full bg-neutral-800 flex items-center justify-center">
+                      <span className="text-xs font-bold text-white">{userInitial}</span>
+                    </div>
+                    <span className="text-[10px] text-neutral-400">You</span>
                   </div>
                 </div>
               );
             }
 
             return (
-              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                    msg.role === 'user' ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-900'
-                  }`}
-                >
-                  {msg.role === 'user'
-                    ? <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                    : <MarkdownMessage content={msg.content} />
-                  }
-                  <span className="text-xs mt-1 block text-neutral-400">
-                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+              <div key={idx} className="flex justify-start gap-2.5">
+                <div className="flex flex-col items-center gap-1 shrink-0">
+                  <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
+                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <span className="text-[10px] text-neutral-400">AI</span>
+                </div>
+                <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-neutral-100 text-neutral-900">
+                  <MarkdownMessage content={msg.content} />
+                  <span className="text-xs mt-1 block text-neutral-400">{time}</span>
                 </div>
               </div>
             );

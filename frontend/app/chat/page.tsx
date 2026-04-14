@@ -166,25 +166,21 @@ function EventPlanPanel({ slots }: {
               </div>
             )}
 
-            {/* Food items — collapsible */}
+            {/* Food items — peek 4.5 items, expand on click */}
             {foodItems.length > 0 && (
               <div>
-                <button
-                  onClick={() => setItemsOpen((o) => !o)}
-                  className="w-full flex items-center justify-between mb-2 group"
-                >
+                <div className="flex items-center justify-between mb-2">
                   <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">
                     Selected Items
                   </p>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-neutral-400 tabular-nums">{foodItems.length}</span>
-                    <ChevronDown
-                      className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${itemsOpen ? 'rotate-180' : ''}`}
-                    />
-                  </div>
-                </button>
-                {itemsOpen && (
-                  <div className="space-y-2">
+                  <span className="text-xs text-neutral-400 tabular-nums">{foodItems.length}</span>
+                </div>
+                <div className="relative">
+                  <div
+                    className={`space-y-2 overflow-hidden transition-all duration-300 ${
+                      itemsOpen ? 'max-h-[2000px]' : 'max-h-[198px]'
+                    }`}
+                  >
                     {foodItems.map((item, i) => (
                       <div
                         key={i}
@@ -197,6 +193,23 @@ function EventPlanPanel({ slots }: {
                       </div>
                     ))}
                   </div>
+
+                  {/* Blur + arrow overlay when collapsed and more items exist */}
+                  {!itemsOpen && foodItems.length > 4 && (
+                    <div className="absolute bottom-0 left-0 right-0 h-16 bg-linear-to-t from-white to-transparent pointer-events-none" />
+                  )}
+                </div>
+
+                {foodItems.length > 4 && (
+                  <button
+                    onClick={() => setItemsOpen((o) => !o)}
+                    className="mt-1 w-full flex items-center justify-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 py-1 transition-colors"
+                  >
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 transition-transform ${itemsOpen ? 'rotate-180' : ''}`}
+                    />
+                    {itemsOpen ? 'Show less' : `View all ${foodItems.length} items`}
+                  </button>
                 )}
               </div>
             )}
@@ -493,6 +506,7 @@ function AiIntakeContent() {
                 onProgressUpdate={setProgress}
                 authorId={user?.id}
                 userId={user?.id}
+                userName={user?.name || user?.email || 'You'}
                 initialThreadId={activeThreadId}
                 onThreadStart={async (threadId) => {
                   setActiveThreadId(threadId);

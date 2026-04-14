@@ -25,9 +25,12 @@ _MOD_VERSION = "v6"  # Bump to verify this code is running
 # Conditional nodes: mapping of node_name → (slot_name, valid_condition_fn, fallback_node)
 # If the slot no longer satisfies the condition, reroute to fallback_node.
 _CONDITIONAL_NODES = {
-    "wedding_message": ("event_type", lambda v: v and "wedding" in str(v).lower(), "collect_venue"),
-    "select_service_style": ("event_type", lambda v: v and "wedding" in str(v).lower(), "select_dishes"),
-    "ask_florals": ("event_type", lambda v: v and "wedding" in str(v).lower(), "ask_special_requests"),
+    "wedding_message":        ("event_type", lambda v: v and "wedding" in str(v).lower(), "collect_venue"),
+    "collect_fiance_name":    ("event_type", lambda v: v and "wedding" in str(v).lower(), "collect_event_date"),
+    "collect_birthday_person":("event_type", lambda v: v and "birthday" in str(v).lower(), "collect_event_date"),
+    "collect_company_name":   ("event_type", lambda v: v and "corporate" in str(v).lower(), "collect_event_date"),
+    "select_service_style":   ("event_type", lambda v: v and "wedding" in str(v).lower(), "select_dishes"),
+    "ask_florals":            ("event_type", lambda v: v and "wedding" in str(v).lower(), "ask_special_requests"),
 }
 
 
@@ -136,8 +139,26 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
         target_slot = detection_result.get("target_slot")
         new_value = detection_result.get("new_value")
 
+        # ── Force desserts slot if message mentions a known dessert sub-item ──
+        # Mini dessert options live in description fields, not as standalone DB items,
+        # so detect_slot_modification guesses the wrong slot. Resolve from DB instead.
+        from database.db_manager import load_menu_by_category
+        menu = await load_menu_by_category()
+        dessert_sub_items = set()
+        for cat_name, items in menu.items():
+            if "dessert" in cat_name.lower() or "cake" in cat_name.lower():
+                for item in items:
+                    desc = item.get("description") or ""
+                    for part in desc.split(","):
+                        part = part.strip().lower()
+                        if part:
+                            dessert_sub_items.add(part)
+        msg_lower = last_message.lower()
+        if any(sub in msg_lower for sub in dessert_sub_items):
+            target_slot = "desserts"
+
         # ── Menu slots: appetizers / selected_dishes — use item merge logic ──
-        if target_slot in ("appetizers", "selected_dishes"):
+        if target_slot in ("appetizers", "selected_dishes", "desserts", "drinks", "rentals"):
             from agent.nodes.menu import _resolve_to_db_items, _parse_slot_items
             slot_label = _get_slot_label(target_slot)
             current_value = state["slots"].get(target_slot, {}).get("value") or ""

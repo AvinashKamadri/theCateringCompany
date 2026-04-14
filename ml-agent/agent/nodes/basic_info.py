@@ -3,7 +3,8 @@ Basic info collection nodes: name, date, service type, event type, venue,
 guest count, service style.
 """
 
-from datetime import datetime
+import re as _re
+from datetime import datetime, timedelta
 
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
@@ -65,9 +66,9 @@ async def _extract_and_respond(state, slot_name, next_node, node_key):
         )
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n"
-            f"The customer's response was unclear for the '{slot_name}' field. "
-            f"Politely acknowledge what they said, then re-ask the question for {slot_name}. "
-            f"Give an example of what a good answer looks like.",
+            f"Couldn't catch a clear answer for '{slot_name}'. "
+            f"Re-ask casually in one short line — like a friend asking again, not a form. "
+            f"No apologies, no 'I'm sorry', no formal examples. Just re-ask naturally.",
             context,
         )
         # Stay on the CURRENT node (don't advance)
@@ -81,8 +82,157 @@ async def collect_name_node(state: ConversationState) -> ConversationState:
     return await _extract_and_respond(state, "name", "select_event_type", "collect_name")
 
 
+_WEEKDAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+             "friday": 4, "saturday": 5, "sunday": 6}
+
+def _resolve_day_of_week(text: str, today: datetime) -> str | None:
+    """Resolve 'this saturday', 'next friday', etc. to YYYY-MM-DD in Python (no LLM)."""
+    m = _re.search(
+        r'\b(?:this\s+|next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
+        text, _re.IGNORECASE
+    )
+    if not m:
+        return None
+    target = _WEEKDAYS[m.group(1).lower()]
+    days_ahead = (target - today.weekday()) % 7
+    if days_ahead == 0:
+        days_ahead = 7  # "this X" when today IS X → next week
+    return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+
+async def collect_fiance_name_node(state: ConversationState) -> ConversationState:
+    """Wedding only — collect partner/fiancé name."""
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+
+    extracted = await llm_extract(EXTRACTION_PROMPTS["partner_name"], user_msg)
+    extracted = extracted.strip()
+
+    if extracted and extracted.upper() != "NONE":
+        fill_slot(state["slots"], "partner_name", extracted)
+        context = f"Partner name captured: {extracted}"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_fiance_name']}\n\n"
+            f"Name captured: {extracted}. Confirm it casually, then ask: 'When's the big day?'",
+            context,
+        )
+        state["current_node"] = "collect_event_date"
+    else:
+        # No name found — re-ask
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_fiance_name']}",
+            f"Need partner name. Customer said: {user_msg}",
+        )
+        # Stay on this node
+
+    state["messages"] = add_ai_message(state, response)
+    return state
+
+
+async def collect_birthday_person_node(state: ConversationState) -> ConversationState:
+    """Birthday only — collect whose birthday it is."""
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+
+    extracted = await llm_extract(EXTRACTION_PROMPTS["honoree_name"], user_msg)
+    extracted = extracted.strip()
+
+    if extracted.lower() == "self":
+        full_name = get_slot_value(state["slots"], "name") or ""
+        extracted = full_name.split()[0] if full_name else "you"
+
+    if extracted and extracted.upper() != "NONE":
+        fill_slot(state["slots"], "honoree_name", extracted)
+        context = f"Birthday person: {extracted}"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nBirthday person is {extracted}. Confirm warmly, then ask: 'When's the big day?'",
+            context,
+        )
+        state["current_node"] = "collect_event_date"
+    else:
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_birthday_person']}",
+            f"Need to know whose birthday. Customer said: {user_msg}",
+        )
+        # Stay on this node
+
+    state["messages"] = add_ai_message(state, response)
+    return state
+
+
+async def collect_company_name_node(state: ConversationState) -> ConversationState:
+    """Corporate only — collect company name."""
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+
+    extracted = await llm_extract(EXTRACTION_PROMPTS["company_name"], user_msg)
+    extracted = extracted.strip()
+
+    if extracted and extracted.upper() != "NONE":
+        fill_slot(state["slots"], "company_name", extracted)
+        context = f"Company name: {extracted}"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCompany is {extracted}. Confirm it, then ask: 'What date are you planning for?'",
+            context,
+        )
+        state["current_node"] = "collect_event_date"
+    else:
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_company_name']}",
+            f"Need company name. Customer said: {user_msg}",
+        )
+        # Stay on this node
+
+    state["messages"] = add_ai_message(state, response)
+    return state
+
+
 async def collect_event_date_node(state: ConversationState) -> ConversationState:
-    return await _extract_and_respond(state, "event_date", "collect_venue", "collect_event_date")
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+    today = datetime.now()
+
+    # Try Python-level day-of-week resolution first (100% accurate)
+    resolved = _resolve_day_of_week(user_msg, today)
+
+    if not resolved:
+        # Fall back to LLM for all other date formats
+        prompt = EXTRACTION_PROMPTS["event_date"].format(today=today.strftime("%Y-%m-%d"))
+        resolved = (await llm_extract(prompt, user_msg)).strip()
+
+    if resolved and resolved.upper() != "NONE":
+        try:
+            parsed = datetime.strptime(resolved, "%Y-%m-%d")
+            if parsed.date() <= today.date():
+                # Past date — re-ask casually
+                from agent.nodes.helpers import add_ai_message
+                response = await llm_respond(
+                    f"{SYSTEM_PROMPT}\n\nThat date has already passed. Re-ask for the event date casually in one line.",
+                    f"Customer said: {user_msg}\nResolved date: {resolved}"
+                )
+                state["messages"] = add_ai_message(state, response)
+                return state
+            fill_slot(state["slots"], "event_date", resolved)
+        except ValueError:
+            resolved = "NONE"
+
+    slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+    from agent.nodes.helpers import add_ai_message
+    from prompts.system_prompts import NODE_PROMPTS
+
+    if resolved and resolved.upper() != "NONE":
+        context = f"Customer said: {user_msg}\nEVENT DATE = {resolved} — confirm THIS date exactly, do not recalculate.\nSlots: {slots_summary}"
+        response = await llm_respond(f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_event_date']}", context)
+        state["current_node"] = "collect_venue"
+    else:
+        context = f"Customer said: {user_msg}\nCouldn't extract a date.\nSlots: {slots_summary}"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCouldn't catch the date. Re-ask casually in one short line — no examples, no formality.",
+            context
+        )
+
+    state["messages"] = add_ai_message(state, response)
+    return state
 
 
 async def select_service_type_node(state: ConversationState) -> ConversationState:
@@ -136,13 +286,34 @@ async def select_event_type_node(state: ConversationState) -> ConversationState:
         f"CURRENT slot values: {slots_summary}"
     )
 
-    response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_event_type']}",
-        context,
-    )
+    # Route to event-specific context node before date collection
+    event_lower = (extracted or "").lower()
+    if "wedding" in event_lower:
+        state["current_node"] = "collect_fiance_name"
+        confirmation = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nSay one short warm congrats for a wedding. Nothing else. No questions.",
+            f"Event type: Wedding. Customer name: {get_slot_value(state['slots'], 'name')}"
+        )
+    elif "birthday" in event_lower:
+        state["current_node"] = "collect_birthday_person"
+        confirmation = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nSay one short upbeat line confirming it's a birthday event. Nothing else. No questions.",
+            f"Event type: Birthday. Customer name: {get_slot_value(state['slots'], 'name')}"
+        )
+    elif "corporate" in event_lower:
+        state["current_node"] = "collect_company_name"
+        confirmation = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nSay one short professional line confirming it's a corporate event. Nothing else. No questions.",
+            f"Event type: Corporate. Customer name: {get_slot_value(state['slots'], 'name')}"
+        )
+    else:
+        state["current_node"] = "collect_event_date"
+        confirmation = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nConfirm the event type in one line, then ask: 'When's the event?'",
+            f"Event type: {extracted}"
+        )
 
-    state["current_node"] = "collect_event_date"
-    state["messages"] = add_ai_message(state, response)
+    state["messages"] = add_ai_message(state, confirmation)
     return state
 
 

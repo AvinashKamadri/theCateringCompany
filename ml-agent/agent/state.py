@@ -43,6 +43,9 @@ SLOT_NAMES = [
     "event_date",        # Event date
     "service_type",      # drop-off or on-site
     "event_type",        # Wedding, Corporate, Birthday, Social, Custom
+    "partner_name",      # Fiancé/partner name (weddings only)
+    "company_name",      # Company name (corporate only)
+    "honoree_name",      # Whose birthday/celebration (birthday only)
     "venue",             # Venue details
     "guest_count",       # Approximate guest count
     "service_style",     # cocktail hour, reception, both

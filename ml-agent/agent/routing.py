@@ -18,6 +18,9 @@ _NODE_COLLECTS: dict[str, str | None] = {
     "select_service_type": "service_type",
     "select_event_type": "event_type",
     "wedding_message": None,
+    "collect_fiance_name": "partner_name",
+    "collect_birthday_person": "honoree_name",
+    "collect_company_name": "company_name",
     "collect_venue": "venue",
     "collect_guest_count": "guest_count",
     "select_service_style": "service_style",
@@ -132,21 +135,8 @@ def route_message(state: ConversationState) -> str:
     if _detect_off_topic_correction(last_user_msg, current_slot, filled_slots):
         return "check_modifications"
 
-    valid_nodes = {
-        "start", "collect_name", "collect_event_date", "select_service_type",
-        "select_event_type", "wedding_message", "collect_venue",
-        "collect_guest_count", "present_menu", "select_service_style",
-        "select_dishes", "ask_appetizers", "select_appetizers",
-        "menu_design", "ask_menu_changes", "collect_menu_changes",
-        "ask_utensils", "select_utensils",
-        "ask_desserts", "select_desserts", "ask_more_desserts",
-        "ask_rentals", "ask_florals",
-        "ask_special_requests", "collect_special_requests",
-        "collect_dietary", "ask_anything_else", "collect_anything_else",
-        "generate_contract", "check_modifications",
-    }
-
-    if current in valid_nodes:
+    from agent.nodes import NODE_MAP
+    if current in NODE_MAP:
         return current
 
     return "start"

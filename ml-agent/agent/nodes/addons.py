@@ -18,12 +18,10 @@ def _slots_context(state):
 
 async def ask_utensils_node(state: ConversationState) -> ConversationState:
     """Handle yes/no about utensils."""
-    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    mentions_utensils = bool(_re.search(r'\butensils?\b', user_msg, _re.IGNORECASE))
-    if is_affirmative(user_msg) or (mentions_utensils and not is_negative(user_msg)):
+    if is_affirmative(user_msg):
         context = f"Customer wants utensils. Event: {_slots_context(state)}"
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_utensils']}", context
@@ -70,14 +68,18 @@ async def select_utensils_node(state: ConversationState) -> ConversationState:
 
 async def ask_desserts_node(state: ConversationState) -> ConversationState:
     """Handle yes/no about desserts — present real dessert items from DB."""
-    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # Treat as affirmative if: standard yes-word OR user explicitly mentions "dessert"
-    # (e.g. "lets go to desserts", "looks good, desserts please")
-    mentions_dessert = bool(_re.search(r'\bdesserts?\b', user_msg, _re.IGNORECASE))
-    wants_desserts = is_affirmative(user_msg) or (mentions_dessert and not is_negative(user_msg))
+    # Use LLM to detect intent — handles slang, hype, enthusiasm naturally
+    intent = await llm_extract(
+        "Does this message mean the person wants desserts, or are they declining/skipping desserts? "
+        "Consider any form of enthusiasm, excitement, or affirmation as 'yes'. "
+        "Only return 'no' if they clearly decline (e.g. 'no thanks', 'skip', 'pass', 'none'). "
+        "Return ONLY: yes or no",
+        user_msg
+    )
+    wants_desserts = intent.strip().lower() != "no"
 
     if wants_desserts:
         # Fetch real dessert data from DB
@@ -147,28 +149,55 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
         f"Customer message: {user_msg}"
     )
 
-    # Resolve against dessert-only menu
+    # Try DB resolution first
     matched_items, resolved_text = await _resolve_to_db_items(extraction, dessert_menu)
 
-    if not matched_items:
-        # Nothing matched — re-present dessert menu
+    # If DB only returns the parent bundle name (e.g. "Mini Desserts - Select 4"),
+    # use the user's actual extracted selections instead so they see what they picked
+    _BUNDLE_NAMES = {"mini desserts - select 4", "mini desserts"}
+    if matched_items and len(matched_items) == 1 and matched_items[0]["name"].lower() in _BUNDLE_NAMES:
+        resolved_text = extraction.strip()
+
+    if not resolved_text or resolved_text.upper() == "NONE":
+        # Nothing extracted — re-present dessert menu
         dessert_ctx = await get_dessert_context(state)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n"
-            "The customer mentioned desserts that are not on our menu. "
-            "Politely let them know and re-present the dessert list. "
+            "Couldn't catch those selections. Re-present the dessert list casually. "
             "CRITICAL: Copy item names verbatim from the list below. No additions.",
             dessert_ctx
         )
         state["messages"] = add_ai_message(state, response)
         return state
 
-    # Append to existing desserts if any
+    # Append to existing desserts (deduplicate, cap at 4)
     existing = get_slot_value(state["slots"], "desserts")
     if existing and existing != "no":
-        new_val = f"{existing}, {resolved_text}"
+        existing_items = [i.strip() for i in existing.split(",") if i.strip()]
+        existing_lower = {i.lower() for i in existing_items}
+        new_items = [i.strip() for i in resolved_text.split(",") if i.strip().lower() not in existing_lower]
+        combined = existing_items + new_items
     else:
-        new_val = resolved_text
+        existing_items = []
+        combined = [i.strip() for i in resolved_text.split(",") if i.strip()]
+
+    # Enforce 4-item max
+    if len(combined) > 4:
+        over = len(combined) - 4
+        combined = combined[:4]
+        fill_slot(state["slots"], "desserts", ", ".join(combined))
+        context = f"Desserts selected (capped at 4): {', '.join(combined)}\nSlots: {_slots_context(state)}"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer selected more than 4 mini desserts. "
+            f"Let them know the limit is 4 — you've kept the first 4: {', '.join(combined)}. "
+            f"Ask if they'd like to swap any out. Keep it casual, one line.",
+            context
+        )
+        state["current_node"] = "ask_more_desserts"
+        state["messages"] = add_ai_message(state, response)
+        return state
+
+    new_val = ", ".join(combined)
     fill_slot(state["slots"], "desserts", new_val)
 
     context = f"Desserts selected: {new_val}\nSlots: {_slots_context(state)}"
@@ -186,7 +215,23 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_affirmative(user_msg):
+    intent = await llm_extract(
+        "The customer was asked if they want to add more desserts. "
+        "Are they done, or do they want to add more? "
+        "Return ONLY: done or more",
+        user_msg
+    )
+    if intent.strip().lower() == "done":
+        context = f"Desserts finalized. Slots: {_slots_context(state)}"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nDessert selections are finalized. "
+            "Ask: Would you like us to provide utensils for your event?",
+            context
+        )
+        state["current_node"] = "ask_utensils"
+    else:
+        # Affirmative OR user named items directly (e.g. "add brownies and fruit tarts")
+        # Route back to select_desserts which handles both cases
         dessert_ctx = await get_dessert_context(state)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_more_desserts']}\n\n"
@@ -196,14 +241,6 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
             dessert_ctx
         )
         state["current_node"] = "select_desserts"
-    else:
-        context = f"Desserts finalized. Slots: {_slots_context(state)}"
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nDessert selections are finalized. "
-            "Ask: Would you like us to provide utensils for your event?",
-            context
-        )
-        state["current_node"] = "ask_utensils"
 
     state["messages"] = add_ai_message(state, response)
     return state

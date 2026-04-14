@@ -10,7 +10,7 @@ import { useAuthStore } from '@/lib/store/auth-store';
 import { chatAiApi } from '@/lib/api/chat-ai';
 import {
   Plus, MessageSquare, ChevronRight, Loader2,
-  CalendarDays, Users, MapPin, UtensilsCrossed,
+  CalendarDays, Users, MapPin, UtensilsCrossed, ChevronDown,
 } from 'lucide-react';
 import { AppNav } from '@/components/layout/app-nav';
 
@@ -53,6 +53,7 @@ function removeSession(threadId: string) {
 function EventPlanPanel({ slots }: {
   slots: Partial<ContractData>;
 }) {
+  const [itemsOpen, setItemsOpen] = useState(false);
   const hasDate     = !!slots.event_date;
   const hasGuests   = !!slots.guest_count;
   const hasVenue    = !!slots.venue;
@@ -165,28 +166,51 @@ function EventPlanPanel({ slots }: {
               </div>
             )}
 
-            {/* Food items */}
+            {/* Food items — peek 4.5 items, expand on click */}
             {foodItems.length > 0 && (
               <div>
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-2">
                   <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">
                     Selected Items
                   </p>
                   <span className="text-xs text-neutral-400 tabular-nums">{foodItems.length}</span>
                 </div>
-                <div className="space-y-2">
-                  {foodItems.map((item, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100"
-                    >
-                      <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
-                        <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
+                <div className="relative">
+                  <div
+                    className={`space-y-2 overflow-hidden transition-all duration-300 ${
+                      itemsOpen ? 'max-h-[2000px]' : 'max-h-[198px]'
+                    }`}
+                  >
+                    {foodItems.map((item, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100"
+                      >
+                        <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
+                          <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
+                        </div>
+                        <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
                       </div>
-                      <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+
+                  {/* Blur + arrow overlay when collapsed and more items exist */}
+                  {!itemsOpen && foodItems.length > 4 && (
+                    <div className="absolute bottom-0 left-0 right-0 h-16 bg-linear-to-t from-white to-transparent pointer-events-none" />
+                  )}
                 </div>
+
+                {foodItems.length > 4 && (
+                  <button
+                    onClick={() => setItemsOpen((o) => !o)}
+                    className="mt-1 w-full flex items-center justify-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 py-1 transition-colors"
+                  >
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 transition-transform ${itemsOpen ? 'rotate-180' : ''}`}
+                    />
+                    {itemsOpen ? 'Show less' : `View all ${foodItems.length} items`}
+                  </button>
+                )}
               </div>
             )}
 
@@ -482,6 +506,7 @@ function AiIntakeContent() {
                 onProgressUpdate={setProgress}
                 authorId={user?.id}
                 userId={user?.id}
+                userName={user?.name || user?.email || 'You'}
                 initialThreadId={activeThreadId}
                 onThreadStart={async (threadId) => {
                   setActiveThreadId(threadId);

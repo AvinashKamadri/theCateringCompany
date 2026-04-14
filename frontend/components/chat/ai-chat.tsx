@@ -306,8 +306,6 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
     }
   };
 
-  const progressPercentage = (state.progress.filled / state.progress.total) * 100;
-
   const handleCommandSelect = (selectedOption: string) => {
     handleSendMessage(`I'm interested in ${selectedOption}`);
   };
@@ -323,30 +321,13 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
       <div className="flex flex-col h-full bg-white">
         {/* Header with Progress */}
         <div className="border-b border-neutral-200 px-6 py-4">
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
               <h2 className="text-lg font-bold text-neutral-900">Catering Assistant</h2>
               <p className="text-xs text-neutral-500">Let's plan your perfect event together</p>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-neutral-500 font-medium">
-                {state.isComplete ? 'All details collected' : 'Gathering event details'}
-              </span>
-              <span className="text-neutral-900 font-semibold tabular-nums">
-                {state.progress.filled} / {state.progress.total}
-              </span>
-            </div>
-            <div className="relative h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-              <div
-                className="absolute inset-y-0 left-0 bg-black rounded-full transition-all duration-500 ease-out"
-                style={{ width: `${progressPercentage}%` }}
-              />
             </div>
           </div>
         </div>

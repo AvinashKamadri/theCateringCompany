@@ -8,7 +8,10 @@ import { toast } from 'sonner';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { chatAiApi } from '@/lib/api/chat-ai';
-import { Plus, MessageSquare, ChevronRight, Loader2 } from 'lucide-react';
+import {
+  Plus, MessageSquare, ChevronRight, Loader2,
+  CalendarDays, Users, MapPin, UtensilsCrossed,
+} from 'lucide-react';
 import { AppNav } from '@/components/layout/app-nav';
 
 const STAFF_DOMAINS = ['@catering-company.com'];
@@ -46,6 +49,181 @@ function removeSession(threadId: string) {
   } catch {}
 }
 
+/** Right-side event plan panel */
+function EventPlanPanel({ slots }: {
+  slots: Partial<ContractData>;
+}) {
+  const hasDate     = !!slots.event_date;
+  const hasGuests   = !!slots.guest_count;
+  const hasVenue    = !!slots.venue;
+  const hasEventType = !!slots.event_type;
+  const hasName     = !!slots.name;
+
+  // Collect food items
+  const foodItems: string[] = [];
+  const parseItems = (val?: string | string[]) => {
+    if (!val || val === 'none' || val === 'no') return;
+    if (Array.isArray(val)) { foodItems.push(...val.filter(Boolean)); return; }
+    val.split(',').map((v) => v.trim()).filter(Boolean).forEach((v) => foodItems.push(v));
+  };
+  parseItems(slots.selected_dishes);
+  parseItems(slots.appetizers);
+  parseItems(slots.desserts);
+
+  const hasAnyDetail = hasDate || hasGuests || hasVenue || hasEventType || hasName || foodItems.length > 0;
+
+  const formatDate = (d: string) => {
+    try {
+      return new Date(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    } catch { return d; }
+  };
+
+  return (
+    <div className="w-72 xl:w-80 bg-white border-l border-neutral-200 flex flex-col overflow-y-auto shrink-0">
+      {/* Panel header */}
+      <div className="px-5 pt-6 pb-4 border-b border-neutral-100">
+        <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">
+          Your Event Plan
+        </p>
+      </div>
+
+      <div className="px-5 py-5 flex-1">
+        {!hasAnyDetail ? (
+          /* Empty state */
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center mb-3">
+              <UtensilsCrossed className="w-5 h-5 text-neutral-300" />
+            </div>
+            <p className="text-sm text-neutral-400 leading-relaxed">
+              Your event details will<br />appear here as we chat.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {/* Core event details */}
+            {(hasName || hasEventType || hasDate || hasGuests || hasVenue) && (
+              <div className="space-y-3">
+                {hasName && (
+                  <div className="flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <Users className="w-3.5 h-3.5 text-neutral-500" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Client</p>
+                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.name}</p>
+                    </div>
+                  </div>
+                )}
+
+                {hasEventType && (
+                  <div className="flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-500" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Event</p>
+                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.event_type}</p>
+                    </div>
+                  </div>
+                )}
+
+                {hasDate && (
+                  <div className="flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <CalendarDays className="w-3.5 h-3.5 text-neutral-500" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Date</p>
+                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{formatDate(slots.event_date!)}</p>
+                    </div>
+                  </div>
+                )}
+
+                {hasGuests && (
+                  <div className="flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <Users className="w-3.5 h-3.5 text-neutral-500" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Guests</p>
+                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.guest_count} Attendees</p>
+                    </div>
+                  </div>
+                )}
+
+                {hasVenue && (
+                  <div className="flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <MapPin className="w-3.5 h-3.5 text-neutral-500" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Location</p>
+                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.venue}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Food items */}
+            {foodItems.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">
+                    Selected Items
+                  </p>
+                  <span className="text-xs text-neutral-400 tabular-nums">{foodItems.length}</span>
+                </div>
+                <div className="space-y-2">
+                  {foodItems.map((item, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100"
+                    >
+                      <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
+                        <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
+                      </div>
+                      <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Additional details */}
+            {slots.service_type && (
+              <div>
+                <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">
+                  Service
+                </p>
+                <p className="text-sm text-neutral-800 capitalize">{slots.service_type.replace('-', ' ')}</p>
+              </div>
+            )}
+
+            {slots.dietary_concerns && slots.dietary_concerns !== 'none' && (
+              <div>
+                <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">
+                  Dietary Notes
+                </p>
+                <p className="text-sm text-neutral-800">{slots.dietary_concerns}</p>
+              </div>
+            )}
+
+            {slots.special_requests && slots.special_requests !== 'none' && (
+              <div>
+                <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">
+                  Special Requests
+                </p>
+                <p className="text-sm text-neutral-800">{slots.special_requests}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AiIntakeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -60,6 +238,8 @@ function AiIntakeContent() {
   );
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
+  const [currentSlots, setCurrentSlots] = useState<Partial<ContractData>>({});
+  const [, setProgress] = useState<{ filled: number; total: number }>({ filled: 0, total: 20 });
 
   const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));
 
@@ -110,19 +290,24 @@ function AiIntakeContent() {
   const titleUpdatedRef = useRef(false);
 
   const handleSlotsUpdate = async (slots: Partial<ContractData>) => {
-    if (!draftProjectId || titleUpdatedRef.current) return;
-    const name = (slots as any).name;
-    const eventType = (slots as any).event_type;
-    if (!name || !eventType) return;
-    titleUpdatedRef.current = true;
-    try {
-      await apiClient.post('/projects/ai-intake', {
-        project_id: draftProjectId,
-        client_name: name,
-        event_type: eventType,
-        thread_id: activeThreadId,
-      });
-    } catch { /* non-fatal */ }
+    setCurrentSlots((prev) => ({ ...prev, ...slots }));
+
+    // Update project title (once only)
+    if (draftProjectId && !titleUpdatedRef.current) {
+      const name = (slots as any).name;
+      const eventType = (slots as any).event_type;
+      if (name && eventType) {
+        titleUpdatedRef.current = true;
+        try {
+          await apiClient.post('/projects/ai-intake', {
+            project_id: draftProjectId,
+            client_name: name,
+            event_type: eventType,
+            thread_id: activeThreadId,
+          });
+        } catch { /* non-fatal */ }
+      }
+    }
   };
 
   const handleComplete = async (contractData: ContractData) => {
@@ -176,51 +361,47 @@ function AiIntakeContent() {
   if (!isAuthenticated || isStaff) return null;
 
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <div className="h-screen flex flex-col bg-neutral-50">
       <AppNav />
 
-      <div className="pt-14 h-screen flex flex-col">
-        {/* Page header — matches dashboard page header style */}
-        <div className="bg-white border-b border-neutral-200 px-6 py-4 shrink-0">
-          <div className="max-w-4xl mx-auto flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-semibold text-neutral-900">AI Intake</h1>
-              <p className="text-sm text-neutral-500">Plan your event with our AI assistant</p>
+      <div className="flex flex-1 overflow-hidden pt-14">
+        {/* Left: main content area */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Thin top bar for session switching + saving indicator */}
+          {(view === 'chat' && sessions.filter((s) => !s.error).length > 0) || isSaving ? (
+            <div className="bg-white border-b border-neutral-100 px-6 py-2 flex items-center justify-between shrink-0">
+              <div />
+              <div className="flex items-center gap-3">
+                {view === 'chat' && sessions.filter((s) => !s.error).length > 0 && (
+                  <button
+                    onClick={() => setView('picker')}
+                    className="text-xs text-neutral-500 hover:text-neutral-900 flex items-center gap-1.5 border border-neutral-200 rounded-md px-2.5 py-1 hover:border-neutral-300 transition-colors"
+                  >
+                    <MessageSquare className="w-3 h-3" />
+                    My sessions
+                  </button>
+                )}
+                {isSaving && (
+                  <div className="flex items-center gap-1.5 text-neutral-500 text-xs">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Saving…
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              {view === 'chat' && sessions.filter((s) => !s.error).length > 0 && (
-                <button
-                  onClick={() => setView('picker')}
-                  className="text-sm text-neutral-600 hover:text-neutral-900 flex items-center gap-1.5 border border-neutral-200 rounded-lg px-3 py-1.5 hover:border-neutral-300 transition-colors"
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  My sessions
-                </button>
-              )}
-              {isSaving && (
-                <div className="flex items-center gap-2 text-neutral-500 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Saving…
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+          ) : null}
 
-        {/* Content */}
-        <div className="flex-1 overflow-hidden">
-          <div className="max-w-4xl mx-auto h-full py-6 px-4">
-
-            {/* Session Picker */}
-            {view === 'picker' && !loadingSessions && (
-              <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+          {/* Session Picker */}
+          {view === 'picker' && !loadingSessions && (
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="max-w-lg mx-auto bg-white rounded-xl border border-neutral-200 overflow-hidden">
                 <div className="px-6 py-5 border-b border-neutral-100">
                   <h2 className="font-semibold text-neutral-900">Your intake sessions</h2>
                   <p className="text-sm text-neutral-500 mt-0.5">Continue where you left off, or start fresh</p>
                 </div>
                 <div className="divide-y divide-neutral-100">
                   <button
-                    onClick={() => { setActiveThreadId(undefined); setView('chat'); }}
+                    onClick={() => { setActiveThreadId(undefined); setCurrentSlots({}); setProgress({ filled: 0, total: 20 }); setView('chat'); }}
                     className="w-full flex items-center gap-4 px-6 py-4 hover:bg-neutral-50 transition-colors text-left"
                   >
                     <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center shrink-0">
@@ -289,29 +470,33 @@ function AiIntakeContent() {
                   ))}
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Chat */}
-            {view === 'chat' && (
-              <div className="bg-white rounded-xl border border-neutral-200 h-full overflow-hidden">
-                <AiChat
-                  onComplete={handleComplete}
-                  onSlotsUpdate={handleSlotsUpdate}
-                  authorId={user?.id}
-                  userId={user?.id}
-                  initialThreadId={activeThreadId}
-                  onThreadStart={async (threadId) => {
-                    setActiveThreadId(threadId);
-                    try {
-                      const res = await apiClient.post('/projects/ai-intake', { thread_id: threadId }) as any;
-                      setDraftProjectId(res.project?.id);
-                    } catch { /* non-fatal — will create fresh on complete */ }
-                  }}
-                />
-              </div>
-            )}
-          </div>
+          {/* Chat */}
+          {view === 'chat' && (
+            <div className="flex-1 overflow-hidden">
+              <AiChat
+                onComplete={handleComplete}
+                onSlotsUpdate={handleSlotsUpdate}
+                onProgressUpdate={setProgress}
+                authorId={user?.id}
+                userId={user?.id}
+                initialThreadId={activeThreadId}
+                onThreadStart={async (threadId) => {
+                  setActiveThreadId(threadId);
+                  try {
+                    const res = await apiClient.post('/projects/ai-intake', { thread_id: threadId }) as any;
+                    setDraftProjectId(res.project?.id);
+                  } catch { /* non-fatal */ }
+                }}
+              />
+            </div>
+          )}
         </div>
+
+        {/* Right: event plan panel */}
+        <EventPlanPanel slots={currentSlots} />
       </div>
     </div>
   );
@@ -319,7 +504,7 @@ function AiIntakeContent() {
 
 export default function AiIntakePage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-neutral-50" />}>
+    <Suspense fallback={<div className="h-screen bg-neutral-50" />}>
       <AiIntakeContent />
     </Suspense>
   );

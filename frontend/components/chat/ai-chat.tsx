@@ -15,6 +15,7 @@ interface AiChatProps {
   onComplete?: (contractData: ContractData) => void;
   onThreadStart?: (threadId: string) => void;
   onSlotsUpdate?: (slots: Partial<ContractData>) => void;
+  onProgressUpdate?: (progress: { filled: number; total: number }) => void;
 }
 
 const STORAGE_KEY = 'tc_chat_sessions';
@@ -123,7 +124,7 @@ function saveSessionToStorage(threadId: string) {
   }
 }
 
-export function AiChat({ projectId, authorId, userId, initialThreadId, onComplete, onThreadStart, onSlotsUpdate }: AiChatProps) {
+export function AiChat({ projectId, authorId, userId, initialThreadId, onComplete, onThreadStart, onSlotsUpdate, onProgressUpdate }: AiChatProps) {
   const [state, setState] = useState<ChatState>({
     messages: [],
     isLoading: false,
@@ -184,7 +185,11 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
       saveSessionToStorage(threadId);
       onThreadStart?.(threadId);
 
-      // If already complete, restore contract data for the CTA
+      // Restore slots and progress for parent panel
+      if (conv.slots) {
+        onSlotsUpdate?.(conv.slots);
+      }
+      onProgressUpdate?.({ filled: conv.slots_filled ?? 0, total: 20 });
       if (conv.is_completed && conv.slots) {
         setState((prev) => ({ ...prev, contractData: { ...conv.slots, thread_id: threadId } as any }));
       }
@@ -257,6 +262,8 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
         isLoading: false,
       }));
 
+      onProgressUpdate?.({ filled: response.slots_filled, total: response.total_slots });
+
       // Persist session to localStorage
       saveSessionToStorage(response.thread_id);
       if (!state.threadId) {
@@ -321,7 +328,7 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-neutral-900">TheCateringCompany</h2>
+              <h2 className="text-lg font-bold text-neutral-900">Catering Assistant</h2>
               <p className="text-xs text-neutral-500">Let's plan your perfect event together</p>
             </div>
           </div>
@@ -460,10 +467,10 @@ export function AiChat({ projectId, authorId, userId, initialThreadId, onComplet
               )}
             </button>
           </div>
-          <p className="text-xs text-neutral-400 mt-2">
-            Enter to send · Shift+Enter for new line · Try{' '}
-            <span className="font-mono text-neutral-600">/menu</span>{' '}
-            <span className="font-mono text-neutral-600">/events</span>
+          <p className="text-xs text-neutral-400 mt-2 text-center">
+            Shift+Enter for new line · Use{' '}
+            <span className="font-mono text-neutral-600">@ai</span>{' '}
+            to update previous items
           </p>
         </div>
       </div>

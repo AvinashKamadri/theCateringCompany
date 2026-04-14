@@ -5,9 +5,15 @@ import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
 
-function extractJwtFromCookie(req: Request): string | null {
-  if (req && req.cookies && req.cookies['app_jwt']) {
+function extractJwtFromCookieOrHeader(req: Request): string | null {
+  // Try cookie first (production same-origin)
+  if (req?.cookies?.['app_jwt']) {
     return req.cookies['app_jwt'];
+  }
+  // Fall back to Authorization: Bearer header (local cross-origin dev)
+  const authHeader = req?.headers?.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    return authHeader.slice(7);
   }
   return null;
 }
@@ -19,7 +25,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     private readonly authService: AuthService,
   ) {
     super({
-      jwtFromRequest: extractJwtFromCookie,
+      jwtFromRequest: extractJwtFromCookieOrHeader,
       ignoreExpiration: false,
       secretOrKey: configService.get<string>('JWT_SECRET'),
     });

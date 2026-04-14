@@ -291,19 +291,25 @@ async def select_event_type_node(state: ConversationState) -> ConversationState:
     if "wedding" in event_lower:
         state["current_node"] = "collect_fiance_name"
         confirmation = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nSay one short warm congrats for a wedding. Nothing else. No questions.",
+            f"{SYSTEM_PROMPT}\n\nCongrats on the wedding — one short warm line, "
+            "then immediately ask for the fiancé/partner's name in the SAME message. "
+            "Example: 'Congrats on the wedding! Who's the other half of this day?'",
             f"Event type: Wedding. Customer name: {get_slot_value(state['slots'], 'name')}"
         )
     elif "birthday" in event_lower:
         state["current_node"] = "collect_birthday_person"
         confirmation = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nSay one short upbeat line confirming it's a birthday event. Nothing else. No questions.",
+            f"{SYSTEM_PROMPT}\n\nConfirm the birthday event with one upbeat line, "
+            "then immediately ask whose birthday it is in the SAME message. "
+            "Example: 'Awesome, a birthday celebration! Whose big day is it?'",
             f"Event type: Birthday. Customer name: {get_slot_value(state['slots'], 'name')}"
         )
     elif "corporate" in event_lower:
         state["current_node"] = "collect_company_name"
         confirmation = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nSay one short professional line confirming it's a corporate event. Nothing else. No questions.",
+            f"{SYSTEM_PROMPT}\n\nConfirm the corporate event with one short line, "
+            "then immediately ask for the company/organization name in the SAME message. "
+            "Example: 'Nice — corporate event it is. What company is this for?'",
             f"Event type: Corporate. Customer name: {get_slot_value(state['slots'], 'name')}"
         )
     else:

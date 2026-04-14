@@ -141,12 +141,13 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
             item_num += 1
     numbered_str = "\n".join(numbered_lines)
 
-    extraction = await llm_respond(
+    extraction = await llm_extract(
         "Extract the dessert selections from this customer message. "
-        "Use the numbered list below to map references to exact item names. "
-        "Return ONLY a comma-separated list of exact item names, nothing else.\n\n"
+        "The customer may refer to items by number or by name. "
+        "Use the numbered list below to map numbers to exact item names. "
+        "Return ONLY a comma-separated list of exact item names (no numbers, no extra text).\n\n"
         f"Available desserts:\n{numbered_str}",
-        f"Customer message: {user_msg}"
+        user_msg
     )
 
     # Try DB resolution first
@@ -216,12 +217,15 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
     user_msg = get_last_human_message(state["messages"])
 
     intent = await llm_extract(
-        "The customer was asked if they want to add more desserts. "
-        "Are they done, or do they want to add more? "
+        "The customer was asked 'Want to add anything else to the dessert lineup, or is that it?' "
+        "Does their reply mean they are DONE with desserts, or do they want to ADD more? "
+        "Phrases like 'that is all', 'that's it', 'this is all', 'nope', 'done', 'no', 'no more', "
+        "'move on', 'looks good', 'we good', 'perfect' = done. "
+        "Phrases like 'add', 'also', 'more', 'yes', or naming specific items = more. "
         "Return ONLY: done or more",
         user_msg
     )
-    if intent.strip().lower() == "done":
+    if intent.strip().lower() != "more":
         context = f"Desserts finalized. Slots: {_slots_context(state)}"
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nDessert selections are finalized. "
@@ -255,33 +259,23 @@ async def ask_rentals_node(state: ConversationState) -> ConversationState:
         fill_slot(state["slots"], "rentals", "no")
     else:
         extraction = await llm_extract(
-            "Extract rental items from the customer's message. Options: linens, tables, chairs. "
-            "Return ONLY a comma-separated list of what they chose (e.g. 'linens, tables'). "
-            "Return NONE if none selected.",
+            "The customer was asked about rentals. Available options: 1=Linens, 2=Tables, 3=Chairs. "
+            "The customer may type numbers, names, or both. "
+            "Map: 1/linens → Linens, 2/tables → Tables, 3/chairs → Chairs. "
+            "Return ONLY a comma-separated list (e.g. 'Linens, Tables'). "
+            "If they said 'yes' without specifying, return 'Linens, Tables, Chairs'. "
+            "Return NONE if they clearly don't want any.",
             user_msg
         )
         fill_slot(state["slots"], "rentals", extraction.strip())
 
-    # Route to florals for weddings, otherwise skip to special requests
-    event_type = get_slot_value(state["slots"], "event_type")
-    is_wedding = event_type and "wedding" in str(event_type).lower()
-
-    if is_wedding:
-        # Fetch floral items from DB to present
-        floral_ctx = await _get_floral_context(state)
-        context = f"Rentals: {get_slot_value(state['slots'], 'rentals')}\n{floral_ctx}"
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_florals']}",
-            context
-        )
-        state["current_node"] = "ask_florals"
-    else:
-        fill_slot(state["slots"], "florals", "no")
-        context = f"Rentals: {get_slot_value(state['slots'], 'rentals')}\nSlots: {_slots_context(state)}"
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_special_requests']}", context
-        )
-        state["current_node"] = "ask_special_requests"
+    # Skip florals — go straight to special requests
+    fill_slot(state["slots"], "florals", "no")
+    context = f"Rentals: {get_slot_value(state['slots'], 'rentals')}\nSlots: {_slots_context(state)}"
+    response = await llm_respond(
+        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_special_requests']}", context
+    )
+    state["current_node"] = "ask_special_requests"
 
     state["messages"] = add_ai_message(state, response)
     return state

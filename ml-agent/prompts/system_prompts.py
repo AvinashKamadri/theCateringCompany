@@ -32,13 +32,15 @@ NODE_PROMPTS = {
     ),
 
     "collect_name": (
-        "The customer just gave their name. Confirm it with a short casual line and ask what kind of event they're planning. "
-        "Rotate between these styles (pick one, don't repeat the same opener every time): "
-        "'Nice to meet you, {name}! What are we putting together?' / "
-        "'Got it—thanks, {name}. What kind of event are you planning?' / "
-        "'Perfect. Tell me about the event you have in mind.' / "
-        "'Alright, {name}—what's the occasion?' "
-        "If they hesitate, add: 'Most people fall into wedding, corporate, birthday, or something custom.'"
+        "The customer just gave their name. Confirm it with a short casual line. "
+        "Then ask what kind of event and show numbered options:\n"
+        "'What kind of event are you planning?\n"
+        "1. Wedding\n"
+        "2. Birthday\n"
+        "3. Corporate\n"
+        "4. Social\n"
+        "5. Custom'\n"
+        "Keep the greeting short — one line max."
     ),
 
     "collect_fiance_name": (
@@ -93,7 +95,7 @@ NODE_PROMPTS = {
     "collect_guest_count": (
         "The customer gave a guest count. Confirm it briefly. "
         "- If Wedding: Ask 'What style of service are you thinking — cocktail hour, reception, or both?' "
-        "- If NOT Wedding: Ask 'Would you like to start with a cocktail hour and appetizers?'"
+        "- If NOT Wedding: Ask 'Would you like to add appetizers to your event?'"
     ),
 
     "present_menu": (
@@ -174,10 +176,12 @@ NODE_PROMPTS = {
     ),
 
     "ask_rentals": (
-        "Ask about rental needs casually. Rotate between: "
-        "'Do you need any rentals — linens, tables, or chairs?' / "
-        "'Will you need us to handle any rentals like linens, tables, or chairs?' / "
-        "'Any rentals needed — linens, tables, chairs?' "
+        "Ask about rental needs. Show numbered options:\n"
+        "'Do you need any rentals?\n"
+        "1. Linens\n"
+        "2. Tables\n"
+        "3. Chairs\n"
+        "You can pick one, all, or none.'\n"
         "Note: almost every event needs linens — mention you can price out a standard package based on guest count."
     ),
 
@@ -247,6 +251,7 @@ EXTRACTION_PROMPTS = {
     ),
     "event_type": (
         "Determine the event type. Must be one of: Wedding, Corporate, Birthday, Social, Custom. "
+        "If the user types a number, map it: 1=Wedding, 2=Birthday, 3=Corporate, 4=Social, 5=Custom. "
         "Return ONLY the event type. If unclear, return NONE."
     ),
     "partner_name": (
@@ -267,10 +272,10 @@ EXTRACTION_PROMPTS = {
         "If they give a name, return that name. If unclear, return NONE."
     ),
     "venue": (
-        "Extract the venue name/location from this message. "
-        "CRITICAL: Return NONE if the message is an instruction, correction, question, "
-        "or meta-request (e.g. 'change the date', 'actually', 'wait', 'never mind'). "
-        "Only return a value if the message genuinely names or describes a location."
+        "The customer was just asked where the event will be held. "
+        "Their reply is the message below. Extract the venue, location, address, or area they gave. "
+        "Accept ANY location — a venue name, address, city, neighborhood, 'home', 'backyard', 'TBD', etc. "
+        "Return NONE ONLY if the message is clearly NOT a location (e.g. a question, correction, or unrelated text)."
     ),
     "guest_count": (
         "Extract the number of guests from this message. "

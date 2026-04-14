@@ -157,16 +157,70 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
         if any(sub in msg_lower for sub in dessert_sub_items):
             target_slot = "desserts"
 
-        # ── Menu slots: appetizers / selected_dishes — use item merge logic ──
-        if target_slot in ("appetizers", "selected_dishes", "desserts", "drinks", "rentals"):
+        # ── Rentals / utensils — simple string slots, not menu items ──
+        if target_slot in ("rentals", "utensils"):
+            slot_label = _get_slot_label(target_slot)
+            old_value = state["slots"].get(target_slot, {}).get("value")
+            now = datetime.now().isoformat()
+            history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
+            history.append({"old_value": old_value, "new_value": new_value, "timestamp": now})
+            state["slots"][target_slot] = {
+                "value": new_value, "filled": True, "modified_at": now, "modification_history": history,
+            }
+            confirm = f"Done! I've updated your {slot_label} to '{new_value}'."
+            response = f"{confirm}\n\n{pending_question}" if pending_question else confirm
+            state["messages"] = add_ai_message(state, response)
+
+        # ── Menu slots: appetizers / selected_dishes / desserts — use item merge logic ──
+        elif target_slot in ("appetizers", "selected_dishes", "desserts", "drinks"):
             from agent.nodes.menu import _resolve_to_db_items, _parse_slot_items
+            from database.db_manager import load_menu_by_category
             slot_label = _get_slot_label(target_slot)
             current_value = state["slots"].get(target_slot, {}).get("value") or ""
             current_items = _parse_slot_items(current_value)
 
+            # If user said "modify/change/update X" without specific items,
+            # show current selection and re-present the menu so they can pick
+            vague_modify = bool(re.search(
+                r'\b(modify|change|update|edit|redo|revise|swap)\b', last_message, re.IGNORECASE
+            )) and not re.search(
+                r'\b(add|remove|delete|drop|take out)\b', last_message, re.IGNORECASE
+            )
+            items_text = str(new_value).strip()
+            # Check if the "new_value" is just the action word itself (no actual items)
+            action_words = {"modify", "change", "update", "edit", "redo", "revise", "swap",
+                            "the appetizers", "the menu", "the dishes", "the desserts",
+                            "appetizers", "menu", "dishes", "desserts"}
+            is_vague = vague_modify or items_text.lower() in action_words
+
+            if is_vague:
+                # Re-present current items and the full menu for this slot
+                menu = await load_menu_by_category()
+                menu_lines = []
+                idx = 1
+                for cat_name, cat_items in menu.items():
+                    if target_slot == "desserts" and "dessert" not in cat_name.lower() and "cake" not in cat_name.lower():
+                        continue
+                    if target_slot == "appetizers" and "hors" not in cat_name.lower() and "platter" not in cat_name.lower() and "canape" not in cat_name.lower():
+                        continue
+                    for item in cat_items:
+                        menu_lines.append(f"{idx}. {item['name']}")
+                        idx += 1
+                menu_str = "\n".join(menu_lines) if menu_lines else "Menu items not available."
+
+                confirm = (
+                    f"Your current {slot_label}: **{current_value or 'none selected'}**\n\n"
+                    f"Here's the full menu — tell me what you'd like to add, remove, or swap:\n{menu_str}"
+                )
+                response = f"{confirm}\n\n{pending_question}" if pending_question else confirm
+                state["messages"] = add_ai_message(state, response)
+                # Stay on same node — don't advance
+                restored_node = _adjust_node_for_slot_change(previous_node, state["slots"])
+                state["current_node"] = restored_node
+                return state
+
             # Detect remove vs. add intent from the raw user message
             remove_intent = bool(re.search(r'\b(remove|delete|take out|drop)\b', last_message, re.IGNORECASE))
-            items_text = str(new_value).strip()
 
             if remove_intent:
                 matched, _ = await _resolve_to_db_items(items_text)

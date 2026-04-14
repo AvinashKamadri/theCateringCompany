@@ -182,7 +182,14 @@ async def ask_anything_else_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_affirmative(user_msg):
+    # Use LLM to detect if user wants to add something or is done
+    intent = await llm_extract(
+        "The customer was asked 'Is there anything else you need for your event?' "
+        "Are they adding something or saying they're done? "
+        "Return ONLY: add or done",
+        user_msg
+    )
+    if intent.strip().lower() == "add":
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_anything_else']}",
             f"Customer wants to add something. Ask what else they need.\nSlots: {_slots_context(state)}"

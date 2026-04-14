@@ -577,7 +577,9 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
 
     # "yes these are final" / "yes looks good" / "yes we're done" = NO changes
     finalize_keywords = ["final", "done", "good", "perfect", "that's all", "thats all",
-                         "no changes", "looks good", "all set", "we're set", "we are set"]
+                         "no changes", "looks good", "all set", "we're set", "we are set",
+                         "ok", "okay", "nah", "nope", "we good", "rolling", "roll with",
+                         "we rollin", "go with this", "happy with", "set with"]
     user_lower = user_msg.lower()
 
     # Detect direct change action words ("add X", "remove X", "also include", etc.)

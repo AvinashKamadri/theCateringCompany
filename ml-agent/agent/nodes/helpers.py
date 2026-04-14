@@ -39,9 +39,10 @@ def is_affirmative(text: str) -> bool:
     patterns = [
         # Classic yes words
         r'\byes\b', r'\byeah\b', r'\byep\b', r'\byea\b', r'\bya\b',
+        r'\byessir\b', r'\byes sir\b', r'\bhell yeah\b', r'\bheck yeah\b',
         r'\bsure\b', r'\bok\b', r'\bokay\b', r'\bplease\b',
         r'\bdefinitely\b', r'\babsolutely\b', r'\bof course\b',
-        r'\bwhy not\b',
+        r'\bwhy not\b', r'\bfor sure\b',
         # "sounds good/great/fine/perfect"
         r'\bsounds (good|great|fine|perfect|amazing|awesome|wonderful)\b',
         # "looks good/great/fine/perfect" (e.g. "looks good for me")

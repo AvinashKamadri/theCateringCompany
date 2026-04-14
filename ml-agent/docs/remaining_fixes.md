@@ -6,6 +6,12 @@ Items not yet implemented from the client feedback PDF.
 
 ## P1 — Ship Next
 
+### Collect email / phone number
+**PDF ref:** p1  
+**Problem:** PDF lists email/phone as required client info. We only collect name — no email or phone.  
+**Solution:** Add `email` and `phone` slots. Add a node after `collect_name` (before event type): *"What's the best email and phone number to reach you?"* Extract both in one message via `llm_extract_structured`.  
+**Files:** `state.py`, `basic_info.py`, `system_prompts.py`, `__init__.py`, `routing.py`
+
 ### FIX-09 · Human approval gate before contract is sent
 **PDF ref:** p27  
 **Problem:** Contract is generated and shown to the client immediately. No staff review.  
@@ -21,6 +27,18 @@ Items not yet implemented from the client feedback PDF.
 ---
 
 ## P2 — Polish / New Sections
+
+### Passed or station question (cocktail hour)
+**PDF ref:** p1, p9  
+**Problem:** PDF says to ask if the client wants appetizers passed or served at a station. Currently not asked.  
+**Solution:** After appetizer selection is confirmed, ask: *"Do you want these passed around or set up at a station?"* Store in a `service_style_appetizers` slot or append to `menu_notes`. Only applies when cocktail hour is selected.  
+**Files:** `state.py`, `addons.py` or `menu.py`, `system_prompts.py`
+
+### No venue yet — skip gracefully
+**PDF ref:** p6  
+**Problem:** If user says "I don't have a venue yet" or "not sure", the bot re-asks. PDF says to move on gracefully.  
+**Solution:** In `collect_venue_node`, detect "no venue", "not sure", "don't know yet", "TBD" → fill slot with "TBD", respond: *"No problem — we can circle back to that. How many guests are you thinking?"* and advance to guest count.  
+**Files:** `basic_info.py`, `system_prompts.py` (venue extraction prompt already accepts "TBD")
 
 ### FIX-11 · @AI tip — show once early in flow
 **PDF ref:** p8  
@@ -59,6 +77,12 @@ Items not yet implemented from the client feedback PDF.
 5. Trash Removal — $175 flat
 6. Travel Fee — $150/$250/$375+ based on distance  
 **Files:** `state.py`, `addons.py`, `system_prompts.py`, `__init__.py`, `routing.py`
+
+### Coffee Bar incorrectly pulled as dessert
+**PDF ref:** p17  
+**Problem:** When user types mini dessert options, "Coffee Bar" gets auto-included as a dessert because it's in the Desserts DB category. User never asked for it.  
+**Solution:** In `select_desserts_node`, when resolving items from the dessert menu, exclude "Coffee Bar" unless the user explicitly mentioned it. Coffee Bar should be part of the drinks section (FIX-15), not desserts.  
+**Files:** `addons.py` (select_desserts_node extraction/resolution logic)
 
 ### FIX-18 · Duplicate items in selection
 **PDF ref:** p18  

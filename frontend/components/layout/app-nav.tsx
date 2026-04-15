@@ -24,12 +24,6 @@ export function AppNav() {
   const router = useRouter();
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
-  const isStaff = user?.role === 'staff' || user?.email?.toLowerCase().endsWith('@catering-company.com');
-  const navigation = ALL_NAVIGATION.filter((item) => {
-    if (item.staffOnly && !isStaff) return false;
-    if (item.clientOnly && isStaff) return false;
-    return true;
-  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const isStaff = user?.email?.endsWith('@catering-company.com') ?? false;

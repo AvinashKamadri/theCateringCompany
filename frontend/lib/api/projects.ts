@@ -21,6 +21,11 @@ export const projectsApi = {
     return apiClient.get('/projects');
   },
 
+  // Search projects by title, venue, event type (server-side ILIKE)
+  search: async (q: string): Promise<Project[]> => {
+    return apiClient.get(`/projects/search?q=${encodeURIComponent(q)}`);
+  },
+
   // Get single project by ID
   getById: async (id: string): Promise<any> => {
     return apiClient.get(`/projects/${id}`);

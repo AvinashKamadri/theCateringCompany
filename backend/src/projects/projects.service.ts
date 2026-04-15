@@ -86,6 +86,49 @@ export class ProjectsService {
   }
 
   /**
+   * Full-text search across a user's projects.
+   * Matches against title, venue name, and event type using ILIKE.
+   */
+  async search(userId: string, query: string) {
+    const q = `%${query.trim()}%`;
+    const projects = await this.prisma.projects.findMany({
+      where: {
+        deleted_at: null,
+        OR: [
+          { owner_user_id: userId },
+          { project_collaborators: { some: { user_id: userId } } },
+        ],
+        AND: [
+          {
+            OR: [
+              { title: { contains: query.trim(), mode: 'insensitive' } },
+              { venues: { name: { contains: query.trim(), mode: 'insensitive' } } },
+              { events: { some: { event_type: { contains: query.trim(), mode: 'insensitive' } } } },
+            ],
+          },
+        ],
+      },
+      include: {
+        venues: { select: { id: true, name: true } },
+        events: { select: { id: true, event_type: true }, take: 1 },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 20,
+    });
+
+    return projects.map((project: any) => ({
+      id: project.id,
+      name: project.title,
+      event_type: project.events?.[0]?.event_type || 'general',
+      event_date: project.event_date,
+      guest_count: project.guest_count,
+      status: project.status,
+      venue_name: project.venues?.name,
+      created_at: project.created_at,
+    }));
+  }
+
+  /**
    * Find a project by ID, including the latest active contract metadata.
    * The latest active contract is determined by:
    *   - project_id matches

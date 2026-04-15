@@ -31,51 +31,66 @@ let failedQueue: any[] = [];
 
 const processQueue = (error: any, token: string | null = null) => {
   failedQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve(token);
-    }
+    if (error) prom.reject(error);
+    else prom.resolve(token);
   });
   failedQueue = [];
 };
+
+/**
+ * Clear all auth cookies client-side and wipe Zustand auth state.
+ * Called before redirecting to /signin so the middleware doesn't
+ * see a stale cookie and bounce the user straight back.
+ */
+function forceLogout() {
+  if (typeof document === 'undefined') return;
+
+  // Clear the JWT cookies for all likely paths/domains
+  const cookiesToClear = ['app_jwt', 'app_refresh_token'];
+  const paths = ['/', '/api'];
+  for (const name of cookiesToClear) {
+    for (const path of paths) {
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${path}; SameSite=Lax`;
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${path}; SameSite=None; Secure`;
+    }
+  }
+
+  // Clear Zustand persisted auth state from localStorage
+  try {
+    localStorage.removeItem('auth-storage');
+  } catch {}
+}
 
 // Response interceptor for error handling with automatic token refresh
 apiClient.interceptors.response.use(
   (response) => response.data,
   async (error: AxiosError<ApiError>) => {
     const originalRequest = error.config as any;
-
-    // If 401 and we haven't tried to refresh yet (skip for auth endpoints themselves)
     const isAuthEndpoint = originalRequest.url?.includes('/auth/');
+
+    // If 401 and we haven't tried to refresh yet (skip auth endpoints)
     if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
       if (isRefreshing) {
-        // If already refreshing, queue this request
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })
-          .then(() => {
-            return apiClient(originalRequest);
-          })
-          .catch((err) => {
-            return Promise.reject(err);
-          });
+          .then(() => apiClient(originalRequest))
+          .catch((err) => Promise.reject(err));
       }
 
       originalRequest._retry = true;
       isRefreshing = true;
 
       try {
-        // Try to refresh the token
         await apiClient.post('/auth/refresh', {});
         processQueue(null, 'refreshed');
         isRefreshing = false;
-        // Retry the original request
         return apiClient(originalRequest);
       } catch (refreshError) {
-        // Refresh failed, redirect to signin
         processQueue(refreshError, null);
         isRefreshing = false;
+        // Clear cookies BEFORE redirecting — prevents middleware bounce loop
+        forceLogout();
         if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/signin')) {
           window.location.href = '/signin';
         }
@@ -83,8 +98,9 @@ apiClient.interceptors.response.use(
       }
     }
 
-    // For other errors or if refresh also failed — but never redirect from auth endpoints
-    if (error.response?.status === 401 && !isAuthEndpoint) {
+    // Fallback 401 handler (e.g. refresh endpoint itself returned 401)
+    if (error.response?.status === 401 && !isAuthEndpoint && !originalRequest._retry) {
+      forceLogout();
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/signin')) {
         window.location.href = '/signin';
       }

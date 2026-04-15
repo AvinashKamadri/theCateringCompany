@@ -519,9 +519,13 @@ async def collect_guest_count_node(state: ConversationState) -> ConversationStat
         )
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nConfirm the guest count in one brief line. "
-            "Then immediately present the FULL appetizer menu from the database below as a numbered list. "
-            "Use a casual intro mentioning crowd favorites from the list. "
-            "Say: 'pick as many as you'd like' or 'if you don't want appetizers, just say skip'. "
+            "Then present the FULL appetizer menu from the database using this EXACT grouped format:\n"
+            "- Bold section headers matching the group names (Chicken, Pork, Beef, Seafood, Canapes, Vegetarian)\n"
+            "- Show the group price on the header when all items share the same price (e.g. '$3.50 pp/option')\n"
+            "- Keep global sequential numbering — numbers continue across groups\n"
+            "- For Seafood, Canapes, and Vegetarian show individual price per item since they vary\n"
+            "- Show EVERY item — no skipping\n"
+            "Add a casual intro mentioning crowd favorites, and end with: 'pick as many as you'd like — or say skip to go straight to the main menu.'\n"
             "CRITICAL: Only list items from the database. Show ALL items.",
             context,
         )
@@ -548,11 +552,13 @@ async def present_menu_node(state: ConversationState) -> ConversationState:
     )
     response = await llm_respond(
         f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['present_menu']}\n\n"
-        "CRITICAL INSTRUCTION: The database menu is listed above in the context. "
-        "You MUST present ONLY those exact items — numbered exactly as they appear. "
-        "DO NOT add, rename, substitute, or invent any item not in that list. "
-        "DO NOT show appetizers — those have already been selected. "
-        "Copy the item names verbatim from the database list.",
+        "Present the main dish menu using the EXACT grouped format from the database context:\n"
+        "- Use section headers exactly as named (Signature Combinations, BBQ Menus, Tasty & Casual, Global Inspirations, Soup / Salad / Sandwich)\n"
+        "- Keep the global sequential numbering — numbers continue across sections\n"
+        "- Show the price per item\n"
+        "- Do NOT collapse sections or merge categories\n"
+        "- DO NOT show appetizers — those have already been selected\n"
+        "CRITICAL: Copy item names verbatim from the database list. DO NOT add or rename any item.",
         context,
     )
 
@@ -586,8 +592,13 @@ async def select_service_style_node(state: ConversationState) -> ConversationSta
     )
     response = await llm_respond(
         f"{SYSTEM_PROMPT}\n\nConfirm the service style briefly. "
-        "Then immediately present the FULL appetizer menu from the database below as a numbered list. "
-        "Mention crowd favorites from the list. Say 'pick as many as you'd like'. "
+        "Then present the FULL appetizer menu from the database using this EXACT grouped format:\n"
+        "- Bold section headers matching the group names (Chicken, Pork, Beef, Seafood, Canapes, Vegetarian)\n"
+        "- Show the group price on the header when all items share the same price (e.g. '$3.50 pp/option')\n"
+        "- Keep global sequential numbering — numbers continue across groups\n"
+        "- For Seafood, Canapes, and Vegetarian show individual price per item since they vary\n"
+        "- Show EVERY item — no skipping\n"
+        "Mention crowd favorites from the list. Say 'pick as many as you'd like'.\n"
         "CRITICAL: Only list items from the database. Show ALL items.",
         combined_context,
     )

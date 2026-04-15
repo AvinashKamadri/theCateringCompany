@@ -64,7 +64,6 @@ SLOT_NAMES = [
     "drinks",            # Drinks: water/tea/lemonade + coffee/bar add-ons
     "rentals",           # linen/table/chair selections or "no"
     "labor",             # Labor services (setup, cleanup, bartending, travel)
-    "florals",           # Floral arrangement selections or "no" (wedding only)
     # Final details
     "special_requests",  # Special requests or "none"
     "dietary_concerns",  # Health and dietary concerns
@@ -144,7 +143,6 @@ NODE_SEQUENCE = [
     "select_desserts",       # conditional: only if yes
     "ask_more_desserts",     # conditional: only if yes
     "ask_rentals",
-    "ask_florals",           # conditional: only for weddings
     # Final
     "ask_special_requests",
     "collect_special_requests",  # conditional: only if yes

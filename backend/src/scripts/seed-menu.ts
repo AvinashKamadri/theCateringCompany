@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 interface MenuItem {
-  name: string; 
+  name: string;
   description?: string;
   unit_price: number;
   price_type: 'per_person' | 'flat' | 'per_unit' | 'per_hour';
@@ -19,166 +19,266 @@ interface MenuCategory {
 }
 
 const menuData: MenuCategory[] = [
-  // ── I. Hors D'oeuvres & Platters ──────────────────────────────────────
+
+  // ── I. Hors D'oeuvres ─────────────────────────────────────────────────
 
   {
-    name: 'Hors D\'oeuvres - Poultry',
+    name: "Hors D'oeuvres - Chicken",
     sort_order: 1,
     items: [
-      { name: 'Adobo Lime Chicken Skewers with Cilantro Cream', unit_price: 3.50, price_type: 'per_person' },
-      { name: 'Chicken Banh Mi Sliders with Pickled Veggies & Sriracha Aioli', unit_price: 3.50, price_type: 'per_person' },
-      { name: 'Maple Bacon Chicken Pops', unit_price: 3.50, price_type: 'per_person' },
-      { name: 'Chicken Satay with Peanut Sauce', unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Maple Bacon Chicken Pops',                  unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Chicken Tikka Skewers',                     unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Adobo Lime Chicken Bites',                  unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Chicken Satay',                             unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Chicken Banh Mi Slider w/ Jalapeno Slaw',  unit_price: 3.50, price_type: 'per_person' },
+      { name: 'BBQ Chicken Slider',                        unit_price: 3.50, price_type: 'per_person' },
     ],
   },
   {
-    name: 'Hors D\'oeuvres - Meat',
+    name: "Hors D'oeuvres - Pork",
     sort_order: 2,
     items: [
-      { name: 'Fillet Tip Crostini with Horseradish Cream & Microgreens', unit_price: 4.50, price_type: 'per_person', tags: ['premium'], is_upsell: true },
-      { name: 'Philly Cheesesteak Eggroll with Sriracha Ketchup', unit_price: 3.50, price_type: 'per_person' },
-      { name: 'Mini Beef Sliders with Caramelized Onions & Swiss', unit_price: 3.50, price_type: 'per_person' },
-      { name: 'Candied Bacon Skewers', unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Smoked Pork Belly Dippers',    unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Bacon Bourbon Meatballs',      unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Pulled Pork Sliders',          unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Chorizo Stuffed Baby Peppers', unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Twice Baked Potato Bites',     unit_price: 3.50, price_type: 'per_person' },
     ],
   },
   {
-    name: 'Hors D\'oeuvres - Seafood & Canapes',
+    name: "Hors D'oeuvres - Beef",
     sort_order: 3,
     items: [
-      { name: 'Coconut Shrimp with Sweet Chili Sauce', unit_price: 3.50, price_type: 'per_person' },
-      { name: 'Mini Crab Cakes with Remoulade Sauce', unit_price: 4.75, price_type: 'per_person' },
-      { name: 'Shrimp Salad in Cucumber Cups', unit_price: 2.25, price_type: 'per_person' },
-      { name: 'Bruschetta (Tomato, Basil, Garlic on Crostini)', unit_price: 1.75, price_type: 'per_person', tags: ['vegetarian'] },
-      { name: 'Caprese Skewers (Tomato, Mozzarella, Basil, Balsamic Glaze)', unit_price: 2.00, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Asian Roast Beef Crostini w/ Wasabi Aioli',  unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Adobo Steak Skewers',                        unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Meatballs (BBQ, Swedish, Sweet and Sour)',   unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Mexican Stuffed Peppers w/ Cojito Cheese',   unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Filet Tip Crostini',                         unit_price: 4.50, price_type: 'per_person', tags: ['premium'], is_upsell: true },
     ],
   },
   {
-    name: 'Platters & Displays',
+    name: "Hors D'oeuvres - Seafood",
     sort_order: 4,
     items: [
-      { name: 'Vegetable Crudite & Hummus/Pita', description: 'Assorted fresh veggies & dip', unit_price: 2.25, price_type: 'per_person', tags: ['vegetarian', 'vegan'] },
-      { name: 'Fruit Display', description: 'Seasonal sliced fruit', unit_price: 3.50, price_type: 'per_person', tags: ['vegetarian', 'vegan'] },
-      { name: 'Cheese & Fruit Display', description: 'Domestic & Imported cheeses', unit_price: 4.25, price_type: 'per_person', tags: ['vegetarian'] },
-      { name: 'Charcuterie Board', description: 'Cured meats, cheeses, olives, and nuts', unit_price: 4.25, price_type: 'per_person' },
+      { name: 'Grilled Shrimp Cocktail',    unit_price: 4.75, price_type: 'per_person' },
+      { name: 'Crab Stuffed Cucumbers',     unit_price: 3.50, price_type: 'per_person' },
+      { name: 'South West Shrimp Crostini', unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Shrimp and Mango Bites',     unit_price: 3.50, price_type: 'per_person' },
+      { name: 'Firecracker Shrimp',         unit_price: 4.75, price_type: 'per_person' },
+      { name: 'Crab Cakes',                 unit_price: 4.75, price_type: 'per_person' },
+      { name: 'Crab Dip',                   unit_price: 3.75, price_type: 'per_person' },
+      { name: 'Ahi Tuna Bites',             unit_price: 3.50, price_type: 'per_person' },
+    ],
+  },
+  {
+    name: "Hors D'oeuvres - Canapes",
+    sort_order: 5,
+    items: [
+      { name: 'Smoked Salmon Phyllo Cups',  unit_price: 3.80, price_type: 'per_person' },
+      { name: 'Tropical Cucumber Cups',     unit_price: 2.00, price_type: 'per_person' },
+      { name: 'Deviled Egg',                unit_price: 3.00, price_type: 'per_person' },
+      { name: 'Caviar Egg',                 unit_price: 3.50, price_type: 'per_person', tags: ['premium'], is_upsell: true },
+      { name: 'Caviar and Cream Crisp',     unit_price: 4.00, price_type: 'per_person', tags: ['premium'], is_upsell: true },
+      { name: 'Charred Tomato and Pesto',   unit_price: 2.75, price_type: 'per_person', tags: ['vegetarian'] },
+    ],
+  },
+  {
+    name: "Hors D'oeuvres - Vegetarian",
+    sort_order: 6,
+    items: [
+      { name: 'Bruschetta',                         unit_price: 1.75, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Hummus and Pita',                    unit_price: 1.95, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Chips and Salsa',                    unit_price: 1.75, price_type: 'per_person', tags: ['vegetarian', 'vegan'] },
+      { name: 'Chips & Guacamole',                  unit_price: 1.75, price_type: 'per_person', tags: ['vegetarian', 'vegan'] },
+      { name: 'White Bean Tapenade w/ Crostini',    unit_price: 1.75, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Artichoke Tapenade w/ Crostini',     unit_price: 1.75, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Caprese Skewers',                    unit_price: 2.75, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Parmesan Artichoke Dip',             unit_price: 3.00, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Spanakopita',                        unit_price: 3.25, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Soft Pretzel Bites w/ Beer Cheese',  unit_price: 3.25, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Mac & Cheese Shooters',              unit_price: 3.25, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Brie Bites',                         unit_price: 3.00, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Double Stuffed Mushrooms',           unit_price: 2.75, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Gazpacho Shooters',                  unit_price: 2.25, price_type: 'per_person', tags: ['vegetarian', 'vegan'] },
     ],
   },
 
-  // ── II. Main Event Bars & Signature Combos ─────────────────────────────
-  // All include high-quality disposable ware and choice of Water, Lemonade, or Iced Tea
+  // ── II. Platters ──────────────────────────────────────────────────────
+
+  {
+    name: 'Platters',
+    sort_order: 7,
+    items: [
+      { name: 'Vegetable Platter',          unit_price: 2.25, price_type: 'per_person', tags: ['vegetarian', 'vegan'] },
+      { name: 'Fruit Platter',              unit_price: 2.50, price_type: 'per_person', tags: ['vegetarian', 'vegan'] },
+      { name: 'Assorted Finger Sandwiches', unit_price: 4.00, price_type: 'per_person' },
+      { name: 'Cheese Platter',             unit_price: 3.50, price_type: 'per_person', tags: ['vegetarian'] },
+      { name: 'Antipasto Platter',          unit_price: 3.35, price_type: 'per_person' },
+      { name: 'Charcuterie Boards',         unit_price: 4.25, price_type: 'per_person' },
+    ],
+  },
+
+  // ── III. Main Menus ───────────────────────────────────────────────────
 
   {
     name: 'Signature Combinations',
-    sort_order: 5,
+    sort_order: 8,
     items: [
       {
         name: 'Prime Rib & Salmon',
-        description: 'Carved Prime Rib (Horseradish Cream and Au Jus), Roasted Salmon (Dill Sauce). Includes Roasted Potatoes, Wild Rice, Glazed Carrots, Roasted Asparagus, and Dinner Rolls.',
-        unit_price: 39.99,
-        price_type: 'per_person',
-      },
-      {
-        name: 'Chicken Piccata',
-        description: 'Lemon Caper Sauce, Penne Pasta (Marinara), Roasted Vegetables, Caesar Salad, and Garlic Bread.',
-        unit_price: 29.49,
-        price_type: 'per_person',
+        description: 'Carved Prime Rib w/ Horseradish Cream & Au Jus, Roasted Salmon w/ Dill Cream Sauce, Roasted Potatoes, Wild Rice, Glazed Carrots, Grilled Asparagus, Dinner Rolls.',
+        unit_price: 39.99, price_type: 'per_person', tags: ['premium'], is_upsell: true,
       },
       {
         name: 'Chicken & Ham',
-        description: 'Grilled Chicken Breast & Mango Glazed Ham. Includes Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, and Dinner Rolls.',
-        unit_price: 27.99,
-        price_type: 'per_person',
+        description: 'Grilled Chicken Breast, Mango Glazed Ham Carved, Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, Dinner Rolls.',
+        unit_price: 27.99, price_type: 'per_person',
+      },
+      {
+        name: 'Chicken Piccata',
+        description: 'Chicken Piccata, Red Wine Braised Beef Roast, Vegetable Farfalle, Long Grain Buttered Rice, Roasted Mixed Veggies, Green Beans, Dinner Rolls.',
+        unit_price: 29.49, price_type: 'per_person',
       },
     ],
   },
   {
-    name: 'Themed Food Bars',
-    sort_order: 6,
+    name: 'BBQ Menus',
+    sort_order: 9,
     items: [
       {
-        name: 'Southern Comfort',
-        description: 'Fried Chicken, Mac & Cheese, Collard Greens, Cornbread, Biscuits, Caprese Platter, and Watermelon Salad.',
-        unit_price: 27.95,
-        price_type: 'per_person',
+        name: 'Beef Brisket & Chicken',
+        description: 'BBQ Beef Brisket (sliced), Beer Can Chicken. Includes Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad.',
+        unit_price: 25.99, price_type: 'per_person',
       },
+      {
+        name: 'Pork & Chicken',
+        description: 'Pulled BBQ Pork, Pulled BBQ Chicken. Includes Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad.',
+        unit_price: 23.99, price_type: 'per_person',
+      },
+    ],
+  },
+  {
+    name: 'Tasty & Casual',
+    sort_order: 10,
+    items: [
+      {
+        name: 'Burger Bar',
+        description: 'Burgers (handmade) w/ Brioche Buns, Beer Can Chicken Breast. Toppings Bar: Mushrooms, Grilled Onions, Pickled Red Onion, Pickles, Lettuce, Tomato, Bacon, Assorted Sauces and Cheeses. Sides: Mac & Cheese, Roasted Red Potato (Herb and Balsamic), Seasonal Spring Greens Salad (Choice of 2 Dressings), Caprese Platter (Sliced Tomato, Fresh Mozzarella, Basil, Balsamic Glaze), Watermelon Salad (Mint, Lime Juice).',
+        unit_price: 23.99, price_type: 'per_person',
+      },
+      {
+        name: 'Southern Comfort',
+        description: 'Garden Salad, Crispy Fried Chicken, Smoked Sausage, Mac and Cheese, Mashed Potatoes, Southern Style Green Beans, Buttered Corn Kernel, Corn Bread w/ Butter.',
+        unit_price: 27.95, price_type: 'per_person',
+      },
+    ],
+  },
+  {
+    name: 'Global Inspirations',
+    sort_order: 11,
+    items: [
       {
         name: 'Mexican Char Grilled',
-        description: 'Carne Asada, Grilled Chicken, Rice/Beans, Pico, Guacamole, Tortillas, and Chips/Salsa.',
-        unit_price: 27.99,
-        price_type: 'per_person',
+        description: 'Carne Asada, Chili Lime Chicken, Spanish Rice, Bandito Black Beans, Peppers & Onions, Pico De Gallo, Sour Cream, Tortilla Shells.',
+        unit_price: 27.99, price_type: 'per_person',
       },
       {
-        name: 'BBQ Brisket & Chicken',
-        description: 'Smoked Brisket, BBQ Chicken, Beans, Coleslaw, Cornbread, Mac & Cheese, and Pickles/Onions.',
-        unit_price: 25.99,
-        price_type: 'per_person',
+        name: 'Fiesta Taco Bar',
+        description: 'Braised Spanish Beef, Braised Chili Chicken, Pinto Beans, Cilantro Lime Rice, Full Toppings Bar.',
+        unit_price: 23.99, price_type: 'per_person',
       },
       {
         name: 'Mediterranean Bar',
-        description: 'Chicken Shawarma, Beef Kofta, Hummus/Pita, Tabbouleh, Greek Salad, Rice Pilaf, and Tzatziki.',
-        unit_price: 23.49,
-        price_type: 'per_person',
+        description: 'Hummus Bar (all homemade): Roasted Garlic, Sundried Tomato, Original. Toppings: Ground Lamb (hot), Grilled Mediterranean Chicken (hot), Roasted Vegetables (hot), Feta Cheese, Roasted Chickpeas, Olives, Fresh Diced Tomato, Pickled Onions, Caramelized Onions, Shredded Lettuce, Pita Bread.',
+        unit_price: 23.49, price_type: 'per_person',
       },
       {
-        name: 'Burger Bar',
-        description: 'Angus Beef, Grilled Chicken, All Fixings, Fries, Coleslaw, and Baked Beans.',
-        unit_price: 23.99,
-        price_type: 'per_person',
+        name: 'Souvlaki Bar',
+        description: 'Proteins: Chicken Souvlaki, Pork Souvlaki. Sides/Toppings: Roasted Greek Potatoes, Roasted Mixed Vegetables, Green Beans, Pita Bread, Fresh Diced Tomatoes, Diced Onions, Shredded Lettuce, Tzatziki, Feta Cheese, Fresh Cilantro.',
+        unit_price: 21.49, price_type: 'per_person',
+      },
+      {
+        name: 'Marsala Menu',
+        description: 'Chicken Marsala, Roasted Cod in Peperonata Sauce, Vegetable Farfalle, Fettuccini, Roasted Mixed Veggies, Green Beans, Dinner Rolls.',
+        unit_price: 25.99, price_type: 'per_person',
+      },
+      {
+        name: 'Ravioli Menu',
+        description: 'Garden Salad, Grilled Chicken with Wild Mushroom Beurre Blanc, Roasted Salmon w/ Lemon Butter Sauce, Truffle Ravioli, Wild Rice, Sauteed Zucchini and Tomatoes, Roasted Asparagus, Dinner Rolls.',
+        unit_price: 31.99, price_type: 'per_person',
+      },
+      {
+        name: 'Grilled Pasta Menu',
+        description: 'Caesar Salad w/ Croutons on side, Grilled Chicken Breast, Sliced Italian Sausage, Pesto Penne Alfredo, Green Beans, Honey Glazed Carrots, Dinner Rolls.',
+        unit_price: 21.49, price_type: 'per_person',
       },
     ],
   },
   {
-    name: 'Casual & Light Fare',
-    sort_order: 7,
+    name: 'Soup / Salad / Sandwich',
+    sort_order: 12,
     items: [
       {
-        name: 'Soup, Salad & Sandwich',
-        description: 'Assorted Sandwiches, Choice of Soup (Tomato Bisque, Chicken Noodle, or Wedding), Mixed Green Salad, Chips, and Cookies.',
-        unit_price: 21.95,
-        price_type: 'per_person',
+        name: 'Soup / Salad / Sandwich Menu',
+        description: 'Soup (Pick 2): Broccoli Cheddar, Loaded Potato, Tomato Basil Bisque, Chicken Tortilla, Vegetable Minestrone, Clam Chowder, French Onion, Chicken Noodle, Traditional Chili, Chicken Chili. Salad (Pick 2): Caesar Salad, Cobb Salad, Greek Salad, Southwest Salad, Potato Salad, Coleslaw, Seasonal Greens Salad, Bacon and Blue Cheese Salad, Pasta Salad, Sweet Kale Salad w/ Bacon and Cranberries, Design Your Own. Sandwich/Wrap (Pick 2): Gourmet Grilled Cheese, Corned Beef Reuben, Pulled Pork Cuban, Avocado BLT, Pesto Chicken, Turkey Club, Roasted Vegetable and Hummus Wrap, Philly Cheese Steak, Build Your Own.',
+        unit_price: 21.95, price_type: 'per_person',
       },
     ],
   },
 
-  // ── III. Sweets & Wedding Cakes ────────────────────────────────────────
+  // ── IV. Desserts & Coffee ─────────────────────────────────────────────
 
   {
-    name: 'Desserts & Coffee',
-    sort_order: 8,
+    name: 'Mini Desserts - Select 4',
+    sort_order: 13,
     items: [
-      // Individual desserts — guests select up to 4; price is per person for the dessert course
-      { name: 'Flavored Mousse Cup',        unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
+      { name: 'Flavored Mousse Cup',        description: 'Available flavors: Chocolate, White Chocolate, Raspberry, Kahlua.',   unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
       { name: 'Lemon Bars',                 unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
       { name: 'Blondies',                   unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
       { name: '7-Layer Bars',               unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
       { name: 'Brownies',                   unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
       { name: 'Chocolate Chip Cookie Bars', unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
       { name: 'Mini Assorted Cheesecakes',  unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
-      { name: 'Fruit Tarts',                unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
-      {
-        name: 'Coffee Bar',
-        description: 'Dunkin\' Donuts Regular/Decaf, Hot Tea, Hot Chocolate, Syrups (Vanilla/Caramel/Hazelnut), and Creamers.',
-        unit_price: 2.75,
-        price_type: 'per_person',
-      },
+      { name: 'Fruit Tarts',                description: 'Available flavors: Raspberry, Strawberry, Blackberry, Lemon, Lime.',   unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
     ],
   },
   {
-    name: 'Wedding Cakes (by Rachel\'s Bloomers)',
-    sort_order: 9,
+    name: 'Coffee & Bar',
+    sort_order: 14,
     items: [
       {
-        name: '2-Tier Cake',
-        description: '6" and 8" tiers. Serves approximately 25 guests. Includes choice of flavor and buttercream frosting.',
-        unit_price: 295.00,
-        price_type: 'flat',
-        tags: ['wedding'],
+        name: 'Coffee Bar',
+        description: 'Brewed In House Dunkin Donuts Coffee served with Sugar, Half & Half, Flavor Shots (Caramel, Hazelnut, French Vanilla). Set out with dessert.',
+        unit_price: 2.75, price_type: 'per_person',
+      },
+      {
+        name: 'Barback Package',
+        description: 'Diet Coke, Coke, Sprite, Ginger Ale, Club Soda, Tonic Water, Bitters, OJ, Cranberry and Pineapple Juices, Lemons, Limes and Oranges, Cherries, Ice, Clear Plastic Cups, Coolers.',
+        unit_price: 8.50, price_type: 'per_person', tags: ['bar'],
+      },
+      {
+        name: 'Ice & Cooler Package',
+        description: 'Ice (2 lbs per person @ $0.70/lb), Coolers included, Cups ($0.35 each).',
+        unit_price: 1.75, price_type: 'per_person', tags: ['bar'],
+      },
+    ],
+  },
+
+  // ── V. Wedding Cakes ──────────────────────────────────────────────────
+
+  {
+    name: 'Wedding/Tiered Cakes',
+    sort_order: 15,
+    items: [
+      {
+        name: '2 Tier 6" & 8" (Serves 25)',
+        description: 'Starts at $275. Cake Flavors: Yellow, White, Almond, Chocolate, Carrot, Red Velvet, Bananas Foster, Whiskey Caramel, Lemon, Spice, Funfetti, Pumpkin Spice, Cookies and Cream, Strawberry, Coconut. Fillings: Butter Cream, Lemon Curd, Raspberry Jam, Strawberry Jam, Cream Cheese Icing, Peanut Butter Cream, Mocha Buttercream, Salted Caramel Buttercream, Cinnamon Butter Cream. Buttercreams: Signature, Chocolate, Cream Cheese Frosting. For Additional Sizing, please send an inquiry.',
+        unit_price: 275.00, price_type: 'flat', tags: ['wedding'],
       },
       {
         name: 'Cupcakes',
-        description: 'Custom colors and flavors available.',
-        unit_price: 3.60,
-        price_type: 'per_unit',
-        tags: ['wedding'],
+        description: 'Choice of two flavors. Custom colors available.',
+        unit_price: 3.50, price_type: 'per_unit', tags: ['wedding'],
       },
     ],
   },
@@ -196,7 +296,6 @@ async function seedMenu() {
     try {
       console.log(`Creating category: ${categoryData.name}...`);
 
-      // Create category
       const category = await prisma.menu_categories.create({
         data: {
           name: categoryData.name,
@@ -206,7 +305,6 @@ async function seedMenu() {
       });
       categoriesCreated++;
 
-      // Create menu items for this category
       for (const itemData of categoryData.items) {
         try {
           await prisma.menu_items.create({
@@ -246,7 +344,6 @@ async function seedMenu() {
   console.log(`Errors: ${errors}`);
   console.log('='.repeat(50));
 
-  // Show sample items from each category
   console.log('\nSample Menu Items:\n');
   const categories = await prisma.menu_categories.findMany({
     include: {
@@ -272,67 +369,19 @@ async function seedPricingPackages() {
   console.log('\nCreating pricing packages...\n');
 
   const packages = [
-    {
-      name: 'Bronze Package',
-      description: 'Perfect for intimate gatherings (20-50 guests)',
-      category: 'Standard',
-      base_price: 20.00,
-      price_type: 'per_person' as const,
-      priority: 1,
-    },
-    {
-      name: 'Silver Package',
-      description: 'Great for medium events (50-100 guests)',
-      category: 'Standard',
-      base_price: 25.00,
-      price_type: 'per_person' as const,
-      priority: 2,
-    },
-    {
-      name: 'Gold Package',
-      description: 'Premium experience (100-200 guests)',
-      category: 'Premium',
-      base_price: 35.00,
-      price_type: 'per_person' as const,
-      priority: 3,
-    },
-    {
-      name: 'Platinum Package',
-      description: 'Luxury catering for special occasions',
-      category: 'Premium',
-      base_price: 50.00,
-      price_type: 'per_person' as const,
-      priority: 4,
-    },
-    {
-      name: 'Wedding Package - Basic',
-      description: 'Essential wedding catering',
-      category: 'Wedding',
-      base_price: 45.00,
-      price_type: 'per_person' as const,
-      priority: 5,
-    },
-    {
-      name: 'Wedding Package - Deluxe',
-      description: 'Complete wedding catering with all services',
-      category: 'Wedding',
-      base_price: 65.00,
-      price_type: 'per_person' as const,
-      priority: 6,
-    },
+    { name: 'Bronze Package',          description: 'Perfect for intimate gatherings (20-50 guests)',         category: 'Standard', base_price: 20.00, price_type: 'per_person' as const, priority: 1 },
+    { name: 'Silver Package',          description: 'Great for medium events (50-100 guests)',                category: 'Standard', base_price: 25.00, price_type: 'per_person' as const, priority: 2 },
+    { name: 'Gold Package',            description: 'Premium experience (100-200 guests)',                    category: 'Premium',  base_price: 35.00, price_type: 'per_person' as const, priority: 3 },
+    { name: 'Platinum Package',        description: 'Luxury catering for special occasions',                  category: 'Premium',  base_price: 50.00, price_type: 'per_person' as const, priority: 4 },
+    { name: 'Wedding Package - Basic', description: 'Essential wedding catering',                             category: 'Wedding',  base_price: 45.00, price_type: 'per_person' as const, priority: 5 },
+    { name: 'Wedding Package - Deluxe',description: 'Complete wedding catering with all services',            category: 'Wedding',  base_price: 65.00, price_type: 'per_person' as const, priority: 6 },
   ];
 
   let packagesCreated = 0;
 
   for (const pkg of packages) {
     try {
-      await prisma.pricing_packages.create({
-        data: {
-          ...pkg,
-          active: true,
-          currency: 'USD',
-        },
-      });
+      await prisma.pricing_packages.create({ data: { ...pkg, active: true, currency: 'USD' } });
       packagesCreated++;
       console.log(`  Created: ${pkg.name}`);
     } catch (error) {
@@ -347,7 +396,6 @@ async function main() {
   try {
     console.log('FlashBack Catering - Menu & Pricing Seeder\n');
 
-    // Check existing data
     const existingCategories = await prisma.menu_categories.count();
     const existingItems = await prisma.menu_items.count();
 
@@ -358,17 +406,13 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
 
-    // Seed menu categories and items
     await seedMenu();
-
-    // Seed pricing packages
     await seedPricingPackages();
 
     console.log('='.repeat(50));
     console.log('Seeding completed successfully!');
     console.log('='.repeat(50));
 
-    // Final counts
     const totalCategories = await prisma.menu_categories.count();
     const totalItems = await prisma.menu_items.count();
     const totalPackages = await prisma.pricing_packages.count();

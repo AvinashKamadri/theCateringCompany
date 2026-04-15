@@ -45,7 +45,6 @@ _NODE_COLLECTS: dict[str, str | None] = {
     "select_desserts": "desserts",
     "ask_more_desserts": "desserts",
     "ask_rentals": "rentals",
-    "ask_florals": "florals",
     "ask_special_requests": "special_requests",
     "collect_special_requests": "special_requests",
     "collect_dietary": "dietary_concerns",

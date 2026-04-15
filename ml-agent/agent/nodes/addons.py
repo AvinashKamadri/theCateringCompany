@@ -1,5 +1,5 @@
 """
-Add-on nodes: utensils, desserts, rentals, florals.
+Add-on nodes: utensils, desserts, rentals.
 """
 
 from agent.state import ConversationState, fill_slot, get_slot_value
@@ -334,9 +334,6 @@ async def ask_rentals_node(state: ConversationState) -> ConversationState:
             return state
         fill_slot(state["slots"], "rentals", extraction.strip())
 
-    # Skip florals
-    fill_slot(state["slots"], "florals", "no")
-
     # Route to labor (Onsite only) or special requests (Drop-off)
     service_type = get_slot_value(state["slots"], "service_type")
     is_onsite = service_type and "onsite" in str(service_type).lower()
@@ -355,23 +352,6 @@ async def ask_rentals_node(state: ConversationState) -> ConversationState:
 
     state["messages"] = add_ai_message(state, response)
     return state
-
-
-async def _get_floral_context(state) -> str:
-    """Fetch floral arrangement items from DB and format for prompt."""
-    menu = await load_menu_by_category()
-    floral_items = []
-    for cat_name, items in menu.items():
-        if any(kw in cat_name.lower() for kw in ["floral", "flower", "bouquet", "arrangement"]):
-            floral_items.extend(items)
-
-    from agent.nodes.menu import _format_items_list
-    formatted = _format_items_list(floral_items) if floral_items else "No floral items available."
-    return (
-        f"FLORAL ARRANGEMENTS FROM DATABASE (present these exact items):\n"
-        f"{formatted}\n\n"
-        f"Event: {_slots_context(state)}"
-    )
 
 
 async def collect_tableware_node(state: ConversationState) -> ConversationState:
@@ -538,27 +518,3 @@ async def collect_bar_service_node(state: ConversationState) -> ConversationStat
     return state
 
 
-async def ask_florals_node(state: ConversationState) -> ConversationState:
-    """Process floral arrangement selections (wedding only)."""
-    state = dict(state)
-    user_msg = get_last_human_message(state["messages"])
-
-    if is_negative(user_msg):
-        fill_slot(state["slots"], "florals", "no")
-    else:
-        extraction = await llm_respond(
-            "Extract the floral arrangement selections from this message. "
-            "Return as a comma-separated list using the exact item names from the menu.",
-            f"Customer message: {user_msg}"
-        )
-        matched_items, resolved_text = await _resolve_to_db_items(extraction)
-        fill_slot(state["slots"], "florals", resolved_text if matched_items else extraction.strip())
-
-    context = f"Florals: {get_slot_value(state['slots'], 'florals')}\nSlots: {_slots_context(state)}"
-    response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_special_requests']}", context
-    )
-
-    state["current_node"] = "ask_special_requests"
-    state["messages"] = add_ai_message(state, response)
-    return state

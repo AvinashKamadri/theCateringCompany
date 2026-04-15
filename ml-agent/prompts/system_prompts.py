@@ -224,11 +224,6 @@ NODE_PROMPTS = {
         "Note: almost every event needs linens — mention you can price out a standard package based on guest count."
     ),
 
-    "ask_florals": (
-        "Wedding event — present floral options from the database as a numbered list. "
-        "Ask if they'd like to add any. They can select multiple or pass."
-    ),
-
     "collect_labor": (
         "Ask which labor services they need. Present as a numbered list:\n"
         "1. Ceremony Setup/Cleanup — $1.50 per person\n"

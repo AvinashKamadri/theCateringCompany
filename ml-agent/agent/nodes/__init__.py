@@ -39,7 +39,6 @@ from agent.nodes.addons import (
     collect_bar_service_node,
     collect_labor_node,
     ask_rentals_node,
-    ask_florals_node,
 )
 from agent.nodes.final import (
     ask_special_requests_node,
@@ -86,7 +85,6 @@ NODE_MAP = {
     "collect_bar_service": collect_bar_service_node,
     "collect_labor": collect_labor_node,
     "ask_rentals": ask_rentals_node,
-    "ask_florals": ask_florals_node,
     "ask_special_requests": ask_special_requests_node,
     "collect_special_requests": collect_special_requests_node,
     "collect_dietary": collect_dietary_node,

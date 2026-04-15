@@ -234,15 +234,46 @@ async def get_main_dishes_context(state) -> str:
 
 
 async def get_appetizer_context(state) -> str:
-    """Fetch appetizer/hors d'oeuvres items from DB and format for prompt."""
+    """Fetch appetizer/hors d'oeuvres items from DB, grouped by sub-category (Chicken, Pork, etc.)."""
     menu = await load_menu_by_category()
-    appetizer_items = []
-    for cat_name, items in menu.items():
-        if _is_appetizer_category(cat_name):
-            appetizer_items.extend(items)
-    formatted = _format_items_list(appetizer_items) if appetizer_items else "No appetizer items in database."
+
+    # Collect only appetizer categories, preserving order
+    appetizer_cats = {cat: items for cat, items in menu.items() if _is_appetizer_category(cat)}
+
+    lines = []
+    global_num = 1
+    for cat_name, items in appetizer_cats.items():
+        # Extract sub-category label after " - " (e.g. "Hors D'oeuvres - Chicken" → "Chicken")
+        if " - " in cat_name:
+            label = cat_name.split(" - ", 1)[1].strip()
+        else:
+            label = cat_name
+
+        # Determine if all items share the same flat price (e.g. all $3.50)
+        prices = [item.get("unit_price") for item in items if item.get("unit_price")]
+        if prices and len(set(prices)) == 1:
+            price_note = f" (${prices[0]:.2f} pp/option)"
+        else:
+            price_note = ""
+
+        lines.append(f"\n**{label}**{price_note}")
+        for item in items:
+            # Per-item price only when it differs from the group price
+            if not price_note and item.get("unit_price"):
+                price_str = f" (${item['unit_price']:.2f})"
+            elif price_note:
+                price_str = ""  # already shown on header
+            else:
+                price_str = ""
+            # Show individual price regardless of group price so LLM can relay it when needed
+            item_price = item.get("unit_price")
+            p_str = f" (${item_price:.2f})" if item_price and not price_note else ""
+            lines.append(f"  {global_num}. {item['name']}{p_str}")
+            global_num += 1
+
+    formatted = "\n".join(lines) if lines else "No appetizer items in database."
     return (
-        f"REAL APPETIZER MENU FROM DATABASE (present these exact items):\n"
+        f"REAL APPETIZER MENU FROM DATABASE — grouped by type, global sequential numbers:\n"
         f"{formatted}\n\n"
         f"Event: {_slots_context(state)}"
     )
@@ -351,9 +382,13 @@ async def collect_meal_style_node(state: ConversationState) -> ConversationState
     menu_context = await get_main_dishes_context(state)
     response = await llm_respond(
         f"{SYSTEM_PROMPT}\n\nMeal style: {choice}. {note} "
-        "Now present the main menu as a numbered list. "
-        "Add: 'Think of this as a starting point — we can customize everything once you're booked.' "
-        "If plated: 'While these menus are shown buffet-style, just pick what's closest — we'll fine-tune on a quick call.' "
+        "Now present the main dish menu using the EXACT grouped format from the database context:\n"
+        "- Use section headers exactly as named (Signature Combinations, BBQ Menus, Tasty & Casual, Global Inspirations, Soup / Salad / Sandwich)\n"
+        "- Keep global sequential numbering — numbers continue across sections\n"
+        "- Show the price per item\n"
+        "- Do NOT collapse sections or merge categories\n"
+        "Add at the end: 'Think of this as a starting point — we can customize everything once you're booked.' "
+        "If plated, also add: 'While these menus are shown buffet-style, just pick what's closest — we'll fine-tune on a quick call.' "
         "CRITICAL: Only list items from the database context.",
         menu_context
     )
@@ -510,9 +545,14 @@ async def ask_appetizers_node(state: ConversationState) -> ConversationState:
         appetizer_context = await get_appetizer_context(state)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_appetizers']}\n\n"
-            "Present ALL appetizer items from the database as a numbered list. "
-            "Show EVERY item — do not summarize or skip any. "
-            "CRITICAL: Use ONLY the exact items from the database context below.",
+            "Present ALL appetizer items from the database using this EXACT grouped format:\n"
+            "- Use the group headers as bold section labels (e.g. **Chicken**, **Pork**, **Seafood**, etc.)\n"
+            "- Keep the global sequential numbering from the database context (numbers continue across groups)\n"
+            "- Show the group price on the header line when all items share the same price (e.g. '$3.50 pp/option')\n"
+            "- For Seafood, Canapes, and Vegetarian show individual prices per item since they vary\n"
+            "- Show EVERY item — do not skip or summarize any group\n"
+            "- End with: 'You can mix and match from any category — just let me know which ones you'd like!'\n"
+            "CRITICAL: Use ONLY the exact item names from the database context below.",
             appetizer_context
         )
         state["current_node"] = "select_appetizers"
@@ -621,7 +661,11 @@ async def collect_appetizer_style_node(state: ConversationState) -> Conversation
         menu_context = await get_main_dishes_context(state)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nGot it — {style.strip()} style. "
-            "Now present the main menu as a numbered list. "
+            "Now present the main dish menu using the EXACT grouped format from the database context:\n"
+            "- Use section headers exactly as named (Signature Combinations, BBQ Menus, Tasty & Casual, Global Inspirations, Soup / Salad / Sandwich)\n"
+            "- Keep global sequential numbering (numbers continue across sections)\n"
+            "- Show the price per item\n"
+            "- Do NOT collapse or merge categories\n"
             "Add: 'Think of this as a starting point — we can customize later.' "
             "CRITICAL: Only list items from the database context.",
             menu_context

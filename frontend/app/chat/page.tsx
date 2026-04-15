@@ -285,30 +285,36 @@ function AiIntakeContent() {
     );
     setLoadingSessions(false);
 
-    stored.forEach(async (s) => {
-      try {
-        const conv = await chatAiApi.getConversation(s.threadId);
-        setSessions((prev) =>
-          prev.map((p) =>
-            p.threadId === s.threadId
-              ? {
-                  ...p,
-                  slotsFilled: conv.slots_filled ?? 0,
-                  totalSlots: 20,
-                  isCompleted: conv.is_completed ?? false,
-                  clientName: (conv.slots as any)?.name ?? undefined,
-                  eventType: (conv.slots as any)?.event_type ?? undefined,
-                  loading: false,
-                }
-              : p
-          )
-        );
-      } catch {
-        setSessions((prev) =>
-          prev.map((p) => p.threadId === s.threadId ? { ...p, loading: false, error: true } : p)
-        );
+    // Hydrate sessions lazily — fetch one at a time with a small delay
+    // to avoid hammering the ML agent with N simultaneous requests on load
+    (async () => {
+      for (const s of stored) {
+        try {
+          const conv = await chatAiApi.getConversation(s.threadId);
+          setSessions((prev) =>
+            prev.map((p) =>
+              p.threadId === s.threadId
+                ? {
+                    ...p,
+                    slotsFilled: conv.slots_filled ?? 0,
+                    totalSlots: 20,
+                    isCompleted: conv.is_completed ?? false,
+                    clientName: (conv.slots as any)?.name ?? undefined,
+                    eventType: (conv.slots as any)?.event_type ?? undefined,
+                    loading: false,
+                  }
+                : p
+            )
+          );
+        } catch {
+          setSessions((prev) =>
+            prev.map((p) => p.threadId === s.threadId ? { ...p, loading: false, error: true } : p)
+          );
+        }
+        // Small delay between requests to avoid overwhelming the ML agent
+        await new Promise((r) => setTimeout(r, 300));
       }
-    });
+    })();
   }, [isAuthenticated, isStaff]);
 
   const titleUpdatedRef = useRef(false);

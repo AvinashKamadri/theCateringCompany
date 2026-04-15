@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { FileText, Loader2, Sparkles } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
@@ -49,15 +48,12 @@ const FOLDER_COLOR = '#1a1a1a';
 const STAFF_DOMAINS = ['@catering-company.com'];
 
 export default function ContractsPage() {
-  const router = useRouter();
-  const { isAuthenticated, user } = useAuthStore();
+  const { user } = useAuthStore();
   const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!isAuthenticated) { router.push('/signin'); return; }
-
     const controller = new AbortController();
     const endpoint = isStaff ? '/staff/contracts' : '/contracts';
     apiClient.get(endpoint, { signal: controller.signal })
@@ -65,7 +61,8 @@ export default function ContractsPage() {
       .catch(() => { if (!controller.signal.aborted) toast.error('Failed to load contracts'); })
       .finally(() => { if (!controller.signal.aborted) setIsLoading(false); });
     return () => controller.abort();
-  }, [isAuthenticated, router, isStaff]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStaff]);
 
   if (isLoading) {
     return (
@@ -178,8 +175,8 @@ export default function ContractsPage() {
                   href={`/contracts/${contract.id}`}
                   className="flex flex-col items-center gap-3 group"
                 >
-                  {/* Fixed-size box so scaled folder doesn't bleed into adjacent cells */}
-                  <div className="w-[200px] h-[200px] flex items-end justify-center pb-2" style={{ transformOrigin: 'top center' }}>
+                  {/* Folder visual — transform-origin bottom so scale grows upward */}
+                  <div className="w-[180px] h-[162px] flex items-end justify-center">
                     <Folder color={FOLDER_COLOR} size={1.8} items={folderItems} />
                   </div>
 
@@ -188,6 +185,19 @@ export default function ContractsPage() {
                     <p className="text-sm font-semibold text-neutral-900 truncate group-hover:text-black leading-snug">
                       {title}
                     </p>
+                    <div className="flex items-center justify-center gap-1.5 mt-1 flex-wrap">
+                      {project?.event_date && (
+                        <span className="text-[11px] text-neutral-500">
+                          {new Date(project.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                      )}
+                      {project?.guest_count != null && (
+                        <span className="text-[11px] text-neutral-400">· {project.guest_count} guests</span>
+                      )}
+                      {contract.total_amount != null && (
+                        <span className="text-[11px] text-neutral-500">· ${contract.total_amount.toLocaleString()}</span>
+                      )}
+                    </div>
                     <div className="flex items-center justify-center gap-2 mt-1 flex-wrap">
                       <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-medium', statusStyle)}>
                         {statusLabel}

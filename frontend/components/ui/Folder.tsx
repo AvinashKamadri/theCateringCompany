@@ -78,7 +78,7 @@ const Folder = ({ color = '#5227FF', size = 1, items = [], className = '' }: Fol
   } as React.CSSProperties;
 
   return (
-    <div style={{ transform: `scale(${size})` }} className={className}>
+    <div style={{ transform: `scale(${size})`, transformOrigin: 'bottom center' }} className={className}>
       <div className={`folder${open ? ' open' : ''}`} style={folderStyle} onClick={handleClick}>
         <div className="folder__back">
           {papers.map((item, i) => (

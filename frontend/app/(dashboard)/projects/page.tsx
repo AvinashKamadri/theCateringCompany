@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Plus, Search, FileText, KeyRound } from 'lucide-react';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { projectsApi, type Project } from '@/lib/api/projects';
@@ -29,15 +28,13 @@ const STATUS_STYLES: Record<string, string> = {
 const FOLDER_COLOR = '#1a1a1a';
 
 export default function ProjectsPage() {
-  const router = useRouter();
-  const { user, isAuthenticated } = useAuthStore();
+  const { user } = useAuthStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
   useEffect(() => {
-    if (!isAuthenticated) { router.push('/signin'); return; }
     const load = async () => {
       try {
         setIsLoading(true);
@@ -50,7 +47,8 @@ export default function ProjectsPage() {
       }
     };
     load();
-  }, [isAuthenticated, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = projects.filter((p) => {
     if (p.name === 'AI Intake (draft)') return false;
@@ -189,8 +187,8 @@ export default function ProjectsPage() {
                   href={`/projects/${project.id}`}
                   className="flex flex-col items-center gap-3 group"
                 >
-                  {/* Fixed-size box so scaled folder doesn't bleed into adjacent cells */}
-                  <div className="w-[200px] h-[200px] flex items-end justify-center pb-2">
+                  {/* Folder visual — transform-origin bottom so scale grows upward */}
+                  <div className="w-[180px] h-[162px] flex items-end justify-center">
                     <Folder color={FOLDER_COLOR} size={1.8} items={folderItems} />
                   </div>
 
@@ -199,13 +197,23 @@ export default function ProjectsPage() {
                     <p className="text-sm font-semibold text-neutral-900 truncate group-hover:text-black leading-snug">
                       {project.name}
                     </p>
-                    {project.event_type && (
-                      <p className="text-xs text-neutral-400 capitalize mt-0.5">{project.event_type}</p>
-                    )}
+                    <div className="flex items-center justify-center gap-1.5 mt-1 flex-wrap">
+                      {project.event_date && (
+                        <span className="text-[11px] text-neutral-500">
+                          {new Date(project.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                      )}
+                      {project.guest_count != null && (
+                        <span className="text-[11px] text-neutral-400">· {project.guest_count} guests</span>
+                      )}
+                    </div>
                     <div className="flex items-center justify-center gap-2 mt-1 flex-wrap">
                       <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-medium', statusStyle)}>
                         {STATUS_LABELS[project.status] ?? project.status}
                       </span>
+                      {project.event_type && (
+                        <span className="text-[10px] text-neutral-400 capitalize">{project.event_type}</span>
+                      )}
                     </div>
                   </div>
                 </Link>

@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body, UseGuards, NotFoundException, Res } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, Query, UseGuards, NotFoundException, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { ContractsService } from './contracts.service';
 import { ContractPdfService } from './contract-pdf.service';
@@ -26,18 +26,33 @@ export class ContractsController {
 
   /** GET /contracts — staff see all contracts; clients see only their own */
   @Get('contracts')
-  async findAll(@CurrentUser() user: { userId: string; email: string }) {
+  async findAll(
+    @CurrentUser() user: { userId: string; email: string },
+    @Query('q') q?: string,
+    @Query('status') status?: string,
+  ) {
     const include = {
       projects_contracts_project_idToprojects: {
         select: { id: true, title: true, event_date: true, guest_count: true, status: true },
       },
     };
 
+    const searchFilter = q && q.trim().length >= 1 ? {
+      OR: [
+        { title: { contains: q.trim(), mode: 'insensitive' as const } },
+        { projects_contracts_project_idToprojects: { title: { contains: q.trim(), mode: 'insensitive' as const } } },
+      ],
+    } : {};
+
+    const statusFilter = status && status !== 'all' ? { status: status as any } : {};
+
     if (this.isStaffEmail(user.email)) {
       return this.prisma.contracts.findMany({
         where: {
           is_active: true,
           projects_contracts_project_idToprojects: { deleted_at: null },
+          ...statusFilter,
+          ...(q && q.trim().length >= 1 ? { OR: searchFilter.OR } : {}),
         },
         include,
         orderBy: { created_at: 'desc' },
@@ -54,6 +69,8 @@ export class ContractsController {
             { project_collaborators: { some: { user_id: user.userId } } },
           ],
         },
+        ...statusFilter,
+        ...(q && q.trim().length >= 1 ? { OR: searchFilter.OR } : {}),
       },
       include,
       orderBy: { created_at: 'desc' },

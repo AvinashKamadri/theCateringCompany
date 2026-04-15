@@ -8,7 +8,7 @@ import re
 import time
 import logging
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from agent.llm import llm
+from agent.llm import llm_cold, llm_warm
 
 logger = logging.getLogger(__name__)
 
@@ -119,15 +119,69 @@ async def _log_generation(system_prompt: str, user_message: str, response_text: 
         logger.warning(f"Failed to log AI generation: {e}")
 
 
+def build_numbered_list(items: list[dict], show_price: bool = True, category_headers: bool = False,
+                        categories: dict | None = None) -> str:
+    """Build a numbered list from DB items in Python — never let the LLM render this.
+
+    Args:
+        items: flat list of {"name": ..., "unit_price": ..., "price_type": ...}
+        show_price: whether to show prices
+        category_headers: whether to group by category
+        categories: dict of {category_name: [items]} if category_headers=True
+    """
+    lines = []
+    num = 1
+
+    if category_headers and categories:
+        # Group by section so items under same section share one bold header
+        current_section = None
+        for cat_name, cat_items in categories.items():
+            section = cat_items[0].get("section", "") if cat_items else ""
+            group = cat_items[0].get("category", cat_name) if cat_items else cat_name
+
+            if section and section != group:
+                # Multi-group section (e.g. "Hors D'oeuvres" > "Chicken")
+                if section != current_section:
+                    lines.append(f"\n**{section}**")
+                    current_section = section
+                lines.append(f"*{group}*")
+            else:
+                # Single section = category (e.g. "Signature Combinations")
+                lines.append(f"\n**{cat_name}**")
+                current_section = cat_name
+
+            for item in cat_items:
+                price = ""
+                if show_price and item.get("unit_price"):
+                    pt = item.get("price_type", "per_person")
+                    price = f" (${item['unit_price']:.2f}/{pt})" if pt != "flat" else f" (${item['unit_price']:.2f})"
+                lines.append(f"{num}. {item['name']}{price}")
+                num += 1
+    else:
+        for item in items:
+            price = ""
+            if show_price and item.get("unit_price"):
+                pt = item.get("price_type", "per_person")
+                price = f" (${item['unit_price']:.2f})" if pt == "flat" else f" (${item['unit_price']:.2f}/{pt})"
+            lines.append(f"{num}. {item['name']}{price}")
+            num += 1
+
+    return "\n".join(lines)
+
+
 def normalize_item_name(name: str) -> str:
     """Strip price annotations for dedup: 'Chicken Satay ($3.50/pp)' → 'chicken satay'"""
     return re.sub(r'\s*\(\$[\d.]+(?:/\w+)?\)', '', name).strip().lower()
 
 
 async def llm_extract(system_prompt: str, user_message: str) -> str:
-    """Call LLM with a system prompt and user message, return response text."""
+    """Deterministic extraction — intent classification, JSON parsing, slot filling.
+
+    Uses temperature=0.0 (llm_cold). Always returns structured, predictable output.
+    Never use this to generate conversational messages.
+    """
     start = time.monotonic()
-    response = await llm.ainvoke([
+    response = await llm_cold.ainvoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_message),
     ])
@@ -138,14 +192,15 @@ async def llm_extract(system_prompt: str, user_message: str) -> str:
 
 
 async def llm_respond(system_prompt: str, context: str) -> str:
-    """Generate a friendly agent response given context.
+    """Conversational response generation — friendly messages, questions, acknowledgments.
 
-    Automatically injects a slot-authority instruction so the LLM always
-    uses CURRENT slot values over stale conversation history (important
-    after @AI modifications change a slot mid-flow).
+    Two layers of variation to keep the bot feeling natural:
+    1. temperature=0.7 (llm_warm) — model-level token sampling variation
+    2. Random style seed — structural variation (acknowledgment-first vs question-first, etc.)
 
-    Also injects a random variation seed so the LLM varies phrasing
-    across conversations even at temperature=0.
+    Also injects slot-authority so the LLM always uses CURRENT slot values
+    over stale conversation history (important after @AI mid-flow modifications).
+    Never use this for extraction or intent classification.
     """
     import random
     _STYLES = [
@@ -168,7 +223,7 @@ async def llm_respond(system_prompt: str, context: str) -> str:
         "(e.g., event type changed from Wedding to Birthday), respond based on the CURRENT value only."
     )
     start = time.monotonic()
-    response = await llm.ainvoke([
+    response = await llm_warm.ainvoke([
         SystemMessage(content=system_prompt + variation + slot_authority),
         HumanMessage(content=context),
     ])

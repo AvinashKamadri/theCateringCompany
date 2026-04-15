@@ -65,7 +65,6 @@ NODE_MAP = {
     "collect_company_name": collect_company_name_node,
     "collect_venue": collect_venue_node,
     "collect_guest_count": collect_guest_count_node,
-    "present_menu": present_menu_node,
     "select_service_style": select_service_style_node,
     "collect_meal_style": collect_meal_style_node,
     "collect_appetizer_style": collect_appetizer_style_node,

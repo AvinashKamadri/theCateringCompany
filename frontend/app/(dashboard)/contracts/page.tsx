@@ -56,38 +56,29 @@ export default function ContractsPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [debouncedQuery, setDebouncedQuery] = useState('');
 
+  // Debounce search query
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchQuery]);
+
   useEffect(() => {
     const controller = new AbortController();
-    const endpoint = '/contracts';
+    const params = new URLSearchParams();
+    if (debouncedQuery.trim()) params.set('q', debouncedQuery.trim());
+    if (filterStatus !== 'all') params.set('status', filterStatus);
+    const qs = params.toString();
+    const endpoint = `/contracts${qs ? `?${qs}` : ''}`;
     apiClient.get(endpoint, { signal: controller.signal })
       .then((data: any) => setContracts(data))
       .catch(() => { if (!controller.signal.aborted) toast.error('Failed to load contracts'); })
       .finally(() => { if (!controller.signal.aborted) setIsLoading(false); });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isStaff]);
+  }, [isStaff, debouncedQuery, filterStatus]);
 
-  // Debounce search query
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedQuery(searchQuery), 250);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [searchQuery]);
-
-  const q = debouncedQuery.trim().toLowerCase();
-  const filtered = contracts.filter((c) => {
-    const project = c.projects_contracts_project_idToprojects;
-    const title = (c.title || project?.title || `Contract v${c.version_number}`).toLowerCase();
-    const statusLabel = (STATUS_LABEL[c.status] ?? c.status).toLowerCase();
-    const eventDate = project?.event_date
-      ? new Date(project.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toLowerCase()
-      : '';
-    const amount = c.total_amount != null ? `$${c.total_amount.toLocaleString()}` : '';
-    const guests = project?.guest_count != null ? `${project.guest_count} guests` : '';
-    const matchSearch = !q || [title, statusLabel, eventDate, amount, guests].some((f) => f.includes(q));
-    const matchStatus = filterStatus === 'all' || c.status === filterStatus;
-    return matchSearch && matchStatus;
-  });
+  const filtered = contracts;
 
   // Status pill counts (always from full list)
   const statusKeys = ['pending_staff_approval', 'approved', 'sent', 'signed', 'rejected', 'draft'] as const;

@@ -30,7 +30,7 @@ export class ProjectsService {
    * A project is accessible if the user is the owner (owner_user_id)
    * OR if the user exists in project_collaborators for that project.
    */
-  async findAllForUser(userId: string) {
+  async findAllForUser(userId: string, q?: string, status?: string) {
     const projects = await this.prisma.projects.findMany({
       where: {
         deleted_at: null,
@@ -42,6 +42,17 @@ export class ProjectsService {
             },
           },
         ],
+        ...(status && status !== 'all' ? { status: status as any } : {}),
+        ...(q && q.trim().length >= 1 ? {
+          AND: [{
+            OR: [
+              { title: { contains: q.trim(), mode: 'insensitive' } },
+              { venues: { name: { contains: q.trim(), mode: 'insensitive' } } },
+              { events: { some: { event_type: { contains: q.trim(), mode: 'insensitive' } } } },
+              ...(isNaN(Number(q.trim())) ? [] : [{ guest_count: Number(q.trim()) }]),
+            ],
+          }],
+        } : {}),
       },
       include: {
         venues: {

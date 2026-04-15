@@ -5,7 +5,7 @@ Add-on nodes: utensils, desserts, rentals.
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
     get_last_human_message, add_ai_message, llm_respond, llm_extract,
-    is_affirmative, is_negative, is_null_extraction,
+    build_numbered_list,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 from agent.nodes.menu import get_dessert_context, _resolve_to_db_items
@@ -21,19 +21,29 @@ async def ask_utensils_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_affirmative(user_msg):
-        context = f"Customer wants utensils. Event: {_slots_context(state)}"
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_utensils']}", context
+    wants_utensils = await llm_extract(
+        "The customer was asked if they want utensils for their event. "
+        "Are they saying yes or no?\n\nReturn ONLY: yes or no",
+        user_msg
+    )
+    if wants_utensils.strip().lower() == "yes":
+        utensil_list = "1. Standard Plastic\n2. Eco-friendly / Biodegradable\n3. Bamboo"
+        intro = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer wants utensils. Write one casual line asking which type. "
+            "Do NOT list the options.",
+            f"Event: {_slots_context(state)}"
         )
+        response = f"{intro}\n\n{utensil_list}"
         state["current_node"] = "select_utensils"
     else:
         fill_slot(state["slots"], "utensils", "no")
-        context = f"Customer doesn't need utensils.\nSlots: {_slots_context(state)}"
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nNo utensils needed. Acknowledge briefly.\n\n{NODE_PROMPTS['collect_tableware']}",
-            context
+        tableware_list = "1. Standard Disposable (included)\n2. Premium Disposable (gold or silver) — $1 per person\n3. Full China — pricing based on guest count"
+        intro = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nNo utensils needed. Acknowledge briefly, then ask about tableware. "
+            "Do NOT list the options.",
+            f"Slots: {_slots_context(state)}"
         )
+        response = f"{intro}\n\n{tableware_list}"
         state["current_node"] = "collect_tableware"
 
     state["messages"] = add_ai_message(state, response)
@@ -61,11 +71,13 @@ async def select_utensils_node(state: ConversationState) -> ConversationState:
         return state
     fill_slot(state["slots"], "utensils", extraction.strip())
 
-    context = f"Utensils selected: {extraction}\nSlots: {_slots_context(state)}"
-    response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\nUtensils confirmed. Now ask about tableware.\n\n{NODE_PROMPTS['collect_tableware']}",
-        context
+    tableware_list = "1. Standard Disposable (included)\n2. Premium Disposable (gold or silver) — $1 per person\n3. Full China — pricing based on guest count"
+    intro = await llm_respond(
+        f"{SYSTEM_PROMPT}\n\nUtensils confirmed. Now transition to tableware — "
+        "write one casual line. Do NOT list the options.",
+        f"Utensils: {extraction}"
     )
+    response = f"{intro}\n\n{tableware_list}"
 
     state["current_node"] = "collect_tableware"
     state["messages"] = add_ai_message(state, response)
@@ -88,14 +100,19 @@ async def ask_desserts_node(state: ConversationState) -> ConversationState:
     wants_desserts = intent.strip().lower() != "no"
 
     if wants_desserts:
-        # Fetch real dessert data from DB
-        dessert_ctx = await get_dessert_context(state)
-        response = await llm_respond(
+        # Python builds the dessert list — LLM only generates intro
+        from agent.nodes.menu import get_dessert_items
+        event_type = (get_slot_value(state["slots"], "event_type") or "").lower()
+        dessert_items = await get_dessert_items(is_wedding="wedding" in event_type)
+        dessert_list = build_numbered_list(dessert_items, show_price=True)
+
+        intro = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_desserts']}\n\n"
-            "CRITICAL: Present ONLY the dessert items listed in the database context above. "
-            "Copy item names verbatim. DO NOT add, rename, or invent any items.",
-            dessert_ctx
+            "Write a brief casual intro for the dessert options. "
+            "Do NOT list any items — the list will be appended automatically.",
+            f"Event: {_slots_context(state)}"
         )
+        response = f"{intro}\n\n{dessert_list}\n\nPick up to 4 mini desserts!"
         state["current_node"] = "select_desserts"
     else:
         fill_slot(state["slots"], "desserts", "no")
@@ -117,8 +134,13 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
     user_msg = get_last_human_message(state["messages"])
 
     # If user wants to skip, move on
-    skip_patterns = r'\b(skip|no|none|pass|no desserts?|skip desserts?|not?\s+want|forget it|move on)\b'
-    if is_negative(user_msg) or _re.search(skip_patterns, user_msg, _re.IGNORECASE):
+    skip_check = await llm_extract(
+        "The customer was shown a dessert menu and asked to pick items. "
+        "Are they skipping/declining desserts, or making selections?\n\n"
+        "Return ONLY: skip or selecting",
+        user_msg
+    )
+    if skip_check.strip().lower() == "skip":
         fill_slot(state["slots"], "desserts", "no")
         context = f"No desserts. Slots: {_slots_context(state)}"
         response = await llm_respond(
@@ -195,7 +217,13 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
     mini_matches = [i for i in extracted_items if i.lower() in _MINI_OPTIONS]
 
     if mini_matches:
-        resolved_text = f"Mini Desserts: {', '.join(mini_matches)}"
+        # Also keep non-mini DB items the user selected (e.g. Barback Package, Coffee Bar)
+        mini_lower = {m.lower() for m in mini_matches}
+        db_non_mini = [item["name"] for item in matched_items if item["name"].lower() not in mini_lower and item["name"].lower() not in _BUNDLE_NAMES]
+        if db_non_mini:
+            resolved_text = f"Mini Desserts: {', '.join(mini_matches)}, {', '.join(db_non_mini)}"
+        else:
+            resolved_text = f"Mini Desserts: {', '.join(mini_matches)}"
     elif matched_items and len(matched_items) == 1 and matched_items[0]["name"].lower() in _BUNDLE_NAMES:
         # DB resolved to bundle but extraction has specific items → use extraction
         resolved_text = f"Mini Desserts: {extraction.strip()}"
@@ -243,16 +271,20 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
     max_items = 4 if is_mini else 20
 
     if len(combined) > max_items:
-        # Too many — explain why and re-show options with SAME format as initial presentation
-        options_str = ", ".join(sorted(_MINI_OPTIONS, key=str.lower)).title()
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nCustomer selected {len(combined)} mini desserts but the limit is 4. "
-            f"Say something like 'That's {len(combined)} — you can only pick up to 4.' "
-            f"Then re-show ALL options as a numbered list: {options_str}. "
-            "End with: 'Pick up to 4 mini desserts' — use the SAME phrasing style as the initial dessert presentation.",
+        # Too many — CLEAR previous selections and start fresh
+        fill_slot(state["slots"], "desserts", None)
+        state["slots"]["desserts"]["filled"] = False
+        # Python-render the dessert options
+        sorted_options = sorted(_MINI_OPTIONS, key=str.lower)
+        dessert_reask_list = "\n".join(f"{i+1}. {opt.title()}" for i, opt in enumerate(sorted_options))
+        intro = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer picked {len(combined)} mini desserts but the limit is 4. "
+            "Tell them clearly: you can only pick 4 mini desserts. Ask them to re-select. "
+            "Do NOT list the options — the list will be appended automatically.",
             f"Customer tried: {', '.join(combined)}"
         )
-        # Stay on select_desserts — loop back
+        response = f"{intro}\n\n{dessert_reask_list}\n\nPick up to 4 mini desserts!"
+        # Stay on select_desserts — loop back with clean slate
         state["messages"] = add_ai_message(state, response)
         return state
 
@@ -271,17 +303,14 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
 
 async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
     """Handle yes/no about more desserts."""
-    from agent.nodes.helpers import is_done_confirming
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
     intent = await llm_extract(
-        "The customer was asked 'Want to add anything else to the dessert lineup, or is that it?' "
-        "Does their reply mean they are DONE with desserts, or do they want to ADD more? "
-        "Phrases like 'that is all', 'that's it', 'this is all', 'nope', 'done', 'no', 'no more', "
-        "'move on', 'looks good', 'we good', 'perfect' = done. "
-        "Phrases like 'add', 'also', 'more', 'yes', or naming specific items = more. "
-        "Return ONLY: done or more",
+        "The customer was asked if they want to add more desserts. "
+        "Are they explicitly naming or requesting additional dessert items, or are they done? "
+        "Default to done for any ambiguous response. "
+        "Return ONLY: more or done",
         user_msg
     )
     if intent.strip().lower() != "more":
@@ -292,16 +321,18 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
         )
         state["current_node"] = "collect_drinks"
     else:
-        # Affirmative OR user named items directly (e.g. "add brownies and fruit tarts")
-        # Route back to select_desserts which handles both cases
-        dessert_ctx = await get_dessert_context(state)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nPresent the dessert items as a numbered list — same format as the initial dessert presentation. "
-            "End with 'Pick up to 4 mini desserts'. "
-            "Customer already has: " + str(get_slot_value(state['slots'], 'desserts')) + ". "
-            "CRITICAL: Only list items from the database.",
-            dessert_ctx
+        # Python-render the dessert options for "add more"
+        from agent.nodes.menu import get_dessert_items
+        event_type = (get_slot_value(state["slots"], "event_type") or "").lower()
+        d_items = await get_dessert_items(is_wedding="wedding" in event_type)
+        d_list = build_numbered_list(d_items, show_price=True)
+        current = get_slot_value(state["slots"], "desserts") or "none"
+        intro = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer wants more desserts. Already has: {current}. "
+            "Write one casual line. Do NOT list items.",
+            f"Current: {current}"
         )
+        response = f"{intro}\n\n{d_list}\n\nPick up to 4 mini desserts!"
         state["current_node"] = "select_desserts"
 
     state["messages"] = add_ai_message(state, response)
@@ -313,26 +344,28 @@ async def ask_rentals_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_negative(user_msg):
+    extraction = await llm_extract(
+        "The customer was asked about rentals. Available options: 1=Linens, 2=Tables, 3=Chairs. "
+        "The customer may type numbers, names, or both. "
+        "Map: 1/linens → Linens, 2/tables → Tables, 3/chairs → Chairs. "
+        "Return ONLY a comma-separated list (e.g. 'Linens, Tables'). "
+        "If they gave a vague answer like 'yes', 'sure', 'okay' WITHOUT specifying which ones, return ASK. "
+        "Return NONE if they clearly don't want any.",
+        user_msg
+    )
+    if extraction.strip().upper() == "NONE":
         fill_slot(state["slots"], "rentals", "no")
-    else:
-        extraction = await llm_extract(
-            "The customer was asked about rentals. Available options: 1=Linens, 2=Tables, 3=Chairs. "
-            "The customer may type numbers, names, or both. "
-            "Map: 1/linens → Linens, 2/tables → Tables, 3/chairs → Chairs. "
-            "Return ONLY a comma-separated list (e.g. 'Linens, Tables'). "
-            "If they said 'yes' or 'sure' WITHOUT specifying which ones, return 'ask'. "
-            "Return NONE if they clearly don't want any.",
-            user_msg
+    elif extraction.strip().upper() == "ASK":
+        rental_list = "1. Linens\n2. Tables\n3. Chairs"
+        intro = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer wants rentals but didn't say which. "
+            "Write one casual line asking which ones. Do NOT list them.",
+            f"Customer said: {user_msg}"
         )
-        if extraction.strip().lower() == "ask":
-            response = await llm_respond(
-                f"{SYSTEM_PROMPT}\n\nCustomer wants rentals but didn't say which ones. "
-                "Ask which they need: 1. Linens, 2. Tables, 3. Chairs — they can pick one, multiple, or all.",
-                f"Customer said: {user_msg}"
-            )
-            state["messages"] = add_ai_message(state, response)
-            return state
+        response = f"{intro}\n\n{rental_list}\n\nPick one, multiple, or all!"
+        state["messages"] = add_ai_message(state, response)
+        return state
+    else:
         fill_slot(state["slots"], "rentals", extraction.strip())
 
     # Route to labor (Onsite only) or special requests (Drop-off)
@@ -384,11 +417,13 @@ async def collect_tableware_node(state: ConversationState) -> ConversationState:
     if "plated" in meal_style.lower() and "china" not in choice.lower():
         china_note = " Note: plated packages include china automatically — we'll factor that in."
 
-    response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\nTableware: {choice.strip()}.{china_note} Confirm briefly. "
-        "Then ask: 'What type of service do you prefer — Drop-off (we deliver, no staff) or Onsite (our team is there)?'",
-        f"Tableware: {choice}\nSlots: {_slots_context(state)}"
+    service_list = "1. Drop-off (we deliver, no staff)\n2. Onsite (our team is there with you)"
+    intro = await llm_respond(
+        f"{SYSTEM_PROMPT}\n\nTableware: {choice.strip()}.{china_note} Confirm briefly, then ask about service type. "
+        "Do NOT list the options.",
+        f"Tableware: {choice}"
     )
+    response = f"{intro}\n\n{service_list}"
     state["current_node"] = "select_service_type"
     state["messages"] = add_ai_message(state, response)
     return state
@@ -399,20 +434,35 @@ async def collect_labor_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_negative(user_msg):
-        fill_slot(state["slots"], "labor", "no")
-    else:
-        extraction = await llm_extract(
-            "The customer was shown labor options: "
-            "1=Ceremony Setup/Cleanup, 2=Table & Chair Setup, 3=Table Preset, "
-            "4=Reception Cleanup, 5=Trash Removal, 6=Travel Fee. "
-            "They may type numbers, names, or both. "
-            "Return ONLY a comma-separated list of service names. "
-            "If they said 'yes' or 'all', return all 6 services. "
-            "Return NONE if they don't want any.",
-            user_msg
+    extraction = await llm_extract(
+        "The customer was shown labor options: "
+        "1=Ceremony Setup/Cleanup, 2=Table & Chair Setup, 3=Table Preset, "
+        "4=Reception Cleanup, 5=Trash Removal, 6=Travel Fee. "
+        "They may type numbers, names, or both. "
+        "Return ONLY a comma-separated list of service names. "
+        "If they said 'yes' or 'all', return all 6 services. "
+        "If they gave a vague answer like 'okay', 'sure', 'yes' WITHOUT specifying which ones, return ASK. "
+        "Return NONE if they don't want any.",
+        user_msg
+    )
+    if extraction.strip().upper() == "ASK":
+        labor_list = (
+            "1. Ceremony Setup/Cleanup — $1.50 per person\n"
+            "2. Table & Chair Setup — $2.00 per person\n"
+            "3. Table Preset (plates, napkins, cutlery) — $1.75 per person\n"
+            "4. Reception Cleanup — $3.75 per person\n"
+            "5. Trash Removal — $175 flat\n"
+            "6. Travel Fee — $150 (30 min) / $250 (1 hr) / $375+ (extended)"
         )
-        fill_slot(state["slots"], "labor", extraction.strip() if extraction.strip().upper() != "NONE" else "no")
+        intro = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer wants labor services but didn't specify which. "
+            "Write one casual line asking which ones they need. Do NOT list them.",
+            f"Customer said: {user_msg}"
+        )
+        response = f"{intro}\n\n{labor_list}\n\nFeel free to pick multiple or none!"
+        state["messages"] = add_ai_message(state, response)
+        return state
+    fill_slot(state["slots"], "labor", extraction.strip() if extraction.strip().upper() != "NONE" else "no")
 
     context = f"Labor: {get_slot_value(state['slots'], 'labor')}\nSlots: {_slots_context(state)}"
     response = await llm_respond(
@@ -438,13 +488,13 @@ async def collect_drinks_node(state: ConversationState) -> ConversationState:
     choice = intent.strip().lower()
 
     if choice == "ask":
-        # Vague yes — clarify which one
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nCustomer said yes but didn't specify which drink add-on. "
-            "Briefly acknowledge their enthusiasm, then ask which one: coffee service, bar service, or both? "
-            "Keep it casual.",
+        drink_options = "1. Coffee Service\n2. Bar Service\n3. Both"
+        intro = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer said yes but didn't specify. Acknowledge briefly, then ask which. "
+            "Do NOT list the options.",
             f"Customer said: {user_msg}"
         )
+        response = f"{intro}\n\n{drink_options}"
         # Stay on this node
         state["messages"] = add_ai_message(state, response)
         return state
@@ -455,10 +505,13 @@ async def collect_drinks_node(state: ConversationState) -> ConversationState:
         if choice == "both":
             drinks_so_far += ", Coffee Bar"
         fill_slot(state["slots"], "drinks", drinks_so_far)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_bar_service']}",
-            f"Current drinks: {drinks_so_far}\nSlots: {_slots_context(state)}"
+        bar_list = "1. Beer & Wine\n2. Beer & Wine + Two Signature Drinks\n3. Full Open Bar"
+        intro = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nMention bar back items ($8.50pp) or simple ice/coolers ($1.75pp). "
+            "Then transition to bar packages. Do NOT list the packages.",
+            f"Current drinks: {drinks_so_far}"
         )
+        response = f"{intro}\n\n{bar_list}\n\nAll bar services include professional bartenders — $50/hr, 5-hour minimum."
         state["current_node"] = "collect_bar_service"
     elif choice == "coffee":
         fill_slot(state["slots"], "drinks", "Water, Iced Tea, Lemonade (included), Coffee Bar")

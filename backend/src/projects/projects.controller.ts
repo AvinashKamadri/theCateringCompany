@@ -26,8 +26,12 @@ export class ProjectsController {
    * List all projects accessible by the current user.
    */
   @Get()
-  async findAll(@CurrentUser() user: { userId: string }) {
-    return this.projectsService.findAllForUser(user.userId);
+  async findAll(
+    @CurrentUser() user: { userId: string },
+    @Query('q') q?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.projectsService.findAllForUser(user.userId, q, status);
   }
 
   // ─── Literal routes must come BEFORE :id to avoid param collision ───────────

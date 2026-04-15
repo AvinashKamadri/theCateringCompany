@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Plus, Search, FileText, KeyRound } from 'lucide-react';
 import { useAuthStore } from '@/lib/store/auth-store';
@@ -33,12 +33,27 @@ export default function ProjectsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce search query
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchQuery]);
 
   useEffect(() => {
+    const controller = new AbortController();
     const load = async () => {
       try {
         setIsLoading(true);
-        setProjects(await projectsApi.getAll());
+        const params = new URLSearchParams();
+        if (debouncedQuery.trim()) params.set('q', debouncedQuery.trim());
+        if (filterStatus !== 'all') params.set('status', filterStatus);
+        const qs = params.toString();
+        const data = await projectsApi.getAll(qs ? `?${qs}` : '');
+        setProjects(data.filter((p: Project) => p.name !== 'AI Intake (draft)'));
       } catch {
         toast.error('Failed to load projects');
         setProjects([]);
@@ -47,15 +62,10 @@ export default function ProjectsPage() {
       }
     };
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => controller.abort();
+  }, [debouncedQuery, filterStatus]);
 
-  const filtered = projects.filter((p) => {
-    if (p.name === 'AI Intake (draft)') return false;
-    const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchStatus = filterStatus === 'all' || p.status === filterStatus;
-    return matchSearch && matchStatus;
-  });
+  const filtered = projects;
 
   if (isLoading) {
     return (
@@ -96,30 +106,42 @@ export default function ProjectsPage() {
             </div>
           </div>
 
-          {/* Search + filter */}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
-              <input
-                type="text"
-                placeholder="Search projects…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 text-sm border border-neutral-200 rounded-lg bg-white text-black placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
-              />
-            </div>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="px-3 py-2 text-sm border border-neutral-200 rounded-lg bg-white text-black focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
-            >
-              <option value="all">All Status</option>
-              <option value="draft">Draft</option>
-              <option value="inquiry">Inquiry</option>
-              <option value="proposal_sent">Proposal Sent</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="completed">Completed</option>
-            </select>
+          {/* Search */}
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+            <input
+              type="text"
+              placeholder="Search by name, venue, event type, guest count…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 text-sm border border-neutral-200 rounded-lg bg-white text-black placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+            />
+          </div>
+
+          {/* Status filter pills */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(['all', 'draft', 'inquiry', 'proposal_sent', 'confirmed', 'completed'] as const).map((s) => {
+              const label = s === 'all' ? 'All' : STATUS_LABELS[s] ?? s;
+              const count = s === 'all' ? projects.length : projects.filter((p) => p.status === s).length;
+              if (s !== 'all' && count === 0) return null;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setFilterStatus(s)}
+                  className={cn(
+                    'px-3 py-1 rounded-full text-xs font-medium transition-colors border',
+                    filterStatus === s
+                      ? 'bg-black text-white border-black'
+                      : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400 hover:text-black'
+                  )}
+                >
+                  {label}
+                  <span className={cn('ml-1.5', filterStatus === s ? 'text-neutral-300' : 'text-neutral-400')}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

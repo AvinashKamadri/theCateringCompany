@@ -18,6 +18,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let message = 'Internal server error';
     let error = 'InternalServerError';
 
+    if (!(exception instanceof HttpException)) {
+      console.error('[AllExceptionsFilter] Unhandled exception:', exception);
+    }
+
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();

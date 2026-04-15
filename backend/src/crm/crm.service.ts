@@ -65,12 +65,12 @@ export class CrmService {
     const [totals] = await this.prisma.$queryRaw<any[]>`
       SELECT
         count(*)::int                                                          AS total,
-        count(*) FILTER (WHERE status = 'confirmed')::int                     AS confirmed,
-        count(*) FILTER (WHERE status = 'completed')::int                     AS completed,
-        count(*) FILTER (WHERE status = 'draft')::int                         AS draft,
-        count(*) FILTER (WHERE status = 'active')::int                        AS active,
-        count(*) FILTER (WHERE status = 'cancelled')::int                     AS cancelled,
-        count(*) FILTER (WHERE status = 'rejected')::int                      AS rejected,
+        count(*) FILTER (WHERE status::text = 'confirmed')::int                 AS confirmed,
+        count(*) FILTER (WHERE status::text = 'completed')::int               AS completed,
+        count(*) FILTER (WHERE status::text = 'draft')::int                   AS draft,
+        count(*) FILTER (WHERE status::text = 'active')::int                  AS active,
+        count(*) FILTER (WHERE status::text = 'cancelled')::int               AS cancelled,
+        count(*) FILTER (WHERE status::text = 'rejected')::int                AS rejected,
         coalesce(avg(guest_count) FILTER (WHERE guest_count IS NOT NULL), 0)  AS avg_guests,
         count(*) FILTER (WHERE created_via_ai_intake = true)::int             AS via_ai
       FROM projects

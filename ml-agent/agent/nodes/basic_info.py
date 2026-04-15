@@ -79,7 +79,57 @@ async def _extract_and_respond(state, slot_name, next_node, node_key):
 
 
 async def collect_name_node(state: ConversationState) -> ConversationState:
-    return await _extract_and_respond(state, "name", "select_event_type", "collect_name")
+    return await _extract_and_respond(state, "name", "collect_contact", "collect_name")
+
+
+async def collect_contact_node(state: ConversationState) -> ConversationState:
+    """Collect email and phone in one message."""
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+
+    email = await llm_extract(EXTRACTION_PROMPTS["email"], user_msg)
+    phone = await llm_extract(EXTRACTION_PROMPTS["phone"], user_msg)
+    email = email.strip()
+    phone = phone.strip()
+
+    got_email = email and email.upper() != "NONE"
+    got_phone = phone and phone.upper() != "NONE"
+
+    if got_email:
+        fill_slot(state["slots"], "email", email)
+    if got_phone:
+        fill_slot(state["slots"], "phone", phone)
+
+    slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+
+    if got_email and got_phone:
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nGot email and phone. Confirm briefly, then ask what kind of event they're planning. "
+            "Show numbered options:\n1. Wedding\n2. Birthday\n3. Corporate\n4. Social\n5. Custom",
+            f"Email: {email}, Phone: {phone}\nSlots: {slots_summary}"
+        )
+        state["current_node"] = "select_event_type"
+    elif got_email and not got_phone:
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nGot the email. Ask for the phone number too.",
+            f"Email: {email}\nSlots: {slots_summary}"
+        )
+        # Stay on this node
+    elif got_phone and not got_email:
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nGot the phone. Ask for the email too.",
+            f"Phone: {phone}\nSlots: {slots_summary}"
+        )
+        # Stay on this node
+    else:
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_contact']}",
+            f"Couldn't extract email or phone from: {user_msg}"
+        )
+        # Stay on this node
+
+    state["messages"] = add_ai_message(state, response)
+    return state
 
 
 _WEEKDAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
@@ -113,7 +163,8 @@ async def collect_fiance_name_node(state: ConversationState) -> ConversationStat
         context = f"Partner name captured: {extracted}"
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_fiance_name']}\n\n"
-            f"Name captured: {extracted}. Confirm it casually, then ask: 'When's the big day?'",
+            f"Name captured: {extracted}. Confirm it casually, then ask: 'When's the big day?' "
+            "End with: 'Tip: type @AI anytime to update a previous answer.'",
             context,
         )
         state["current_node"] = "collect_event_date"

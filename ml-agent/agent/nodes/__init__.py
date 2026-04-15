@@ -5,6 +5,7 @@ LangGraph node implementations for the catering intake flow.
 from agent.nodes.start import start_node
 from agent.nodes.basic_info import (
     collect_name_node,
+    collect_contact_node,
     collect_event_date_node,
     select_service_type_node,
     select_event_type_node,
@@ -18,6 +19,8 @@ from agent.nodes.basic_info import (
     select_service_style_node,
 )
 from agent.nodes.menu import (
+    collect_meal_style_node,
+    collect_appetizer_style_node,
     select_dishes_node,
     ask_appetizers_node,
     select_appetizers_node,
@@ -31,6 +34,10 @@ from agent.nodes.addons import (
     ask_desserts_node,
     select_desserts_node,
     ask_more_desserts_node,
+    collect_tableware_node,
+    collect_drinks_node,
+    collect_bar_service_node,
+    collect_labor_node,
     ask_rentals_node,
     ask_florals_node,
 )
@@ -40,6 +47,7 @@ from agent.nodes.final import (
     collect_dietary_node,
     ask_anything_else_node,
     collect_anything_else_node,
+    offer_followup_node,
     generate_contract_node,
 )
 from agent.nodes.check_modifications import check_modifications_node
@@ -48,6 +56,7 @@ from agent.nodes.check_modifications import check_modifications_node
 NODE_MAP = {
     "start": start_node,
     "collect_name": collect_name_node,
+    "collect_contact": collect_contact_node,
     "collect_event_date": collect_event_date_node,
     "select_service_type": select_service_type_node,
     "select_event_type": select_event_type_node,
@@ -59,6 +68,8 @@ NODE_MAP = {
     "collect_guest_count": collect_guest_count_node,
     "present_menu": present_menu_node,
     "select_service_style": select_service_style_node,
+    "collect_meal_style": collect_meal_style_node,
+    "collect_appetizer_style": collect_appetizer_style_node,
     "select_dishes": select_dishes_node,
     "ask_appetizers": ask_appetizers_node,
     "select_appetizers": select_appetizers_node,
@@ -70,6 +81,10 @@ NODE_MAP = {
     "ask_desserts": ask_desserts_node,
     "select_desserts": select_desserts_node,
     "ask_more_desserts": ask_more_desserts_node,
+    "collect_tableware": collect_tableware_node,
+    "collect_drinks": collect_drinks_node,
+    "collect_bar_service": collect_bar_service_node,
+    "collect_labor": collect_labor_node,
     "ask_rentals": ask_rentals_node,
     "ask_florals": ask_florals_node,
     "ask_special_requests": ask_special_requests_node,
@@ -77,6 +92,7 @@ NODE_MAP = {
     "collect_dietary": collect_dietary_node,
     "ask_anything_else": ask_anything_else_node,
     "collect_anything_else": collect_anything_else_node,
+    "offer_followup": offer_followup_node,
     "generate_contract": generate_contract_node,
     "check_modifications": check_modifications_node,
 }

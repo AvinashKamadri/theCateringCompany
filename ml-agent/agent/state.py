@@ -40,6 +40,8 @@ class ConversationState(TypedDict):
 SLOT_NAMES = [
     # Basic info
     "name",              # First and last name
+    "email",             # Email address
+    "phone",             # Phone number
     "event_date",        # Event date
     "service_type",      # drop-off or on-site
     "event_type",        # Wedding, Corporate, Birthday, Social, Custom
@@ -50,18 +52,24 @@ SLOT_NAMES = [
     "guest_count",       # Approximate guest count
     "service_style",     # cocktail hour, reception, both
     # Menu building
+    "meal_style",        # Buffet or Plated (wedding only)
     "selected_dishes",   # List of 3-5 main dishes
     "appetizers",        # List of appetizers or None
+    "appetizer_style",   # Passed or Station
     "menu_notes",        # Special menu design notes
     # Add-ons
+    "tableware",         # Disposable / Premium Disposable / China
     "utensils",          # Utensil selections or "no"
     "desserts",          # Dessert selections or "no"
+    "drinks",            # Drinks: water/tea/lemonade + coffee/bar add-ons
     "rentals",           # linen/table/chair selections or "no"
+    "labor",             # Labor services (setup, cleanup, bartending, travel)
     "florals",           # Floral arrangement selections or "no" (wedding only)
     # Final details
     "special_requests",  # Special requests or "none"
     "dietary_concerns",  # Health and dietary concerns
     "additional_notes",  # Anything else
+    "followup_call",     # Yes/no + preferred time
 ]
 
 

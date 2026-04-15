@@ -119,6 +119,11 @@ async def _log_generation(system_prompt: str, user_message: str, response_text: 
         logger.warning(f"Failed to log AI generation: {e}")
 
 
+def normalize_item_name(name: str) -> str:
+    """Strip price annotations for dedup: 'Chicken Satay ($3.50/pp)' → 'chicken satay'"""
+    return re.sub(r'\s*\(\$[\d.]+(?:/\w+)?\)', '', name).strip().lower()
+
+
 async def llm_extract(system_prompt: str, user_message: str) -> str:
     """Call LLM with a system prompt and user message, return response text."""
     start = time.monotonic()

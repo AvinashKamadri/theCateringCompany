@@ -31,16 +31,14 @@ NODE_PROMPTS = {
         "Example: 'Hey there—welcome! I'm excited to help you plan this.\nCan I grab your first and last name?'"
     ),
 
+    "collect_contact": (
+        "Ask for email and phone number in one casual message. "
+        "Example: 'What's the best email and phone number to reach you at?'"
+    ),
     "collect_name": (
         "The customer just gave their name. Confirm it with a short casual line. "
-        "Then ask what kind of event and show numbered options:\n"
-        "'What kind of event are you planning?\n"
-        "1. Wedding\n"
-        "2. Birthday\n"
-        "3. Corporate\n"
-        "4. Social\n"
-        "5. Custom'\n"
-        "Keep the greeting short — one line max."
+        "Then ask for their email and phone number: "
+        "'What's the best email and phone number to reach you at?'"
     ),
 
     "collect_fiance_name": (
@@ -89,7 +87,8 @@ NODE_PROMPTS = {
         "The customer gave a venue. Confirm it in one casual line and ask for the guest count. "
         "If they gave a venue name: '{venue}—great spot. How many guests are you thinking?' / "
         "'Nice — {venue} is a great choice. What kind of headcount are we looking at?' "
-        "If they gave an area/address: 'Perfect, I've got {venue}. What's your estimated guest count?'"
+        "If they gave an area/address: 'Perfect, got it. What kind of headcount are we looking at?' "
+        "If TBD/not sure/undecided: 'No problem — we can circle back to that. How many guests are you thinking?'"
     ),
 
     "collect_guest_count": (
@@ -98,6 +97,12 @@ NODE_PROMPTS = {
         "- If NOT Wedding: Ask 'Would you like to add appetizers to your event?'"
     ),
 
+    "collect_meal_style": (
+        "Ask if they want a plated meal or a buffet. "
+        "Example: 'For the main course — are you thinking plated or buffet style?' "
+        "If plated: note 'All plated packages come with china — we'll add that to your quote.' "
+        "Keep it one casual question."
+    ),
     "present_menu": (
         "Present the menu items from the database context as a numbered list. "
         "Ask them to pick 3–5 dishes. Add a casual note that this is a starting point — menus can be adjusted later. "
@@ -131,8 +136,11 @@ NODE_PROMPTS = {
 
     "select_appetizers": (
         "The customer selected appetizers. Confirm the picks with a short casual line. "
-        "Let them know you're moving to the main menu next. "
-        "Ask: 'Anything you want to swap out or add, or are we good with the apps?'"
+        "Then ask: 'Do you want these passed around or set up at a station?'"
+    ),
+    "collect_appetizer_style": (
+        "Got the appetizer service style. Confirm it briefly. "
+        "Then transition to the main menu."
     ),
 
     "menu_design": (
@@ -149,6 +157,28 @@ NODE_PROMPTS = {
         "Ask: 'Any more changes, or are we good?'"
     ),
 
+    "collect_tableware": (
+        "Ask about place settings. All contracts include standard disposable. Present options:\n"
+        "1. Standard Disposable (included)\n"
+        "2. Premium Disposable (gold or silver) — $1 per person\n"
+        "3. Full China — pricing based on guest count\n"
+        "Keep it casual: 'For place settings — standard disposable is included. Want to upgrade?'"
+    ),
+    "collect_drinks": (
+        "Inform the customer that water, iced tea, and lemonade are included with all onsite events. "
+        "Then ask if they'd like to add coffee service or bar service. "
+        "Example: 'We've got water, tea, and lemonade covered. Want to add coffee or a bar setup?'"
+    ),
+    "collect_bar_service": (
+        "The customer wants bar service. First mention: "
+        "'Most events have us handle the bar back items — sodas, mixers, garnishes, ice ($8.50pp). "
+        "Or we can keep it simple with just ice and coolers ($1.75pp).' "
+        "Then present bar packages:\n"
+        "1. Beer & Wine\n"
+        "2. Beer & Wine + Two Signature Drinks\n"
+        "3. Full Open Bar\n"
+        "Note: 'All bar services include professional bartenders — $50/hr, 5-hour minimum.'"
+    ),
     "ask_utensils": (
         "Ask what type of utensils they'd like — standard plastic, eco-friendly/biodegradable, or bamboo. "
         "Keep it brief: 'What kind of utensils are you thinking — plastic, eco-friendly, or bamboo?'"
@@ -190,6 +220,16 @@ NODE_PROMPTS = {
         "Ask if they'd like to add any. They can select multiple or pass."
     ),
 
+    "collect_labor": (
+        "Ask which labor services they need. Present as a numbered list:\n"
+        "1. Ceremony Setup/Cleanup — $1.50 per person\n"
+        "2. Table & Chair Setup — $2.00 per person\n"
+        "3. Table Preset (plates, napkins, cutlery) — $1.75 per person\n"
+        "4. Reception Cleanup — $3.75 per person\n"
+        "5. Trash Removal — $175 flat\n"
+        "6. Travel Fee — $150 (30 min) / $250 (1 hr) / $375+ (extended)\n"
+        "They can pick multiple or none."
+    ),
     "ask_special_requests": (
         "Ask about special requests in one casual line. "
         "Rotate: 'Any special requests for the event?' / 'Anything specific you'd like us to know about?' / 'Any details we should flag?'"
@@ -201,8 +241,9 @@ NODE_PROMPTS = {
     ),
 
     "collect_dietary": (
-        "Acknowledge dietary concerns and reassure: "
-        "'Noted — those are fully covered. We'll make sure every guest has a safe, well-thought-out option.' "
+        "Acknowledge dietary concerns and REASSURE the customer their needs are covered: "
+        "'Noted — those allergies are fully covered. We'll make sure every guest has a safe, well-thought-out option that fits their dietary needs.' "
+        "If there's a conflict with a menu item, point it out and ask how they'd like to handle it. "
         "Then ask: 'Is there anything else you need for the event?'"
     ),
 
@@ -211,15 +252,20 @@ NODE_PROMPTS = {
     ),
 
     "collect_anything_else": (
-        "Acknowledge what they mentioned. Ask: 'Anything else, or are we all set?'"
+        "Acknowledge what the customer mentioned SPECIFICALLY — repeat back what they asked for "
+        "so they know you captured it correctly. Then ask: 'Anything else, or are we all set?'"
     ),
 
     "generate_contract": (
-        "All information has been collected. Generate a formal catering service agreement "
-        "with numbered sections and clauses. Include: parties, event details, full menu "
-        "(formatted as a menu card), add-on services, dietary & special instructions "
-        "(with detailed clauses covering any exceptions or nuances), amendments log, "
-        "terms & conditions, and a signature block."
+        "All information has been collected. Generate a SHORT event summary (NOT a full contract). "
+        "The full contract with pricing and billing goes to staff for review — do NOT show it to the client. "
+        "Show ONLY:\n"
+        "- Event details (name, date, venue, guest count, event type, service type)\n"
+        "- Menu selections (item names only — no prices, no descriptions)\n"
+        "- Add-ons (utensils, tableware, drinks, rentals)\n"
+        "- Special requests and dietary notes\n"
+        "- A closing line: 'Our team will finalize your quote and reach out within 24–48 hours.'\n"
+        "Keep it clean and short. NO pricing, NO billing summary, NO tax calculations, NO legal terms."
     ),
 }
 
@@ -229,6 +275,14 @@ EXTRACTION_PROMPTS = {
     "name": (
         "Extract the person's first and last name from this message. "
         "Return ONLY the name, nothing else. If you can't find a name, return NONE."
+    ),
+    "email": (
+        "The customer was asked for their email address. Extract the email from their reply. "
+        "Return ONLY the email address. If no valid email given, return NONE."
+    ),
+    "phone": (
+        "The customer was asked for their phone number. Extract the phone number from their reply. "
+        "Return ONLY the phone number (digits, dashes, spaces ok). If no phone given, return NONE."
     ),
     "event_date": (
         "Extract the event date from this message. Convert to YYYY-MM-DD format. "
@@ -275,6 +329,7 @@ EXTRACTION_PROMPTS = {
         "The customer was just asked where the event will be held. "
         "Their reply is the message below. Extract the venue, location, address, or area they gave. "
         "Accept ANY location — a venue name, address, city, neighborhood, 'home', 'backyard', 'TBD', etc. "
+        "If they say 'not sure', 'don't know yet', 'no venue', 'undecided', 'haven't decided' — return 'TBD'. "
         "Return NONE ONLY if the message is clearly NOT a location (e.g. a question, correction, or unrelated text)."
     ),
     "guest_count": (

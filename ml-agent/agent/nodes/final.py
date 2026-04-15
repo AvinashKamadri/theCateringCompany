@@ -197,12 +197,11 @@ async def ask_anything_else_node(state: ConversationState) -> ConversationState:
         state["current_node"] = "collect_anything_else"
     else:
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThat's everything! Tell the customer you have all the "
-            "information needed and their contract is being generated now. "
-            "Thank them warmly.",
-            f"All details: {_slots_context(state)}"
+            f"{SYSTEM_PROMPT}\n\nThat's everything! Keep it short — one line: "
+            "'We've got everything we need. Would you like to schedule a quick 10–15 minute call to go over the details?'",
+            f"Slots: {_slots_context(state)}"
         )
-        state["current_node"] = "generate_contract"
+        state["current_node"] = "offer_followup"
 
     state["messages"] = add_ai_message(state, response)
     return state
@@ -223,6 +222,37 @@ async def collect_anything_else_node(state: ConversationState) -> ConversationSt
     )
 
     state["current_node"] = "ask_anything_else"
+    state["messages"] = add_ai_message(state, response)
+    return state
+
+
+async def offer_followup_node(state: ConversationState) -> ConversationState:
+    """Offer a follow-up call, then generate contract with pending_staff_review status."""
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+
+    intent = await llm_extract(
+        "The customer was asked if they'd like to schedule a follow-up call. "
+        "Did they say yes or no? Return ONLY: yes or no",
+        user_msg
+    )
+
+    if intent.strip().lower() == "yes":
+        fill_slot(state["slots"], "followup_call", "Requested — team will schedule")
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer wants a follow-up call. Confirm: "
+            "'We'll have someone reach out to set up a call. Your summary is being prepared — thanks!'",
+            f"Slots: {_slots_context(state)}"
+        )
+    else:
+        fill_slot(state["slots"], "followup_call", "no")
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nNo follow-up call needed. Confirm: "
+            "'Sounds good — your summary is being prepared and our team will review it. Thanks!'",
+            f"Slots: {_slots_context(state)}"
+        )
+
+    state["current_node"] = "generate_contract"
     state["messages"] = add_ai_message(state, response)
     return state
 

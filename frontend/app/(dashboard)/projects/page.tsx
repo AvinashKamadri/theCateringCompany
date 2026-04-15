@@ -53,7 +53,7 @@ export default function ProjectsPage() {
         if (filterStatus !== 'all') params.set('status', filterStatus);
         const qs = params.toString();
         const data = await projectsApi.getAll(qs ? `?${qs}` : '');
-        setProjects(data.filter((p: Project) => p.name !== 'AI Intake (draft)'));
+        setProjects(data);
       } catch {
         toast.error('Failed to load projects');
         setProjects([]);

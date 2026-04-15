@@ -704,9 +704,10 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                     <input
                       type="tel"
                       value={input}
-                      onChange={(e) => setInput(e.target.value.replace(/[^\d\s\-().+]/g, ''))}
+                      onChange={(e) => setInput(e.target.value.replace(/[^\d]/g, '').slice(0, 10))}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendMessage(`${countryCode.code} ${input}`); setInput(''); } }}
-                      placeholder="000 000 0000"
+                      placeholder="0000000000"
+                      maxLength={10}
                       className="flex-1 px-3 py-3 text-sm focus:outline-none bg-white"
                       disabled={state.isLoading}
                     />

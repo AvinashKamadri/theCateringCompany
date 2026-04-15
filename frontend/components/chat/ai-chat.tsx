@@ -30,17 +30,25 @@ interface ListItem {
 }
 
 function parseListItems(content: string): ListItem[] | null {
-  const lines = content.split('\n');
   const items: ListItem[] = [];
+
+  // First try line-by-line (normal multiline lists)
+  const lines = content.split('\n');
   for (const line of lines) {
-    // With price: "1. Item ($3.50)" or "• Item ($3.50/pp)"
     const withPrice = line.match(/^(?:\d+\.|[-•*])\s+(.+?)\s+\((\$[\d.,]+[^)]*)\)/);
     if (withPrice) { items.push({ name: withPrice[1].trim(), price: withPrice[2].trim() }); continue; }
-    // Plain numbered: "1. Option"
     const plain = line.match(/^(\d+)\.\s+(.{2,60})$/);
     if (plain) items.push({ name: plain[2].trim() });
   }
-  return items.length >= 2 ? items : null;
+  if (items.length >= 2) return items;
+
+  // Fallback: inline numbered list e.g. "1. Wedding 2. Birthday 3. Corporate"
+  const inlineMatches = content.matchAll(/\d+\.\s+([A-Za-z][A-Za-z &'-]{1,40})(?=\s+\d+\.|$)/g);
+  const inlineItems: ListItem[] = [];
+  for (const m of inlineMatches) inlineItems.push({ name: m[1].trim() });
+  if (inlineItems.length >= 2) return inlineItems;
+
+  return null;
 }
 
 // Multi-select: items with prices OR more than 6 options (e.g. desserts).

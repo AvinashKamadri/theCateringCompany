@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+
 import './Folder.css';
 
 const darkenColor = (hex: string, percent: number): string => {
@@ -30,44 +30,10 @@ const Folder = ({ color = '#5227FF', size = 1, items = [], className = '' }: Fol
   const papers = items.slice(0, maxItems);
   while (papers.length < maxItems) papers.push(null);
 
-  const [open, setOpen] = useState(false);
-  const [paperOffsets, setPaperOffsets] = useState(
-    Array.from({ length: maxItems }, () => ({ x: 0, y: 0 }))
-  );
-
   const folderBackColor = darkenColor(color, 0.08);
   const paper1 = darkenColor('#ffffff', 0.1);
   const paper2 = darkenColor('#ffffff', 0.05);
   const paper3 = '#ffffff';
-
-  const handleClick = () => {
-    setOpen(prev => !prev);
-    if (open) {
-      setPaperOffsets(Array.from({ length: maxItems }, () => ({ x: 0, y: 0 })));
-    }
-  };
-
-  const handlePaperMouseMove = (e: React.MouseEvent, index: number) => {
-    if (!open) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    const offsetX = (e.clientX - centerX) * 0.15;
-    const offsetY = (e.clientY - centerY) * 0.15;
-    setPaperOffsets(prev => {
-      const next = [...prev];
-      next[index] = { x: offsetX, y: offsetY };
-      return next;
-    });
-  };
-
-  const handlePaperMouseLeave = (_e: React.MouseEvent, index: number) => {
-    setPaperOffsets(prev => {
-      const next = [...prev];
-      next[index] = { x: 0, y: 0 };
-      return next;
-    });
-  };
 
   const folderStyle = {
     '--folder-color': color,
@@ -79,20 +45,10 @@ const Folder = ({ color = '#5227FF', size = 1, items = [], className = '' }: Fol
 
   return (
     <div style={{ transform: `scale(${size})`, transformOrigin: 'bottom center' }} className={className}>
-      <div className={`folder${open ? ' open' : ''}`} style={folderStyle} onClick={handleClick}>
+      <div className="folder" style={folderStyle}>
         <div className="folder__back">
           {papers.map((item, i) => (
-            <div
-              key={i}
-              className={`paper paper-${i + 1}`}
-              onMouseMove={e => handlePaperMouseMove(e, i)}
-              onMouseLeave={e => handlePaperMouseLeave(e, i)}
-              style={
-                open
-                  ? ({ '--magnet-x': `${paperOffsets[i]?.x ?? 0}px`, '--magnet-y': `${paperOffsets[i]?.y ?? 0}px` } as React.CSSProperties)
-                  : {}
-              }
-            >
+            <div key={i} className={`paper paper-${i + 1}`}>
               {item}
             </div>
           ))}

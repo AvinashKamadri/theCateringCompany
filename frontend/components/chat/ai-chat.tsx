@@ -42,10 +42,11 @@ function parseListItems(content: string): ListItem[] | null {
   return items.length >= 2 ? items : null;
 }
 
-// Multi-select: many items with prices. Single-select: few options or no prices.
+// Multi-select: items with prices OR more than 6 options (e.g. desserts).
+// Single-select: few options like event types (≤6 items, no prices).
 function isMultiSelect(items: ListItem[]): boolean {
   const withPrices = items.filter((i) => i.price).length;
-  return withPrices > 0 && items.length > 5;
+  return (withPrices > 0 && items.length > 5) || items.length > 6;
 }
 
 function splitAtList(content: string): { intro: string } {
@@ -54,7 +55,7 @@ function splitAtList(content: string): { intro: string } {
   return { intro: content.slice(0, firstListLine).trimEnd() };
 }
 
-// ─── Option card (single-select) ──────────────────────────────────────────────
+// ─── Option card (single-select square) ───────────────────────────────────────
 
 function OptionCard({
   item,
@@ -68,19 +69,23 @@ function OptionCard({
   return (
     <button
       onClick={onToggle}
-      className={`relative flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left transition-all focus:outline-none w-full ${
+      className={`relative flex flex-col items-start justify-end h-20 rounded-xl border-2 p-3 text-left transition-all focus:outline-none w-full ${
         selected
           ? 'border-black bg-black text-white'
           : 'border-neutral-200 bg-white hover:border-neutral-400 text-neutral-900'
       }`}
     >
-      <span className="text-sm font-medium flex-1">{item.name}</span>
+      {selected && (
+        <div className="absolute top-2.5 right-2.5 w-5 h-5 bg-white rounded-full flex items-center justify-center shadow">
+          <Check className="w-3 h-3 text-black" strokeWidth={3} />
+        </div>
+      )}
+      <span className="text-sm font-semibold leading-tight">{item.name}</span>
       {item.price && (
-        <span className={`text-xs shrink-0 ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
+        <span className={`text-xs mt-0.5 ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
           {item.price}
         </span>
       )}
-      {selected && <Check className="w-4 h-4 shrink-0" strokeWidth={3} />}
     </button>
   );
 }
@@ -130,10 +135,15 @@ function ItemSelector({
   onSelectionChange: (names: string[]) => void;
   multi: boolean;
 }) {
+  const MAX_SELECT = 4;
   const toggle = (name: string) => {
     if (multi) {
-      const next = selected.includes(name) ? selected.filter((n) => n !== name) : [...selected, name];
-      onSelectionChange(next);
+      const isSelected = selected.includes(name);
+      if (isSelected) {
+        onSelectionChange(selected.filter((n) => n !== name));
+      } else if (selected.length < MAX_SELECT) {
+        onSelectionChange([...selected, name]);
+      }
     } else {
       // Single-select: toggle off if already selected, else replace
       onSelectionChange(selected.includes(name) ? [] : [name]);
@@ -150,7 +160,7 @@ function ItemSelector({
         </div>
         {selected.length > 0 && (
           <p className="text-xs text-neutral-500 mt-2">
-            <span className="font-medium text-neutral-800">{selected.length}</span> selected — hit Send to confirm
+            <span className="font-medium text-neutral-800">{selected.length}</span>/{MAX_SELECT} selected — hit Send to confirm
           </p>
         )}
       </div>
@@ -158,10 +168,12 @@ function ItemSelector({
   }
 
   return (
-    <div className="mt-2 w-full space-y-2">
-      {items.map((item) => (
-        <OptionCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
-      ))}
+    <div className="mt-2 w-full">
+      <div className="grid grid-cols-3 gap-2">
+        {items.map((item) => (
+          <OptionCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
+        ))}
+      </div>
       {selected.length > 0 && (
         <p className="text-xs text-neutral-500 mt-1">Hit Send to confirm</p>
       )}

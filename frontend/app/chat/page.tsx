@@ -506,7 +506,7 @@ function AiIntakeContent() {
                 onProgressUpdate={setProgress}
                 authorId={user?.id}
                 userId={user?.id}
-                userName={user?.name || user?.email || 'You'}
+                userName={user?.email || 'You'}
                 initialThreadId={activeThreadId}
                 onThreadStart={async (threadId) => {
                   setActiveThreadId(threadId);

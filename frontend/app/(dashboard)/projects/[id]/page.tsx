@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   Calendar, Users, MapPin, FileText, MessageSquare, Loader2,
-  ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield,
+  ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield, Link2,
 } from 'lucide-react';
 
 interface Contract {
@@ -46,11 +46,11 @@ const CONTRACT_STATUS_LABEL: Record<string, string> = {
 };
 
 const CONTRACT_STATUS_STYLE: Record<string, string> = {
-  pending_staff_approval: 'bg-neutral-100 text-neutral-700',
+  pending_staff_approval: 'bg-amber-50 text-amber-800 border border-amber-200',
   approved: 'bg-neutral-900 text-white',
   sent: 'bg-neutral-200 text-neutral-800',
   signed: 'bg-black text-white',
-  rejected: 'bg-neutral-100 text-neutral-400',
+  rejected: 'bg-red-50 text-red-700',
   draft: 'bg-neutral-100 text-neutral-500',
 };
 
@@ -86,25 +86,20 @@ export default function ProjectDetailPage() {
     fetchCollaborators();
   }, [projectId]);
 
-  // Poll every 5 s while the project has an active AI conversation in progress
   useEffect(() => {
     if (!project) return;
-    const summary = (() => {
-      const raw = project.ai_event_summary;
-      if (!raw) return {};
-      if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return {}; } }
-      return raw as Record<string, unknown>;
-    })();
+    const summary = parseSummary(project.ai_event_summary);
     const hasActiveConversation = project.status === 'draft' && !!summary.thread_id;
-    if (!hasActiveConversation) {
-      clearInterval(pollRef.current);
-      return;
-    }
-    pollRef.current = setInterval(() => {
-      fetchProject(true);
-    }, 5000);
+    if (!hasActiveConversation) { clearInterval(pollRef.current); return; }
+    pollRef.current = setInterval(() => fetchProject(true), 5000);
     return () => clearInterval(pollRef.current);
-  }, [project?.status, (project?.ai_event_summary as any)?.thread_id ?? (typeof project?.ai_event_summary === 'string' ? '' : '')]);
+  }, [project?.status, (project?.ai_event_summary as any)?.thread_id ?? '']);
+
+  const parseSummary = (raw: any) => {
+    if (!raw) return {};
+    if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return {}; } }
+    return raw;
+  };
 
   const fetchProject = async (silent = false) => {
     try {
@@ -113,10 +108,7 @@ export default function ProjectDetailPage() {
       setProject(data as unknown as Project);
       setError(null);
     } catch (err: any) {
-      if (!silent) {
-        setError(err.message || 'Failed to load project');
-        toast.error('Failed to load project details');
-      }
+      if (!silent) { setError(err.message || 'Failed to load project'); toast.error('Failed to load project details'); }
     } finally {
       if (!silent) setLoading(false);
     }
@@ -130,9 +122,7 @@ export default function ProjectDetailPage() {
         const me = data.collaborators.find((c) => c.user_id === currentUser.id);
         setMyRole((me?.role ?? null) as CollaboratorRole | null);
       }
-    } catch {
-      // Non-fatal
-    }
+    } catch { /* non-fatal */ }
   };
 
   const loadJoinCode = async () => {
@@ -140,9 +130,7 @@ export default function ProjectDetailPage() {
     try {
       const data = await projectsApi.getJoinCode(projectId);
       setJoinCode(data.join_code);
-    } catch {
-      toast.error('Could not load invite link');
-    }
+    } catch { toast.error('Could not load invite link'); }
   };
 
   const joinUrl = joinCode
@@ -178,9 +166,7 @@ export default function ProjectDetailPage() {
       await projectsApi.updateCollaboratorRole(projectId, userId, newRole);
       toast.success('Role updated');
       fetchCollaborators();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to update role');
-    }
+    } catch (err: any) { toast.error(err.message || 'Failed to update role'); }
   };
 
   const handleRemove = async (userId: string, email: string) => {
@@ -189,12 +175,8 @@ export default function ProjectDetailPage() {
       await projectsApi.removeCollaborator(projectId, userId);
       toast.success(`${email} removed`);
       fetchCollaborators();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to remove collaborator');
-    }
+    } catch (err: any) { toast.error(err.message || 'Failed to remove collaborator'); }
   };
-
-  const canManage = myRole === 'owner' || myRole === 'manager';
 
   const handleDeleteProject = async () => {
     if (!confirm(`Delete "${project?.title}"? This cannot be undone.`)) return;
@@ -202,50 +184,35 @@ export default function ProjectDetailPage() {
       await projectsApi.deleteProject(projectId);
       toast.success('Project deleted');
       router.push('/projects');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to delete project');
-    }
+    } catch (err: any) { toast.error(err.message || 'Failed to delete project'); }
   };
 
   const roleIcon = (role: CollaboratorRole) => {
-    if (role === 'owner') return <Crown className="h-3.5 w-3.5 text-neutral-500" />;
+    if (role === 'owner') return <Crown className="h-3.5 w-3.5 text-neutral-400" />;
     if (role === 'manager') return <Shield className="h-3.5 w-3.5 text-neutral-400" />;
     return null;
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="h-5 w-5 animate-spin text-neutral-300" />
-      </div>
-    );
-  }
+  const canManage = myRole === 'owner' || myRole === 'manager';
 
-  if (error || !project) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-center">
-          <p className="text-sm text-neutral-500 mb-4">{error || 'Project not found'}</p>
-          <button
-            onClick={() => router.push('/projects')}
-            className="text-sm font-medium text-neutral-900 hover:underline"
-          >
-            ← Back to Projects
-          </button>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <Loader2 className="h-5 w-5 animate-spin text-neutral-300" />
+    </div>
+  );
 
-  const summary = (() => {
-    const raw = project.ai_event_summary;
-    if (!raw) return {};
-    if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return {}; } }
-    return raw;
-  })();
+  if (error || !project) return (
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="text-center">
+        <p className="text-sm text-neutral-500 mb-4">{error || 'Project not found'}</p>
+        <button onClick={() => router.push('/projects')} className="text-sm font-medium hover:underline">← Back to Projects</button>
+      </div>
+    </div>
+  );
+
+  const summary = parseSummary(project.ai_event_summary);
   const contract = project.latestActiveContract;
 
-  // Gather menu items from various possible fields
   const menuItems: string[] = [
     ...(Array.isArray(summary.main_dishes) ? summary.main_dishes : []),
     ...(Array.isArray(summary.appetizers) ? summary.appetizers : []),
@@ -257,20 +224,19 @@ export default function ProjectDetailPage() {
 
   return (
     <div className="min-h-screen bg-neutral-50">
-      {/* Page header */}
+      {/* Header */}
       <div className="bg-white border-b border-neutral-200">
-        <div className="max-w-5xl mx-auto px-6 py-5">
+        <div className="max-w-6xl mx-auto px-6 py-5">
           <button
             onClick={() => router.push('/projects')}
-            className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 mb-4 transition-colors"
+            className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-900 mb-4 transition-colors"
           >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Projects
+            <ArrowLeft className="h-3.5 w-3.5" /> Projects
           </button>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-semibold text-neutral-900">{project.title}</h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl font-bold text-neutral-900">{project.title}</h1>
                 {project.status === 'draft' && summary.thread_id && (
                   <span className="flex items-center gap-1 px-2 py-0.5 bg-green-50 border border-green-200 rounded-full text-xs font-medium text-green-700">
                     <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
@@ -278,10 +244,8 @@ export default function ProjectDetailPage() {
                   </span>
                 )}
               </div>
-              <p className="text-sm text-neutral-500 mt-0.5">
-                Created {new Date(project.created_at).toLocaleDateString('en-US', {
-                  month: 'short', day: 'numeric', year: 'numeric',
-                })}
+              <p className="text-sm text-neutral-400 mt-0.5">
+                Created {new Date(project.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -297,11 +261,9 @@ export default function ProjectDetailPage() {
               {myRole === 'owner' && (
                 <button
                   onClick={handleDeleteProject}
-                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-500 border border-neutral-200 rounded-lg hover:border-neutral-400 hover:text-neutral-900 transition-colors"
-                  title="Delete project"
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-500 border border-neutral-200 rounded-lg hover:border-neutral-400 hover:text-neutral-900 transition-colors"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
                 </button>
               )}
             </div>
@@ -309,308 +271,296 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      {/* Bento grid */}
+      <div className="max-w-6xl mx-auto px-6 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
 
-          {/* Main content */}
-          <div className="lg:col-span-2 space-y-4">
-
-            {/* Event Details */}
-            <div className="bg-white rounded-xl border border-neutral-200 p-5">
-              <h2 className="text-sm font-semibold text-neutral-900 mb-4">Event Details</h2>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-
-                {(summary.event_type || summary.service_type) && (
-                  <div>
-                    <p className="text-xs text-neutral-400 mb-0.5">Event type</p>
-                    <p className="text-sm font-medium text-neutral-900">
-                      {summary.event_type}{summary.event_type && summary.service_type ? ' · ' : ''}{summary.service_type}
-                    </p>
-                  </div>
-                )}
-
-                {project.event_date && (
-                  <div>
-                    <p className="text-xs text-neutral-400 mb-0.5">Date</p>
-                    <p className="text-sm font-medium text-neutral-900 flex items-center gap-1.5">
-                      <Calendar className="h-3.5 w-3.5 text-neutral-400" />
-                      {new Date(project.event_date).toLocaleDateString('en-US', {
-                        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
-                      })}
-                    </p>
-                  </div>
-                )}
-
-                {project.guest_count != null && (
-                  <div>
-                    <p className="text-xs text-neutral-400 mb-0.5">Guests</p>
-                    <p className="text-sm font-medium text-neutral-900 flex items-center gap-1.5">
-                      <Users className="h-3.5 w-3.5 text-neutral-400" />
-                      {project.guest_count}
-                    </p>
-                  </div>
-                )}
-
-                {(summary.venue_name || summary.venue) && (
-                  <div>
-                    <p className="text-xs text-neutral-400 mb-0.5">Venue</p>
-                    <p className="text-sm font-medium text-neutral-900 flex items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5 text-neutral-400" />
-                      {summary.venue_name || summary.venue}
-                    </p>
-                  </div>
-                )}
-
-                {summary.dietary_concerns && (
-                  <div>
-                    <p className="text-xs text-neutral-400 mb-0.5">Dietary</p>
-                    <p className="text-sm font-medium text-neutral-900">{summary.dietary_concerns}</p>
-                  </div>
-                )}
-
-                {summary.special_requests && summary.special_requests !== 'none' && (
-                  <div className="col-span-2">
-                    <p className="text-xs text-neutral-400 mb-0.5">Special requests</p>
-                    <p className="text-sm text-neutral-700">{summary.special_requests}</p>
-                  </div>
-                )}
-              </div>
+          {/* ── Event Details ── spans 2 cols */}
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-6">
+            <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Event Details</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
+              {project.event_date && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-neutral-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</span>
+                  <span className="text-sm font-semibold text-neutral-900">
+                    {new Date(project.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                </div>
+              )}
+              {project.guest_count != null && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-neutral-400 flex items-center gap-1"><Users className="h-3 w-3" /> Guests</span>
+                  <span className="text-sm font-semibold text-neutral-900">{project.guest_count}</span>
+                </div>
+              )}
+              {(summary.venue_name || summary.venue) && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-neutral-400 flex items-center gap-1"><MapPin className="h-3 w-3" /> Venue</span>
+                  <span className="text-sm font-semibold text-neutral-900">{summary.venue_name || summary.venue}</span>
+                </div>
+              )}
+              {summary.event_type && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-neutral-400">Event Type</span>
+                  <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.event_type}</span>
+                </div>
+              )}
+              {summary.service_type && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-neutral-400">Service</span>
+                  <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.service_type}</span>
+                </div>
+              )}
+              {summary.dietary_concerns && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-neutral-400">Dietary</span>
+                  <span className="text-sm font-semibold text-neutral-900">{summary.dietary_concerns}</span>
+                </div>
+              )}
             </div>
-
-            {/* Client Info */}
-            {(summary.client_name || summary.contact_email || summary.contact_phone || summary.name) && (
-              <div className="bg-white rounded-xl border border-neutral-200 p-5">
-                <h2 className="text-sm font-semibold text-neutral-900 mb-4">Client</h2>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-                  {(summary.client_name || summary.name) && (
-                    <div>
-                      <p className="text-xs text-neutral-400 mb-0.5">Name</p>
-                      <p className="text-sm font-medium text-neutral-900">{summary.client_name || summary.name}</p>
-                    </div>
-                  )}
-                  {summary.contact_email && (
-                    <div>
-                      <p className="text-xs text-neutral-400 mb-0.5">Email</p>
-                      <p className="text-sm font-medium text-neutral-900">{summary.contact_email}</p>
-                    </div>
-                  )}
-                  {summary.contact_phone && (
-                    <div>
-                      <p className="text-xs text-neutral-400 mb-0.5">Phone</p>
-                      <p className="text-sm font-medium text-neutral-900">{summary.contact_phone}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Menu */}
-            {menuItems.length > 0 && (
-              <div className="bg-white rounded-xl border border-neutral-200 p-5">
-                <h2 className="text-sm font-semibold text-neutral-900 mb-4">Menu</h2>
-                <div className="space-y-3">
-                  {summary.main_dishes?.length > 0 && (
-                    <div>
-                      <p className="text-xs text-neutral-400 mb-1.5">Main dishes</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {summary.main_dishes.map((item: string, i: number) => (
-                          <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-full text-xs text-neutral-700">{item}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {summary.appetizers?.length > 0 && (
-                    <div>
-                      <p className="text-xs text-neutral-400 mb-1.5">Appetizers</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {summary.appetizers.map((item: string, i: number) => (
-                          <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-full text-xs text-neutral-700">{item}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {summary.desserts?.length > 0 && (
-                    <div>
-                      <p className="text-xs text-neutral-400 mb-1.5">Desserts</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {summary.desserts.map((item: string, i: number) => (
-                          <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-full text-xs text-neutral-700">{item}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {summary.menu_notes && (
-                    <div>
-                      <p className="text-xs text-neutral-400 mb-0.5">Notes</p>
-                      <p className="text-sm text-neutral-700">{summary.menu_notes}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Add-ons */}
-            {addons.length > 0 && (
-              <div className="bg-white rounded-xl border border-neutral-200 p-5">
-                <h2 className="text-sm font-semibold text-neutral-900 mb-3">Add-ons</h2>
-                <div className="flex flex-wrap gap-1.5">
-                  {addons.map((addon: string, i: number) => (
-                    <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-full text-xs text-neutral-700">{addon}</span>
-                  ))}
-                </div>
+            {summary.special_requests && summary.special_requests !== 'none' && (
+              <div className="mt-4 pt-4 border-t border-neutral-100">
+                <span className="text-xs text-neutral-400">Special Requests</span>
+                <p className="text-sm text-neutral-700 mt-1">{summary.special_requests}</p>
               </div>
             )}
           </div>
 
-          {/* Sidebar */}
-          <div className="space-y-4">
-
-            {/* Status */}
-            <div className="bg-white rounded-xl border border-neutral-200 p-5">
-              <h3 className="text-sm font-semibold text-neutral-900 mb-3">Status</h3>
+          {/* ── Status + Contract ── 1 col */}
+          <div className="flex flex-col gap-4">
+            {/* Status tile */}
+            <div className="bg-white rounded-2xl border border-neutral-200 p-5">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Status</p>
               <span className={cn(
-                'inline-flex px-2.5 py-1 rounded-full text-xs font-medium',
-                project.status === 'active' ? 'bg-neutral-900 text-white' :
+                'inline-flex px-3 py-1.5 rounded-xl text-xs font-semibold',
+                project.status === 'confirmed' ? 'bg-neutral-900 text-white' :
                 project.status === 'completed' ? 'bg-black text-white' :
-                'bg-neutral-100 text-neutral-600'
+                'bg-neutral-100 text-neutral-700'
               )}>
                 {project.status}
               </span>
             </div>
 
-            {/* Contract */}
+            {/* Contract tile */}
             {contract ? (
-              <div className="bg-white rounded-xl border border-neutral-200 p-5">
-                <h3 className="text-sm font-semibold text-neutral-900 mb-3">Contract</h3>
-                <div className="space-y-2.5">
+              <div className="bg-white rounded-2xl border border-neutral-200 p-5">
+                <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Contract</p>
+                <div className="space-y-2 mb-4">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-neutral-400">Status</span>
-                    <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium',
-                      CONTRACT_STATUS_STYLE[contract.status] ?? CONTRACT_STATUS_STYLE.draft
-                    )}>
+                    <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', CONTRACT_STATUS_STYLE[contract.status] ?? CONTRACT_STATUS_STYLE.draft)}>
                       {CONTRACT_STATUS_LABEL[contract.status] ?? contract.status.replace(/_/g, ' ')}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-neutral-400">Version</span>
-                    <span className="text-xs font-medium text-neutral-700">v{contract.version_number}</span>
+                    <span className="text-xs font-semibold text-neutral-700">v{contract.version_number}</span>
                   </div>
                   {contract.total_amount != null && (
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-neutral-400">Amount</span>
-                      <span className="text-xs font-medium text-neutral-900 tabular-nums">
-                        ${contract.total_amount.toLocaleString()}
-                      </span>
+                      <span className="text-sm font-bold text-neutral-900">${contract.total_amount.toLocaleString()}</span>
                     </div>
                   )}
                 </div>
                 <button
                   onClick={() => router.push(`/contracts/${contract.id}`)}
-                  className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-white text-sm font-medium rounded-xl hover:bg-neutral-800 transition-colors"
                 >
-                  <FileText className="h-3.5 w-3.5" />
-                  View Contract
+                  <FileText className="h-3.5 w-3.5" /> View Contract
                 </button>
               </div>
             ) : (
-              <div className="bg-white rounded-xl border border-neutral-200 p-5">
-                <h3 className="text-sm font-semibold text-neutral-900 mb-1">No contract yet</h3>
-                <p className="text-xs text-neutral-500 mb-4">
-                  {summary.thread_id
-                    ? 'The intake is in progress. Continue to complete it.'
-                    : 'Complete the AI intake to generate a contract.'}
+              <div className="bg-neutral-900 rounded-2xl p-5 text-white">
+                <p className="text-sm font-semibold mb-1">No contract yet</p>
+                <p className="text-xs text-neutral-400 mb-4">
+                  {summary.thread_id ? 'The intake is in progress.' : 'Complete the AI intake to generate a contract.'}
                 </p>
                 <button
                   onClick={() => router.push(summary.thread_id ? `/chat?thread=${summary.thread_id}` : '/chat')}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-black text-sm font-semibold rounded-xl hover:bg-neutral-100 transition-colors"
                 >
+                  <MessageSquare className="h-3.5 w-3.5" />
                   {summary.thread_id ? 'Continue Intake' : 'Start AI Intake'}
                 </button>
               </div>
             )}
+          </div>
 
-            {/* Collaborators */}
-            <div className="bg-white rounded-xl border border-neutral-200 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-neutral-900">Collaborators</h3>
-                {canManage && (
-                  <button
-                    onClick={() => { setShowAddForm(!showAddForm); loadJoinCode(); }}
-                    className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 transition-colors"
-                  >
-                    <UserPlus className="h-3.5 w-3.5" />
-                    Add
-                  </button>
+          {/* ── Client ── 1 col */}
+          {(summary.client_name || summary.contact_email || summary.contact_phone || summary.name) && (
+            <div className="bg-white rounded-2xl border border-neutral-200 p-6">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Client</p>
+              <div className="space-y-3">
+                {(summary.client_name || summary.name) && (
+                  <div>
+                    <p className="text-xs text-neutral-400">Name</p>
+                    <p className="text-sm font-semibold text-neutral-900 mt-0.5">{summary.client_name || summary.name}</p>
+                  </div>
+                )}
+                {summary.contact_email && (
+                  <div>
+                    <p className="text-xs text-neutral-400">Email</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{summary.contact_email}</p>
+                  </div>
+                )}
+                {summary.contact_phone && (
+                  <div>
+                    <p className="text-xs text-neutral-400">Phone</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{summary.contact_phone}</p>
+                  </div>
                 )}
               </div>
+            </div>
+          )}
 
-              {/* Add form */}
-              {showAddForm && canManage && (
-                <form onSubmit={handleAddCollaborator} className="mb-4 space-y-2">
+          {/* ── Menu ── spans 2 cols */}
+          {menuItems.length > 0 && (
+            <div className={cn('bg-white rounded-2xl border border-neutral-200 p-6', (summary.client_name || summary.name) ? 'lg:col-span-2' : 'lg:col-span-3')}>
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Menu</p>
+              <div className="space-y-4">
+                {summary.appetizers?.length > 0 && (
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-2">Appetizers</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {summary.appetizers.map((item: string, i: number) => (
+                        <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {summary.main_dishes?.length > 0 && (
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-2">Main Dishes</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {summary.main_dishes.map((item: string, i: number) => (
+                        <span key={i} className="px-2.5 py-1 bg-neutral-900 text-white rounded-lg text-xs font-medium">{item}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {summary.desserts?.length > 0 && (
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-2">Desserts</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {summary.desserts.map((item: string, i: number) => (
+                        <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Add-ons ── 1 col */}
+          {addons.length > 0 && (
+            <div className="bg-white rounded-2xl border border-neutral-200 p-6">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Add-ons</p>
+              <div className="flex flex-wrap gap-1.5">
+                {addons.map((addon: string, i: number) => (
+                  <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{addon}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Collaborators ── spans full width */}
+          <div className="lg:col-span-3 bg-white rounded-2xl border border-neutral-200 p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Collaborators</p>
+                <p className="text-sm text-neutral-500 mt-0.5">{collaborators.length} member{collaborators.length !== 1 ? 's' : ''}</p>
+              </div>
+              {canManage && (
+                <div className="flex items-center gap-2">
+                  {/* Generate invite link button */}
+                  <button
+                    onClick={async () => { await loadJoinCode(); }}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-700 border border-neutral-200 rounded-xl hover:bg-neutral-50 hover:border-neutral-400 transition-colors"
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    {joinUrl ? 'Invite Link' : 'Generate Link'}
+                  </button>
+                  {/* Add collaborator button */}
+                  <button
+                    onClick={() => { setShowAddForm(!showAddForm); loadJoinCode(); }}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-black text-white rounded-xl hover:bg-neutral-800 transition-colors"
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Add Collaborator
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Invite link bar */}
+            {joinUrl && canManage && (
+              <div className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-3 mb-5">
+                <Link2 className="h-4 w-4 text-neutral-400 shrink-0" />
+                <span className="flex-1 text-xs text-neutral-600 truncate select-all">{joinUrl}</span>
+                <button
+                  onClick={copyCode}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-black text-white text-xs font-medium rounded-lg hover:bg-neutral-800 transition-colors shrink-0"
+                >
+                  {codeCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  {codeCopied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+            )}
+
+            {/* Add collaborator form */}
+            {showAddForm && canManage && (
+              <form onSubmit={handleAddCollaborator} className="bg-neutral-50 rounded-xl border border-neutral-200 p-4 mb-5">
+                <p className="text-sm font-semibold text-neutral-900 mb-3">Add by email</p>
+                <div className="flex gap-2 flex-wrap">
                   <input
                     type="email"
                     required
                     placeholder="colleague@email.com"
                     value={addEmail}
                     onChange={(e) => setAddEmail(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-neutral-200 rounded-lg focus:ring-1 focus:ring-neutral-900 outline-none"
+                    className="flex-1 min-w-[200px] px-3 py-2 text-sm border border-neutral-200 rounded-xl focus:ring-2 focus:ring-black outline-none bg-white"
                     disabled={addingCollaborator}
                   />
                   <select
                     value={addRole}
                     onChange={(e) => setAddRole(e.target.value as CollaboratorRole)}
-                    className="w-full px-3 py-2 text-sm border border-neutral-200 rounded-lg focus:ring-1 focus:ring-neutral-900 outline-none"
+                    className="px-3 py-2 text-sm border border-neutral-200 rounded-xl focus:ring-2 focus:ring-black outline-none bg-white"
                     disabled={addingCollaborator}
                   >
-                    {myRole === 'owner' && <option value="manager">Manager — full control</option>}
-                    <option value="collaborator">Collaborator — can message</option>
-                    <option value="viewer">Viewer — read only</option>
+                    {myRole === 'owner' && <option value="manager">Manager</option>}
+                    <option value="collaborator">Collaborator</option>
+                    <option value="viewer">Viewer</option>
                   </select>
                   <button
                     type="submit"
                     disabled={addingCollaborator}
-                    className="w-full py-2 text-sm bg-black text-white rounded-lg hover:bg-neutral-800 disabled:opacity-50 transition-colors"
+                    className="px-5 py-2 text-sm font-semibold bg-black text-white rounded-xl hover:bg-neutral-800 disabled:opacity-50 transition-colors"
                   >
                     {addingCollaborator ? 'Adding…' : 'Add'}
                   </button>
-                </form>
-              )}
-
-              {/* Invite link */}
-              {canManage && (
-                <div className="mb-4">
-                  <p className="text-xs text-neutral-400 mb-1.5">Invite link</p>
-                  {joinUrl ? (
-                    <div className="flex items-center gap-2">
-                      <span className="flex-1 text-xs bg-neutral-50 border border-neutral-200 px-2.5 py-1.5 rounded-lg truncate text-neutral-600 select-all">
-                        {joinUrl}
-                      </span>
-                      <button onClick={copyCode} className="p-1.5 text-neutral-400 hover:text-neutral-900 shrink-0 transition-colors">
-                        {codeCopied ? <Check className="h-3.5 w-3.5 text-neutral-900" /> : <Copy className="h-3.5 w-3.5" />}
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={loadJoinCode}
-                      className="text-xs text-neutral-500 hover:text-neutral-900 underline underline-offset-2 transition-colors"
-                    >
-                      Show invite link
-                    </button>
-                  )}
                 </div>
-              )}
+              </form>
+            )}
 
-              {/* Collaborator list */}
-              <div className="space-y-2">
-                {collaborators.length === 0 && (
-                  <p className="text-xs text-neutral-400">No collaborators yet.</p>
-                )}
+            {/* Collaborator list */}
+            {collaborators.length === 0 ? (
+              <div className="text-center py-8 text-neutral-400">
+                <Users className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No collaborators yet. Invite someone to get started.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {collaborators.map((c) => (
-                  <div key={c.user_id} className="flex items-center gap-2">
+                  <div key={c.user_id} className="flex items-center gap-3 p-3 rounded-xl border border-neutral-200 bg-neutral-50">
+                    <div className="w-9 h-9 rounded-full bg-neutral-200 flex items-center justify-center text-sm font-semibold text-neutral-600 uppercase shrink-0">
+                      {c.first_name?.[0] ?? c.email[0]}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         {roleIcon(c.role)}
-                        <span className="text-sm font-medium text-neutral-900 truncate">
+                        <span className="text-sm font-semibold text-neutral-900 truncate">
                           {c.first_name && c.last_name ? `${c.first_name} ${c.last_name}` : c.email}
                         </span>
                       </div>
@@ -623,7 +573,7 @@ export default function ProjectDetailPage() {
                         <select
                           value={c.role}
                           onChange={(e) => handleUpdateRole(c.user_id, e.target.value as CollaboratorRole)}
-                          className="text-xs border border-neutral-200 rounded px-1.5 py-0.5 outline-none"
+                          className="text-xs border border-neutral-200 rounded-lg px-1.5 py-0.5 bg-white outline-none"
                         >
                           {myRole === 'owner' && <option value="manager">Manager</option>}
                           <option value="collaborator">Collaborator</option>
@@ -631,22 +581,22 @@ export default function ProjectDetailPage() {
                         </select>
                         <button
                           onClick={() => handleRemove(c.user_id, c.email)}
-                          className="p-1 text-neutral-300 hover:text-neutral-700 transition-colors"
-                          title="Remove"
+                          className="p-1 text-neutral-300 hover:text-red-500 transition-colors"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     ) : (
-                      <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium shrink-0', ROLE_BADGE[c.role])}>
+                      <span className={cn('text-xs px-2.5 py-1 rounded-full font-medium shrink-0', ROLE_BADGE[c.role])}>
                         {c.role}
                       </span>
                     )}
                   </div>
                 ))}
               </div>
-            </div>
+            )}
           </div>
+
         </div>
       </div>
     </div>

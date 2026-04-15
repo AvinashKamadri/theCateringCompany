@@ -32,7 +32,14 @@
       "Bash(npm list:*)",
       "Bash(git show:*)",
       "Bash(cp /tmp/projects_page_before.tsx \"c:/Users/avina/projects/flashback/TheCateringCompany/frontend/app/\\(dashboard\\)/projects/page.tsx\")",
-      "Bash(cp /tmp/contracts_page_before.tsx \"c:/Users/avina/projects/flashback/TheCateringCompany/frontend/app/\\(dashboard\\)/contracts/page.tsx\")"
+      "Bash(cp /tmp/contracts_page_before.tsx \"c:/Users/avina/projects/flashback/TheCateringCompany/frontend/app/\\(dashboard\\)/contracts/page.tsx\")",
+      "Bash(python3 -c ':*)",
+      "Bash(py -3 -c ':*)",
+      "Bash(py -3 -m pip install pymupdf -q)",
+      "Bash(grep -E '\\\\.\\(py|ts|js\\)$')",
+      "Read(//c/Users/avina/projects/flashback/**)",
+      "Read(//c/Users/avina/.claude/projects/c--Users-avina-projects-flashback-TheCateringCompany/memory/**)",
+      "Bash(timeout 10 npx ts-node -e ':*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\avina\\projects\\flashback\\TheCateringCompanyAgent\\agent\\nodes"

@@ -324,6 +324,48 @@ export class OpenSignService {
     }
   }
 
+  /**
+   * Register (or update) the DocuSeal webhook for submission.completed events.
+   * Safe to call on every startup — checks existing webhooks and skips if already registered.
+   */
+  async ensureWebhookRegistered(webhookBaseUrl: string): Promise<void> {
+    if (!this.enabled) return;
+
+    const targetUrl = `${webhookBaseUrl}/webhooks/docuseal`;
+
+    try {
+      // List existing webhooks
+      const listRes = await this.client.get('/webhooks');
+      const existing: any[] = Array.isArray(listRes.data) ? listRes.data : (listRes.data?.data ?? []);
+
+      const alreadyRegistered = existing.some(
+        (wh: any) => wh.url === targetUrl && (wh.events ?? []).includes('submission.completed'),
+      );
+
+      if (alreadyRegistered) {
+        this.logger.log(`DocuSeal webhook already registered: ${targetUrl}`);
+        return;
+      }
+
+      // Remove stale entries pointing to same host but different path (avoid duplicates)
+      for (const wh of existing) {
+        if (wh.url?.includes('/webhooks/docuseal')) {
+          await this.client.delete(`/webhooks/${wh.id}`).catch(() => {});
+          this.logger.log(`Removed stale DocuSeal webhook: ${wh.url}`);
+        }
+      }
+
+      // Register new webhook
+      await this.client.post('/webhooks', {
+        url: targetUrl,
+        events: ['submission.completed'],
+      });
+      this.logger.log(`✅ DocuSeal webhook registered: ${targetUrl}`);
+    } catch (err: any) {
+      this.logger.warn(`DocuSeal webhook registration failed: ${err.response?.data?.message || err.message}`);
+    }
+  }
+
   private mapStatus(status: string): 'pending' | 'completed' | 'declined' | 'expired' {
     switch (status) {
       case 'completed': return 'completed';

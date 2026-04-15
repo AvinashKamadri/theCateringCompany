@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useState, useEffect, useRef, Fragment } from 'react';
-import { Send, Loader2, CheckCircle2, Sparkles, Check, ChevronDown } from 'lucide-react';
+import { Send, Loader2, Sparkles, Check, ChevronDown } from 'lucide-react';
 import { chatAiApi } from '@/lib/api/chat-ai';
 import type { ChatMessage, ChatState, ContractData } from '@/types/chat-ai.types';
 import { toast } from 'sonner';
 import { CommandDialog } from './command-dialog';
+import IntakeReviewPanel from './IntakeReviewPanel';
 
 interface AiChatProps {
   projectId?: string;
@@ -660,36 +661,12 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Completion banner */}
+        {/* Completion — intake review accordion */}
         {state.isComplete && state.contractData && (
-          <div className="border-t border-neutral-200 bg-neutral-50 px-6 py-4">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-neutral-900 mt-0.5 shrink-0" />
-              <div className="flex-1">
-                <h3 className="font-semibold text-neutral-900 mb-2">Event Summary</h3>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  {state.contractData.name && (
-                    <div><span className="text-neutral-500 font-medium">Client:</span><span className="text-neutral-900 ml-2">{state.contractData.name}</span></div>
-                  )}
-                  {state.contractData.event_type && (
-                    <div><span className="text-neutral-500 font-medium">Event:</span><span className="text-neutral-900 ml-2">{state.contractData.event_type}</span></div>
-                  )}
-                  {state.contractData.event_date && (
-                    <div><span className="text-neutral-500 font-medium">Date:</span><span className="text-neutral-900 ml-2">{state.contractData.event_date}</span></div>
-                  )}
-                  {state.contractData.guest_count && (
-                    <div><span className="text-neutral-500 font-medium">Guests:</span><span className="text-neutral-900 ml-2">{state.contractData.guest_count}</span></div>
-                  )}
-                </div>
-                <button
-                  onClick={() => onComplete?.(state.contractData!)}
-                  className="mt-3 w-full bg-black text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-neutral-800 transition-colors"
-                >
-                  Create Project & Contract
-                </button>
-              </div>
-            </div>
-          </div>
+          <IntakeReviewPanel
+            contractData={state.contractData}
+            onConfirm={() => onComplete?.(state.contractData!)}
+          />
         )}
 
         {/* Input */}

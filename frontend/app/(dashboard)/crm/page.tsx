@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { RoleGuard } from '@/components/auth/RoleGuard';
 import {
   Users,
   TrendingUp,
@@ -91,6 +92,7 @@ export default function CRMPage() {
   const stages = Object.entries(STATUS_CONFIG).sort((a, b) => a[1].order - b[1].order);
 
   return (
+    <RoleGuard role="staff">
     <div className="min-h-screen bg-neutral-50">
       {/* Header */}
       <div className="bg-white border-b border-neutral-200">
@@ -280,5 +282,6 @@ export default function CRMPage() {
         )}
       </div>
     </div>
+    </RoleGuard>
   );
 }

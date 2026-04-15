@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Search, FileText, KeyRound, X } from 'lucide-react';
+import { Plus, Search, FileText, KeyRound } from 'lucide-react';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { projectsApi, type Project } from '@/lib/api/projects';
 import { toast } from 'sonner';
@@ -29,23 +29,19 @@ const FOLDER_COLOR = '#1a1a1a';
 
 export default function ProjectsPage() {
   const { user } = useAuthStore();
-  const [allProjects, setAllProjects] = useState<Project[]>([]);  // full list from server
-  const [searchResults, setSearchResults] = useState<Project[] | null>(null); // null = not searching
+  const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Initial load
   useEffect(() => {
     const load = async () => {
       try {
         setIsLoading(true);
-        setAllProjects(await projectsApi.getAll());
+        setProjects(await projectsApi.getAll());
       } catch {
         toast.error('Failed to load projects');
-        setAllProjects([]);
+        setProjects([]);
       } finally {
         setIsLoading(false);
       }
@@ -54,36 +50,12 @@ export default function ProjectsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Debounced server-side search
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-
-    if (searchQuery.trim().length < 2) {
-      setSearchResults(null);
-      return;
-    }
-
-    debounceRef.current = setTimeout(async () => {
-      setIsSearching(true);
-      try {
-        const results = await projectsApi.search(searchQuery.trim());
-        setSearchResults(results);
-      } catch {
-        setSearchResults([]);
-      } finally {
-        setIsSearching(false);
-      }
-    }, 350);
-
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [searchQuery]);
-
-  // Source: search results when active, otherwise full list
-  const source = (searchResults ?? allProjects).filter((p) => p.name !== 'AI Intake (draft)');
-  const filtered = source.filter((p) => filterStatus === 'all' || p.status === filterStatus);
-
-  // Pill counts always based on full list (not search results)
-  const allVisible = allProjects.filter((p) => p.name !== 'AI Intake (draft)');
+  const filtered = projects.filter((p) => {
+    if (p.name === 'AI Intake (draft)') return false;
+    const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchStatus = filterStatus === 'all' || p.status === filterStatus;
+    return matchSearch && matchStatus;
+  });
 
   if (isLoading) {
     return (
@@ -115,7 +87,7 @@ export default function ProjectsPage() {
                 Join
               </Link>
               <Link
-                href="/projects/new"
+                href="/chat"
                 className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-black rounded-lg hover:bg-neutral-800 transition-colors"
               >
                 <Plus className="h-4 w-4" />
@@ -124,55 +96,30 @@ export default function ProjectsPage() {
             </div>
           </div>
 
-          {/* Search */}
-          <div className="relative mb-3">
-            {isSearching
-              ? <div className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 rounded-full border-2 border-neutral-200 border-t-black animate-spin" />
-              : <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400 pointer-events-none" />
-            }
-            <input
-              type="text"
-              placeholder="Search by name, venue, event type…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-9 py-2 text-sm border border-neutral-200 rounded-lg bg-white text-black placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => { setSearchQuery(''); setSearchResults(null); }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Status filter pills */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {(['all', 'draft', 'inquiry', 'proposal_sent', 'confirmed', 'completed'] as const).map((s) => {
-              const label = s === 'all' ? 'All' : STATUS_LABELS[s] ?? s;
-              const count = s === 'all'
-                ? allVisible.length
-                : allVisible.filter((p) => p.status === s).length;
-              if (s !== 'all' && count === 0) return null;
-              return (
-                <button
-                  key={s}
-                  onClick={() => setFilterStatus(s)}
-                  className={cn(
-                    'px-3 py-1 rounded-full text-xs font-medium transition-colors border',
-                    filterStatus === s
-                      ? 'bg-black text-white border-black'
-                      : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400 hover:text-black'
-                  )}
-                >
-                  {label}
-                  <span className={cn('ml-1.5', filterStatus === s ? 'text-neutral-300' : 'text-neutral-400')}>
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
+          {/* Search + filter */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+              <input
+                type="text"
+                placeholder="Search projects…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 text-sm border border-neutral-200 rounded-lg bg-white text-black placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+              />
+            </div>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="px-3 py-2 text-sm border border-neutral-200 rounded-lg bg-white text-black focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+            >
+              <option value="all">All Status</option>
+              <option value="draft">Draft</option>
+              <option value="inquiry">Inquiry</option>
+              <option value="proposal_sent">Proposal Sent</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="completed">Completed</option>
+            </select>
           </div>
         </div>
       </div>
@@ -186,15 +133,13 @@ export default function ProjectsPage() {
                 <FileText className="h-6 w-6 text-neutral-400" />
               </div>
             </div>
-            <h3 className="text-base font-semibold text-black mb-1">
-              {searchQuery ? `No results for "${searchQuery}"` : 'No projects found'}
-            </h3>
+            <h3 className="text-base font-semibold text-black mb-1">No projects found</h3>
             <p className="text-sm text-neutral-400 mb-6">
-              {searchQuery ? 'Try a different name, venue, or event type.' : 'Create your first project to get started.'}
+              {searchQuery ? 'Try adjusting your search or filter.' : 'Create your first project to get started.'}
             </p>
             {!searchQuery && (
               <Link
-                href="/projects/new"
+                href="/chat"
                 className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-black rounded-lg hover:bg-neutral-800 transition-colors"
               >
                 <Plus className="h-4 w-4" />

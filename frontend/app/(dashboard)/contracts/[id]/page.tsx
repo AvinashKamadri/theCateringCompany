@@ -11,6 +11,7 @@ import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import BentoInfoCard from '@/components/ui/BentoInfoCard';
 
 const STAFF_DOMAINS = ['@catering-company.com', '@catering-company.com'];
 
@@ -452,7 +453,7 @@ export default function ContractDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
 
           {/* ── Event Details ── 2 cols */}
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-6">
+          <BentoInfoCard className="lg:col-span-2 p-6">
             <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Event Details</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
               {eventDate && (
@@ -493,12 +494,12 @@ export default function ContractDetailPage() {
                 <p className="text-sm text-neutral-700 mt-0.5">{dietaryRestrictions.join(', ')}</p>
               </div>
             )}
-          </div>
+          </BentoInfoCard>
 
           {/* ── Contract Info + Client ── 1 col */}
           <div className="flex flex-col gap-4">
             {/* Contract info tile */}
-            <div className="bg-white rounded-2xl border border-neutral-200 p-5">
+            <BentoInfoCard className="p-5">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Contract Info</p>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-neutral-400">Version</span><span className="font-semibold">v{contract.version_number}</span></div>
@@ -519,22 +520,22 @@ export default function ContractDetailPage() {
                 ) : null}
                 <div className="flex justify-between pt-1"><span className="text-neutral-400 text-xs">Contract ID</span><span className="font-mono text-xs text-neutral-400 truncate max-w-[110px]">{contract.id}</span></div>
               </div>
-            </div>
+            </BentoInfoCard>
 
             {/* Client tile */}
             {(clientName !== '—' || clientInfo.email || clientInfo.phone) && (
-              <div className="bg-white rounded-2xl border border-neutral-200 p-5">
+              <BentoInfoCard className="p-5">
                 <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Client</p>
                 <div className="space-y-1 text-sm">
                   {clientName !== '—' && <p className="font-semibold text-neutral-900">{clientName}</p>}
                   {clientInfo.email && <p className="text-neutral-500 text-xs">{clientInfo.email}</p>}
                   {clientInfo.phone && <p className="text-neutral-500 text-xs">{clientInfo.phone}</p>}
                 </div>
-              </div>
+              </BentoInfoCard>
             )}
 
             {/* Actions tile */}
-            <div className="bg-white rounded-2xl border border-neutral-200 p-5 space-y-2">
+            <BentoInfoCard className="p-5 space-y-2" enableTilt={false}>
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Actions</p>
               {isStaff && contract.pdf_path && (
                 <a href={`/api/contracts/${contract.id}/pdf`} target="_blank" rel="noopener noreferrer"
@@ -548,7 +549,7 @@ export default function ContractDetailPage() {
                   View Project
                 </button>
               )}
-            </div>
+            </BentoInfoCard>
 
             {/* Status notes */}
             {!isStaff && isPending && (
@@ -581,7 +582,7 @@ export default function ContractDetailPage() {
 
           {/* ── Menu & Services ── 2 cols */}
           {(appetizers.length > 0 || mainDishes.length > 0 || desserts.length > 0 || utensils || rentals || florals) && (
-            <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-6">
+            <BentoInfoCard className="lg:col-span-2 p-6">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Menu & Services</p>
               <div className="space-y-5">
                 {appetizers.length > 0 && (
@@ -616,12 +617,12 @@ export default function ContractDetailPage() {
                   </div>
                 )}
               </div>
-            </div>
+            </BentoInfoCard>
           )}
 
           {/* ── Add-ons & Requests ── 1 col */}
           {(addons.length > 0 || specialRequests.length > 0) && (
-            <div className="bg-white rounded-2xl border border-neutral-200 p-6">
+            <BentoInfoCard className="p-6">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Add-ons & Requests</p>
               {addons.length > 0 && (
                 <div className="mb-3">
@@ -639,17 +640,17 @@ export default function ContractDetailPage() {
                   </ul>
                 </div>
               )}
-            </div>
+            </BentoInfoCard>
           )}
 
           {/* ── Contract Summary ── full width */}
           {summary && (
-            <div className="lg:col-span-3 bg-white rounded-2xl border border-neutral-200 p-6">
+            <BentoInfoCard className="lg:col-span-3 p-6" enableTilt={false}>
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Contract Summary</p>
               <div className="prose prose-sm max-w-none text-neutral-700 whitespace-pre-wrap leading-relaxed text-sm">
                 {summary}
               </div>
-            </div>
+            </BentoInfoCard>
           )}
 
         </div>

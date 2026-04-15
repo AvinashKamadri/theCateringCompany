@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, Fragment } from 'react';
-import { Send, Loader2, CheckCircle2, Sparkles, Check } from 'lucide-react';
+import { Send, Loader2, CheckCircle2, Sparkles, Check, ChevronDown } from 'lucide-react';
 import { chatAiApi } from '@/lib/api/chat-ai';
 import type { ChatMessage, ChatState, ContractData } from '@/types/chat-ai.types';
 import { toast } from 'sonner';
@@ -296,6 +296,36 @@ function saveSessionToStorage(threadId: string) {
   }
 }
 
+// ─── Country codes ────────────────────────────────────────────────────────────
+const COUNTRY_CODES = [
+  { code: '+1',  flag: '🇺🇸', name: 'US' },
+  { code: '+1',  flag: '🇨🇦', name: 'CA' },
+  { code: '+44', flag: '🇬🇧', name: 'GB' },
+  { code: '+91', flag: '🇮🇳', name: 'IN' },
+  { code: '+61', flag: '🇦🇺', name: 'AU' },
+  { code: '+64', flag: '🇳🇿', name: 'NZ' },
+  { code: '+971', flag: '🇦🇪', name: 'AE' },
+  { code: '+65', flag: '🇸🇬', name: 'SG' },
+  { code: '+60', flag: '🇲🇾', name: 'MY' },
+  { code: '+63', flag: '🇵🇭', name: 'PH' },
+  { code: '+852', flag: '🇭🇰', name: 'HK' },
+  { code: '+49', flag: '🇩🇪', name: 'DE' },
+  { code: '+33', flag: '🇫🇷', name: 'FR' },
+  { code: '+39', flag: '🇮🇹', name: 'IT' },
+  { code: '+34', flag: '🇪🇸', name: 'ES' },
+  { code: '+55', flag: '🇧🇷', name: 'BR' },
+  { code: '+52', flag: '🇲🇽', name: 'MX' },
+  { code: '+81', flag: '🇯🇵', name: 'JP' },
+  { code: '+82', flag: '🇰🇷', name: 'KR' },
+  { code: '+86', flag: '🇨🇳', name: 'CN' },
+];
+
+function isAskingForPhone(content: string): boolean {
+  const lower = content.toLowerCase();
+  return (lower.includes('phone') || lower.includes('mobile') || lower.includes('number to reach')) &&
+    !lower.includes('guest') && !lower.includes('how many');
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function AiChat({ projectId, authorId, userId, userName = 'You', initialThreadId, onComplete, onThreadStart, onSlotsUpdate, onProgressUpdate }: AiChatProps) {
@@ -306,6 +336,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     isComplete: false,
   });
   const [input, setInput] = useState('');
+  const [countryCode, setCountryCode] = useState(COUNTRY_CODES[0]);
   const [menuSelections, setMenuSelections] = useState<string[]>([]);
   const [activeMenuMsgIdx, setActiveMenuMsgIdx] = useState<number | null>(null);
   const [commandDialog, setCommandDialog] = useState<{ isOpen: boolean; command: 'menu' | 'events' | null }>({
@@ -662,37 +693,80 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
         )}
 
         {/* Input */}
-        <div className={`border-t border-neutral-200 px-6 py-4 bg-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
-          <div className="flex items-end gap-3">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                // If user manually edits, clear grid selections
-                if (activeMenuMsgIdx !== null) setMenuSelections([]);
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={activeMenuMsgIdx !== null ? 'Select items above or type here…' : 'Type your message…'}
-              className="flex-1 resize-none border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent min-h-[52px] max-h-[120px]"
-              rows={1}
-              disabled={state.isLoading}
-            />
-            <button
-              onClick={() => handleSendMessage()}
-              disabled={!input.trim() || state.isLoading}
-              className="bg-black text-white p-3 rounded-xl hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
-            >
-              {state.isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-            </button>
-          </div>
-          <p className="text-xs text-neutral-400 mt-2 text-center">
-            {activeMenuMsgIdx !== null
-              ? 'Click cards to select · Send to confirm'
-              : <>Shift+Enter for new line · Use <span className="font-mono text-neutral-600">@ai</span> to update previous items</>
-            }
-          </p>
-        </div>
+        {(() => {
+          const lastAiMsg = [...state.messages].reverse().find((m) => m.role === 'ai');
+          const isPhoneMode = !state.isLoading && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && activeMenuMsgIdx === null;
+          return (
+            <div className={`border-t border-neutral-200 px-6 py-4 bg-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
+              <div className="flex items-end gap-3">
+                {isPhoneMode ? (
+                  /* Phone input with country code */
+                  <div className="flex-1 flex items-center border border-neutral-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-black focus-within:border-transparent">
+                    <div className="relative shrink-0">
+                      <select
+                        value={COUNTRY_CODES.indexOf(countryCode)}
+                        onChange={(e) => setCountryCode(COUNTRY_CODES[Number(e.target.value)])}
+                        className="appearance-none bg-neutral-50 border-r border-neutral-200 pl-3 pr-7 py-3 text-sm text-neutral-700 focus:outline-none cursor-pointer h-full"
+                      >
+                        {COUNTRY_CODES.map((c, i) => (
+                          <option key={`${c.code}-${c.name}`} value={i}>
+                            {c.flag} {c.name} {c.code}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-neutral-400 pointer-events-none" />
+                    </div>
+                    <input
+                      type="tel"
+                      value={input}
+                      onChange={(e) => setInput(e.target.value.replace(/[^\d\s\-().+]/g, ''))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendMessage(`${countryCode.code} ${input}`); setInput(''); } }}
+                      placeholder="000 000 0000"
+                      className="flex-1 px-3 py-3 text-sm focus:outline-none bg-white"
+                      disabled={state.isLoading}
+                    />
+                  </div>
+                ) : (
+                  <textarea
+                    ref={inputRef}
+                    value={input}
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      if (activeMenuMsgIdx !== null) setMenuSelections([]);
+                    }}
+                    onKeyDown={handleKeyDown}
+                    placeholder={activeMenuMsgIdx !== null ? 'Select items above or type here…' : 'Type your message…'}
+                    className="flex-1 resize-none border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent min-h-[52px] max-h-[120px]"
+                    rows={1}
+                    disabled={state.isLoading}
+                  />
+                )}
+                <button
+                  onClick={() => {
+                    if (isPhoneMode) {
+                      handleSendMessage(`${countryCode.code} ${input}`);
+                      setInput('');
+                    } else {
+                      handleSendMessage();
+                    }
+                  }}
+                  disabled={!input.trim() || state.isLoading}
+                  className="bg-black text-white p-3 rounded-xl hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                >
+                  {state.isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                </button>
+              </div>
+              <p className="text-xs text-neutral-400 mt-2 text-center">
+                {isPhoneMode
+                  ? 'Select your country code and enter your phone number'
+                  : activeMenuMsgIdx !== null
+                    ? 'Click cards to select · Send to confirm'
+                    : <>Shift+Enter for new line · Use <span className="font-mono text-neutral-600">@ai</span> to update previous items</>
+                }
+              </p>
+            </div>
+          );
+        })()}
       </div>
     </>
   );

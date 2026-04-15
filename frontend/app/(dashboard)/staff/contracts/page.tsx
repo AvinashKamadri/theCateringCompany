@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { RoleGuard } from '@/components/auth/RoleGuard';
 import { CheckCircle, XCircle, Clock, Eye, Send, Loader2, AlertCircle } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
@@ -149,6 +150,7 @@ export default function StaffContractsPage() {
   }
 
   return (
+    <RoleGuard role="staff">
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
@@ -347,5 +349,6 @@ export default function StaffContractsPage() {
         )}
       </div>
     </div>
+    </RoleGuard>
   );
 }

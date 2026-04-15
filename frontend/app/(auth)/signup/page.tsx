@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2, KeyRound } from "lucide-react";
@@ -9,7 +9,12 @@ import { useAuthStore } from "@/lib/store/auth-store";
 
 export default function SignUpPage() {
   const router = useRouter();
-  const setUser = useAuthStore((state) => state.setUser);
+  const { setUser, isAuthenticated } = useAuthStore();
+
+  // If already authenticated (e.g. back-button after signup), push forward
+  useEffect(() => {
+    if (isAuthenticated) router.replace('/projects');
+  }, [isAuthenticated, router]);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -46,9 +51,9 @@ export default function SignUpPage() {
       }
       setUser(data.user);
       if (data.joined_project?.id) {
-        router.push(`/projects/${data.joined_project.id}`);
+        router.replace(`/projects/${data.joined_project.id}`);
       } else {
-        router.push("/chat");
+        router.replace("/chat");
       }
     } catch (err: any) {
       setError(err.message || "Failed to create account.");

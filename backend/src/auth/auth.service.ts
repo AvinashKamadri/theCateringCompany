@@ -279,10 +279,12 @@ export class AuthService {
     sessionId: string,
     email: string,
   ): Promise<{ accessToken: string; refreshToken: string }> {
+    const role = email.endsWith('@catering-company.com') ? 'staff' : 'host';
     const accessToken = this.jwtService.sign({
       sub: userId,
       sessionId,
       email,
+      role,
     });
 
     const refreshTokenValue = randomUUID();

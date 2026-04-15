@@ -1,44 +1,75 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+interface JwtPayload {
+  sub: string;
+  email: string;
+  role?: string;
+  exp?: number;
+}
+
 /**
- * Lightweight JWT expiry check — no signature verification needed here,
- * that's the backend's job. We just need to know if the token is expired
- * so we don't bounce the user in a loop when the cookie is stale.
+ * Decode JWT payload without verifying signature.
+ * Returns null if malformed or expired.
  */
-function isJwtExpired(token: string): boolean {
+function decodeJwt(token: string): JwtPayload | null {
   try {
-    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-    // exp is in seconds; Date.now() is ms
-    return typeof payload.exp === 'number' && payload.exp * 1000 < Date.now();
+    const payload: JwtPayload = JSON.parse(
+      atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
+    );
+    if (typeof payload.exp === 'number' && payload.exp * 1000 < Date.now()) {
+      return null; // expired
+    }
+    return payload;
   } catch {
-    return true; // malformed = treat as expired
+    return null;
   }
 }
 
+// Routes only accessible when NOT authenticated
+const AUTH_ROUTES = ['/signin', '/signup'];
+
+// Routes that require authentication
+const PROTECTED_ROUTES = ['/dashboard', '/projects', '/crm', '/messages', '/contracts', '/chat', '/staff'];
+
+// Routes that require staff role
+const STAFF_ONLY_ROUTES = ['/staff', '/crm'];
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
   const jwtCookie = request.cookies.get('app_jwt');
-  const hasValidCookie = !!jwtCookie?.value && !isJwtExpired(jwtCookie.value);
+  const payload = jwtCookie?.value ? decodeJwt(jwtCookie.value) : null;
+  const isAuthenticated = !!payload;
+  const isStaff = payload?.role === 'staff' ||
+    (payload?.email?.endsWith('@catering-company.com') ?? false);
 
-  // Protected routes that require authentication
-  const protectedRoutes = ['/dashboard', '/projects', '/crm', '/messages', '/contracts', '/chat', '/staff'];
-  const isProtectedRoute = protectedRoutes.some((route) => pathname.startsWith(route));
+  const isAuthRoute = AUTH_ROUTES.some((r) => pathname.startsWith(r));
+  const isProtectedRoute = PROTECTED_ROUTES.some((r) => pathname.startsWith(r));
+  const isStaffOnlyRoute = STAFF_ONLY_ROUTES.some((r) => pathname.startsWith(r));
 
-  // Auth routes that should redirect if already authenticated
-  const authRoutes = ['/signin', '/signup'];
-  const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
-
-  // If trying to access protected route without a valid (non-expired) cookie → signin
-  if (isProtectedRoute && !hasValidCookie) {
+  // 1. Unauthenticated user → protected route: send to signin with return URL
+  if (isProtectedRoute && !isAuthenticated) {
     const url = new URL('/signin', request.url);
     url.searchParams.set('redirect', pathname + request.nextUrl.search);
     return NextResponse.redirect(url);
   }
 
-  // If trying to access auth routes with a valid cookie → projects
-  if (isAuthRoute && hasValidCookie) {
+  // 2. Authenticated user → auth route (signin/signup): send to projects
+  if (isAuthRoute && isAuthenticated) {
     return NextResponse.redirect(new URL('/projects', request.url));
+  }
+
+  // 3. Non-staff user → staff-only route: send to projects (silent 403)
+  if (isStaffOnlyRoute && isAuthenticated && !isStaff) {
+    return NextResponse.redirect(new URL('/projects', request.url));
+  }
+
+  // 4. Root path: redirect based on auth state
+  if (pathname === '/') {
+    return NextResponse.redirect(
+      new URL(isAuthenticated ? '/projects' : '/signin', request.url)
+    );
   }
 
   return NextResponse.next();
@@ -46,6 +77,7 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    '/',
     '/dashboard/:path*',
     '/projects/:path*',
     '/crm/:path*',

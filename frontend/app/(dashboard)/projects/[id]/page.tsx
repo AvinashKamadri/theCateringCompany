@@ -11,6 +11,7 @@ import {
   Calendar, Users, MapPin, FileText, MessageSquare, Loader2,
   ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield, Link2,
 } from 'lucide-react';
+import BentoInfoCard from '@/components/ui/BentoInfoCard';
 
 interface Contract {
   id: string;
@@ -276,7 +277,7 @@ export default function ProjectDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
 
           {/* ── Event Details ── spans 2 cols */}
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-6">
+          <BentoInfoCard className="lg:col-span-2 p-6">
             <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Event Details</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
               {project.event_date && (
@@ -324,12 +325,12 @@ export default function ProjectDetailPage() {
                 <p className="text-sm text-neutral-700 mt-1">{summary.special_requests}</p>
               </div>
             )}
-          </div>
+          </BentoInfoCard>
 
           {/* ── Status + Contract ── 1 col */}
           <div className="flex flex-col gap-4">
             {/* Status tile */}
-            <div className="bg-white rounded-2xl border border-neutral-200 p-5">
+            <BentoInfoCard className="p-5">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Status</p>
               <span className={cn(
                 'inline-flex px-3 py-1.5 rounded-xl text-xs font-semibold',
@@ -339,11 +340,11 @@ export default function ProjectDetailPage() {
               )}>
                 {project.status}
               </span>
-            </div>
+            </BentoInfoCard>
 
             {/* Contract tile */}
             {contract ? (
-              <div className="bg-white rounded-2xl border border-neutral-200 p-5">
+              <BentoInfoCard className="p-5">
                 <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Contract</p>
                 <div className="space-y-2 mb-4">
                   <div className="flex items-center justify-between">
@@ -369,9 +370,9 @@ export default function ProjectDetailPage() {
                 >
                   <FileText className="h-3.5 w-3.5" /> View Contract
                 </button>
-              </div>
+              </BentoInfoCard>
             ) : (
-              <div className="bg-neutral-900 rounded-2xl p-5 text-white">
+              <BentoInfoCard className="p-5 bg-neutral-900! border-neutral-700!" glowColor="255, 255, 255">
                 <p className="text-sm font-semibold mb-1">No contract yet</p>
                 <p className="text-xs text-neutral-400 mb-4">
                   {summary.thread_id ? 'The intake is in progress.' : 'Complete the AI intake to generate a contract.'}
@@ -383,13 +384,13 @@ export default function ProjectDetailPage() {
                   <MessageSquare className="h-3.5 w-3.5" />
                   {summary.thread_id ? 'Continue Intake' : 'Start AI Intake'}
                 </button>
-              </div>
+            </BentoInfoCard>
             )}
           </div>
 
           {/* ── Client ── 1 col */}
           {(summary.client_name || summary.contact_email || summary.contact_phone || summary.name) && (
-            <div className="bg-white rounded-2xl border border-neutral-200 p-6">
+            <BentoInfoCard className="p-6">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Client</p>
               <div className="space-y-3">
                 {(summary.client_name || summary.name) && (
@@ -411,12 +412,12 @@ export default function ProjectDetailPage() {
                   </div>
                 )}
               </div>
-            </div>
+            </BentoInfoCard>
           )}
 
           {/* ── Menu ── spans 2 cols */}
           {menuItems.length > 0 && (
-            <div className={cn('bg-white rounded-2xl border border-neutral-200 p-6', (summary.client_name || summary.name) ? 'lg:col-span-2' : 'lg:col-span-3')}>
+            <BentoInfoCard className={cn('p-6', (summary.client_name || summary.name) ? 'lg:col-span-2' : 'lg:col-span-3')}>
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Menu</p>
               <div className="space-y-4">
                 {summary.appetizers?.length > 0 && (
@@ -450,23 +451,23 @@ export default function ProjectDetailPage() {
                   </div>
                 )}
               </div>
-            </div>
+            </BentoInfoCard>
           )}
 
           {/* ── Add-ons ── 1 col */}
           {addons.length > 0 && (
-            <div className="bg-white rounded-2xl border border-neutral-200 p-6">
+            <BentoInfoCard className="p-6">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Add-ons</p>
               <div className="flex flex-wrap gap-1.5">
                 {addons.map((addon: string, i: number) => (
                   <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{addon}</span>
                 ))}
               </div>
-            </div>
+            </BentoInfoCard>
           )}
 
           {/* ── Collaborators ── spans full width */}
-          <div className="lg:col-span-3 bg-white rounded-2xl border border-neutral-200 p-6">
+          <BentoInfoCard className="lg:col-span-3 p-6" enableTilt={false}>
             <div className="flex items-center justify-between mb-5">
               <div>
                 <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Collaborators</p>
@@ -595,7 +596,7 @@ export default function ProjectDetailPage() {
                 ))}
               </div>
             )}
-          </div>
+          </BentoInfoCard>
 
         </div>
       </div>

@@ -27,47 +27,6 @@
   transform: skew(-15deg) scaleY(0.6);
 }
 
-.folder.open {
-  transform: translateY(-12px);
-}
-
-.folder.open .paper:nth-child(1) {
-  transform: translate(-115%, -145%) rotateZ(-18deg);
-  width: 90%;
-  height: 95%;
-}
-
-.folder.open .paper:nth-child(1):hover {
-  transform: translate(-115%, -145%) rotateZ(-18deg) scale(1.06);
-}
-
-.folder.open .paper:nth-child(2) {
-  transform: translate(20%, -145%) rotateZ(18deg);
-  width: 90%;
-  height: 95%;
-}
-
-.folder.open .paper:nth-child(2):hover {
-  transform: translate(20%, -145%) rotateZ(18deg) scale(1.06);
-}
-
-.folder.open .paper:nth-child(3) {
-  transform: translate(-50%, -160%) rotateZ(0deg);
-  width: 92%;
-  height: 95%;
-}
-
-.folder.open .paper:nth-child(3):hover {
-  transform: translate(-50%, -160%) rotateZ(0deg) scale(1.06);
-}
-
-.folder.open .folder__front {
-  transform: skew(15deg) scaleY(0.6);
-}
-
-.folder.open .right {
-  transform: skew(-15deg) scaleY(0.6);
-}
 
 .folder__back {
   position: relative;

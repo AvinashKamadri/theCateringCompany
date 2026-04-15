@@ -39,7 +39,8 @@
       "Bash(grep -E '\\\\.\\(py|ts|js\\)$')",
       "Read(//c/Users/avina/projects/flashback/**)",
       "Read(//c/Users/avina/.claude/projects/c--Users-avina-projects-flashback-TheCateringCompany/memory/**)",
-      "Bash(timeout 10 npx ts-node -e ':*)"
+      "Bash(timeout 10 npx ts-node -e ':*)",
+      "Bash(npx next:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\avina\\projects\\flashback\\TheCateringCompanyAgent\\agent\\nodes"

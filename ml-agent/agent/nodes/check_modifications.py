@@ -187,6 +187,26 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
             from agent.nodes.menu import _resolve_to_db_items, _parse_slot_items
             from database.db_manager import load_menu_by_category
             slot_label = _get_slot_label(target_slot)
+
+            # Detect skip/clear/remove-all intent
+            skip_intent = bool(re.search(
+                r'\b(skip|none|no |remove all|clear|don.?t want|no desserts?|no appetizers?|cancel)\b',
+                last_message, re.IGNORECASE
+            ))
+            if skip_intent:
+                now = datetime.now().isoformat()
+                old_value = state["slots"].get(target_slot, {}).get("value")
+                state["slots"][target_slot] = {
+                    "value": "no", "filled": True, "modified_at": now,
+                    "modification_history": [{"old_value": old_value, "new_value": "no", "timestamp": now}],
+                }
+                confirm = f"Done! I've cleared your {slot_label}."
+                response = f"{confirm}\n\n{pending_question}" if pending_question else confirm
+                state["messages"] = add_ai_message(state, response)
+                restored_node = _adjust_node_for_slot_change(previous_node, state["slots"])
+                state["current_node"] = restored_node
+                return state
+
             current_value = state["slots"].get(target_slot, {}).get("value") or ""
             current_items = _parse_slot_items(current_value)
 

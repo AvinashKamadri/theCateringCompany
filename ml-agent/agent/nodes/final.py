@@ -395,8 +395,10 @@ FORMAT RULES:
 - Keep it short and professional"""
 
     response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\nGenerate a clean event summary for the client. "
-        "No pricing, no billing, no legal terms. Just a clear recap of everything they selected.",
+        "You are a professional catering assistant generating an event summary. "
+        "Generate a clean, complete event summary. Include ALL details provided. "
+        "No pricing, no billing, no legal terms. This is NOT a conversation — do NOT ask any questions. "
+        "Just output the formatted summary.",
         contract_prompt
     )
 

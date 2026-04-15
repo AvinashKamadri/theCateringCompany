@@ -119,6 +119,41 @@ async def _log_generation(system_prompt: str, user_message: str, response_text: 
         logger.warning(f"Failed to log AI generation: {e}")
 
 
+def build_numbered_list(items: list[dict], show_price: bool = True, category_headers: bool = False,
+                        categories: dict | None = None) -> str:
+    """Build a numbered list from DB items in Python — never let the LLM render this.
+
+    Args:
+        items: flat list of {"name": ..., "unit_price": ..., "price_type": ...}
+        show_price: whether to show prices
+        category_headers: whether to group by category
+        categories: dict of {category_name: [items]} if category_headers=True
+    """
+    lines = []
+    num = 1
+
+    if category_headers and categories:
+        for cat_name, cat_items in categories.items():
+            lines.append(f"\n{cat_name}")
+            for item in cat_items:
+                price = ""
+                if show_price and item.get("unit_price"):
+                    pt = item.get("price_type", "per_person")
+                    price = f" (${item['unit_price']:.2f}/{pt})" if pt != "flat" else f" (${item['unit_price']:.2f})"
+                lines.append(f"{num}. {item['name']}{price}")
+                num += 1
+    else:
+        for item in items:
+            price = ""
+            if show_price and item.get("unit_price"):
+                pt = item.get("price_type", "per_person")
+                price = f" (${item['unit_price']:.2f})" if pt == "flat" else f" (${item['unit_price']:.2f}/{pt})"
+            lines.append(f"{num}. {item['name']}{price}")
+            num += 1
+
+    return "\n".join(lines)
+
+
 def normalize_item_name(name: str) -> str:
     """Strip price annotations for dedup: 'Chicken Satay ($3.50/pp)' → 'chicken satay'"""
     return re.sub(r'\s*\(\$[\d.]+(?:/\w+)?\)', '', name).strip().lower()

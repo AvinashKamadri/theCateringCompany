@@ -25,17 +25,20 @@ _MOD_VERSION = "v6"  # Bump to verify this code is running
 # Conditional nodes: mapping of node_name → (slot_name, valid_condition_fn, fallback_node)
 # If the slot no longer satisfies the condition, reroute to fallback_node.
 _CONDITIONAL_NODES = {
-    "wedding_message": ("event_type", lambda v: v and "wedding" in str(v).lower(), "collect_venue"),
-    "select_service_style": ("event_type", lambda v: v and "wedding" in str(v).lower(), "select_dishes"),
-    "ask_florals": ("event_type", lambda v: v and "wedding" in str(v).lower(), "ask_special_requests"),
+    "wedding_message":        ("event_type", lambda v: v and "wedding" in str(v).lower(), "collect_venue"),
+    "collect_fiance_name":    ("event_type", lambda v: v and "wedding" in str(v).lower(), "collect_event_date"),
+    "collect_birthday_person":("event_type", lambda v: v and "birthday" in str(v).lower(), "collect_event_date"),
+    "collect_company_name":   ("event_type", lambda v: v and "corporate" in str(v).lower(), "collect_event_date"),
+    "select_service_style":   ("event_type", lambda v: v and "wedding" in str(v).lower(), "select_dishes"),
+    "ask_florals":            ("event_type", lambda v: v and "wedding" in str(v).lower(), "ask_special_requests"),
 }
 
 
 def _adjust_node_for_slot_change(node: str, slots: dict) -> str:
     """Re-route conditional nodes when the underlying slot no longer matches.
 
-    For example, if event_type changed from Wedding to Birthday,
-    'wedding_message' should become 'collect_venue' instead.
+    For example, if event_type changed from Corporate to Wedding,
+    'collect_company_name' should become 'collect_fiance_name' instead.
     """
     rule = _CONDITIONAL_NODES.get(node)
     if not rule:
@@ -46,7 +49,18 @@ def _adjust_node_for_slot_change(node: str, slots: dict) -> str:
     current_value = slot_data.get("value")
 
     if not condition_fn(current_value):
-        logger.debug("[CHECK_MODIFICATIONS] Rerouting %s -> %s (slot '%s' = '%s')", node, fallback, slot_name, current_value)
+        # For event_type changes, route to the NEW event type's context node
+        if slot_name == "event_type" and current_value:
+            val = str(current_value).lower()
+            if "wedding" in val:
+                fallback = "collect_fiance_name"
+            elif "birthday" in val:
+                fallback = "collect_birthday_person"
+            elif "corporate" in val:
+                fallback = "collect_company_name"
+            else:
+                fallback = "collect_event_date"
+        print(f"[CHECK_MODIFICATIONS] Rerouting {node} -> {fallback} (slot '{slot_name}' = '{current_value}')")
         return fallback
 
     return node
@@ -91,11 +105,11 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
     so the conversation never jumps ahead.
     """
     state = dict(state)
-    logger.debug("[CHECK_MODIFICATIONS %s] Entered check_modifications_node", _MOD_VERSION)
+    print(f"\n[CHECK_MODIFICATIONS {_MOD_VERSION}] Entered check_modifications_node")
 
     # Remember where we were before the @AI interrupt
     previous_node = state.get("current_node", "start")
-    logger.debug("[CHECK_MODIFICATIONS %s] previous_node = %s", _MOD_VERSION, previous_node)
+    print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] previous_node = {previous_node}")
 
     # Extract the pending question BEFORE we process (from the last AI message)
     pending_question = _extract_pending_question(state)
@@ -136,53 +150,100 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
         target_slot = detection_result.get("target_slot")
         new_value = detection_result.get("new_value")
 
-        # ── Menu slots: appetizers / selected_dishes — use item merge logic ──
-        if target_slot in ("appetizers", "selected_dishes"):
+        # ── Force desserts slot if message mentions a known dessert sub-item ──
+        # Mini dessert options live in description fields, not as standalone DB items,
+        # so detect_slot_modification guesses the wrong slot. Resolve from DB instead.
+        from database.db_manager import load_menu_by_category
+        menu = await load_menu_by_category()
+        dessert_sub_items = set()
+        for cat_name, items in menu.items():
+            if "dessert" in cat_name.lower() or "cake" in cat_name.lower():
+                for item in items:
+                    desc = item.get("description") or ""
+                    for part in desc.split(","):
+                        part = part.strip().lower()
+                        if part:
+                            dessert_sub_items.add(part)
+        msg_lower = last_message.lower()
+        if any(sub in msg_lower for sub in dessert_sub_items):
+            target_slot = "desserts"
+
+        # ── Rentals / utensils — simple string slots, not menu items ──
+        if target_slot in ("rentals", "utensils"):
+            slot_label = _get_slot_label(target_slot)
+            old_value = state["slots"].get(target_slot, {}).get("value")
+            now = datetime.now().isoformat()
+            history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
+            history.append({"old_value": old_value, "new_value": new_value, "timestamp": now})
+            state["slots"][target_slot] = {
+                "value": new_value, "filled": True, "modified_at": now, "modification_history": history,
+            }
+            confirm = f"Done! I've updated your {slot_label} to '{new_value}'."
+            response = f"{confirm}\n\n{pending_question}" if pending_question else confirm
+            state["messages"] = add_ai_message(state, response)
+
+        # ── Menu slots: appetizers / selected_dishes / desserts — use item merge logic ──
+        elif target_slot in ("appetizers", "selected_dishes", "desserts", "drinks"):
             from agent.nodes.menu import _resolve_to_db_items, _parse_slot_items
+            from database.db_manager import load_menu_by_category
             slot_label = _get_slot_label(target_slot)
             current_value = state["slots"].get(target_slot, {}).get("value") or ""
             current_items = _parse_slot_items(current_value)
 
-            # Detect remove / add intent from the raw user message
-            remove_intent = bool(re.search(r'\b(remove|delete|take out|drop)\b', last_message, re.IGNORECASE))
-            add_intent = bool(re.search(r'\badd\b', last_message, re.IGNORECASE))
+            # If user said "modify/change/update X" without specific items,
+            # show current selection and re-present the menu so they can pick
+            vague_modify = bool(re.search(
+                r'\b(modify|change|update|edit|redo|revise|swap)\b', last_message, re.IGNORECASE
+            )) and not re.search(
+                r'\b(add|remove|delete|drop|take out)\b', last_message, re.IGNORECASE
+            )
             items_text = str(new_value).strip()
+            # Check if the "new_value" is just the action word itself (no actual items)
+            action_words = {"modify", "change", "update", "edit", "redo", "revise", "swap",
+                            "the appetizers", "the menu", "the dishes", "the desserts",
+                            "appetizers", "menu", "dishes", "desserts"}
+            is_vague = vague_modify or items_text.lower() in action_words
 
-            # ── Extract remove-items and add-items separately when both appear ──
-            # Pattern: "remove X and add Y" or "remove X, add Y"
-            remove_text = items_text
-            add_text = ""
-            if remove_intent and add_intent:
-                # Try to split the message on "and add" or ", add"
-                split_match = re.split(r'(?:,?\s+and\s+add\b|\badd\b)', last_message, maxsplit=1, flags=re.IGNORECASE)
-                if len(split_match) == 2:
-                    add_text = split_match[1].strip()
-                    # remove_text: everything before "add" in the LLM's new_value, or use remove section
-                    remove_section = re.split(r'\b(?:and\s+)?add\b', items_text, maxsplit=1, flags=re.IGNORECASE)[0].strip()
-                    remove_text = remove_section if remove_section else items_text
+            if is_vague:
+                # Re-present current items and the full menu for this slot
+                menu = await load_menu_by_category()
+                menu_lines = []
+                idx = 1
+                for cat_name, cat_items in menu.items():
+                    if target_slot == "desserts" and "dessert" not in cat_name.lower() and "cake" not in cat_name.lower():
+                        continue
+                    if target_slot == "appetizers" and "hors" not in cat_name.lower() and "platter" not in cat_name.lower() and "canape" not in cat_name.lower():
+                        continue
+                    for item in cat_items:
+                        menu_lines.append(f"{idx}. {item['name']}")
+                        idx += 1
+                menu_str = "\n".join(menu_lines) if menu_lines else "Menu items not available."
+
+                confirm = (
+                    f"Your current {slot_label}: **{current_value or 'none selected'}**\n\n"
+                    f"Here's the full menu — tell me what you'd like to add, remove, or swap:\n{menu_str}"
+                )
+                response = f"{confirm}\n\n{pending_question}" if pending_question else confirm
+                state["messages"] = add_ai_message(state, response)
+                # Stay on same node — don't advance
+                restored_node = _adjust_node_for_slot_change(previous_node, state["slots"])
+                state["current_node"] = restored_node
+                return state
+
+            # Detect remove vs. add intent from the raw user message
+            remove_intent = bool(re.search(r'\b(remove|delete|take out|drop)\b', last_message, re.IGNORECASE))
 
             if remove_intent:
-                matched, _ = await _resolve_to_db_items(remove_text)
+                matched, _ = await _resolve_to_db_items(items_text)
                 remove_names = {i["name"].lower() for i in matched}
-                remove_kws = [p.strip().lower() for p in remove_text.split(",") if p.strip()]
+                remove_kws = [p.strip().lower() for p in items_text.split(",") if p.strip()]
                 updated = [
                     n for n in current_items
                     if n.lower() not in remove_names
                     and not any(kw and kw in n.lower() for kw in remove_kws)
                 ]
-                removed_items = [n for n in current_items if n not in updated]
-
-                # Also process add if combined
-                added_items = []
-                if add_intent and add_text:
-                    add_matched, _ = await _resolve_to_db_items(add_text)
-                    existing_lower = {n.lower() for n in updated}
-                    new_names = [i["name"] for i in add_matched if i["name"].lower() not in existing_lower]
-                    updated = updated + new_names
-                    added_items = new_names
-
-                _, resolved = await _resolve_to_db_items(", ".join(updated)) if updated else ([], "")
-                action_word = "removed"
+                _, resolved = await _resolve_to_db_items(", ".join(updated)) if updated else ([], current_value)
+                action_word = "removed from"
             else:
                 matched, _ = await _resolve_to_db_items(items_text)
                 existing_lower = {n.lower() for n in current_items}
@@ -191,31 +252,7 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                 _, resolved = await _resolve_to_db_items(", ".join(merged)) if merged else ([], current_value)
                 action_word = "added to"
 
-            if remove_intent:
-                actually_resolved = resolved if resolved else ""
-                value_changed = set(updated) != set(current_items)
-                if value_changed and (removed_items or (add_intent and add_text)):
-                    old_value = current_value
-                    now = datetime.now().isoformat()
-                    history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
-                    history.append({"old_value": old_value, "new_value": actually_resolved, "timestamp": now})
-                    state["slots"][target_slot] = {
-                        "value": actually_resolved,
-                        "filled": bool(updated),
-                        "modified_at": now,
-                        "modification_history": history,
-                    }
-                    parts = []
-                    if removed_items:
-                        parts.append(f"Removed **{', '.join(removed_items)}**")
-                    if add_intent and 'added_items' in dir() and added_items:
-                        parts.append(f"Added **{', '.join(added_items)}**")
-                    action_summary = " and ".join(parts) if parts else "Updated"
-                    remaining_str = actually_resolved if actually_resolved else "none"
-                    confirm = f"Done! {action_summary} from your {slot_label}. Updated {slot_label}: {remaining_str}"
-                else:
-                    confirm = f"I couldn't find that item in your {slot_label}. Current {slot_label}: {current_value or 'none selected'}."
-            elif resolved and resolved != current_value:
+            if resolved and resolved != current_value:
                 old_value = current_value
                 now = datetime.now().isoformat()
                 history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
@@ -226,7 +263,7 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                     "modified_at": now,
                     "modification_history": history,
                 }
-                confirm = f"Done! Updated your {slot_label}: **{resolved}**"
+                confirm = f"Done! I've {action_word} your {slot_label}: **{resolved}**"
             else:
                 confirm = f"I couldn't find those items on the menu. Your {slot_label} remain: {current_value or 'none selected'}."
 
@@ -236,11 +273,11 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
         else:
             # ── Scalar slots: use standard date-resolve + validate path ──
             resolved_value = str(new_value)
-            logger.debug("[CHECK_MODIFICATIONS %s] target_slot=%s, raw new_value=%s", _MOD_VERSION, target_slot, new_value)
+            print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] target_slot={target_slot}, raw new_value={new_value}")
             if target_slot == "event_date" and _contains_relative_date(resolved_value):
-                logger.debug("[CHECK_MODIFICATIONS %s] Resolving relative date: %s", _MOD_VERSION, resolved_value)
+                print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Resolving relative date: {resolved_value}")
                 resolved_value = await _resolve_relative_date(resolved_value)
-                logger.debug("[CHECK_MODIFICATIONS %s] Resolved to: %s", _MOD_VERSION, resolved_value)
+                print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Resolved to: {resolved_value}")
 
             validation_result = await validate_slot.ainvoke({
                 "slot_name": target_slot,
@@ -264,6 +301,16 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                 state["slots"][target_slot]["filled"] = True
                 state["slots"][target_slot]["modified_at"] = datetime.now().isoformat()
 
+                # Clear stale context slots when event_type changes
+                if target_slot == "event_type":
+                    _CONTEXT_SLOTS = ["partner_name", "company_name", "honoree_name"]
+                    for stale in _CONTEXT_SLOTS:
+                        if stale in state["slots"] and state["slots"][stale].get("filled"):
+                            state["slots"][stale] = {
+                                "value": None, "filled": False,
+                                "modified_at": None, "modification_history": [],
+                            }
+
                 slot_label = _get_slot_label(target_slot)
 
                 if old_value:
@@ -284,12 +331,7 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
 
     # CRITICAL: Stay on the same node — never jump ahead
     # EXCEPT: reroute conditional nodes when their condition no longer holds
-    # EXCEPT: after processing a menu change from collect_menu_changes → go to ask_menu_changes
-    #         so user gets "are you happy with this?" not "what would you like to change?"
-    if previous_node == "collect_menu_changes" and detection_result.get("detected"):
-        restored_node = "ask_menu_changes"
-    else:
-        restored_node = _adjust_node_for_slot_change(previous_node, state["slots"])
+    restored_node = _adjust_node_for_slot_change(previous_node, state["slots"])
     state["current_node"] = restored_node
-    logger.debug("[CHECK_MODIFICATIONS %s] Exiting. current_node: %s (previous: %s)", _MOD_VERSION, restored_node, previous_node)
+    print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Exiting. current_node: {restored_node} (previous: {previous_node})")
     return state

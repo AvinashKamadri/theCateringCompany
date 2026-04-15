@@ -18,23 +18,33 @@ _NODE_COLLECTS: dict[str, str | None] = {
     "select_service_type": "service_type",
     "select_event_type": "event_type",
     "wedding_message": None,
+    "collect_fiance_name": "partner_name",
+    "collect_birthday_person": "honoree_name",
+    "collect_company_name": "company_name",
+    "collect_contact": "email",
     "collect_venue": "venue",
     "collect_guest_count": "guest_count",
     "select_service_style": "service_style",
     "ask_appetizers": "appetizers",
     "select_appetizers": "appetizers",
+    "collect_meal_style": "meal_style",
+    "collect_appetizer_style": "appetizer_style",
     "present_menu": "selected_dishes",
     "select_dishes": "selected_dishes",
     "menu_design": None,
     "ask_menu_changes": "selected_dishes",
     "collect_menu_changes": "selected_dishes",
+    "collect_tableware": "tableware",
+    "collect_drinks": "drinks",
+    "collect_bar_service": "drinks",
+    "collect_labor": "labor",
+    "offer_followup": "followup_call",
     "ask_utensils": "utensils",
     "select_utensils": "utensils",
     "ask_desserts": "desserts",
     "select_desserts": "desserts",
     "ask_more_desserts": "desserts",
     "ask_rentals": "rentals",
-    "ask_florals": "florals",
     "ask_special_requests": "special_requests",
     "collect_special_requests": "special_requests",
     "collect_dietary": "dietary_concerns",
@@ -46,27 +56,17 @@ _NODE_COLLECTS: dict[str, str | None] = {
 # Words/phrases that clearly signal the user wants to correct a PREVIOUS answer.
 _CORRECTION_SIGNALS = re.compile(
     r'\b(actually|wait|i meant|let me change|can you (change|update|fix)|'
-    r'change (my|the|guest|event|venue|date|name|service|utensil|rental|dessert)|'
-    r'update (my|the|guest|event|venue|date|name|service)|'
-    r'i want to (change|update)|'
+    r'change (my|the)|update (my|the)|i want to (change|update)|'
     r'correction|oh wait|no wait|sorry,?\s+i|i made a mistake|'
     r'i forgot to|i need to (change|update|fix)|'
-    r'make that|scratch that|'
-    r'set (my|the|guest|event|venue|date)|'
-    r'the (guest count|venue|date|name|service type|event type) (is|should be|was|needs to be)|'
-    r'is (the\s+)?\d+(st|nd|rd|th)?\s+not|'  # "is 4th not 2nd"
-    r'not\s+\d+(st|nd|rd|th)?|'  # "not 2nd", "not the 2nd"
-    r'\bwrong\s+(date|day|venue|name|number|count)\b)\b',
+    r'make that|scratch that)\b',
     re.IGNORECASE,
 )
 
 # Keyword sets per slot for detecting which slot the user is talking about.
 _SLOT_KEYWORDS: dict[str, list[str]] = {
     "name":          [r'\bmy name\b', r'\bname is\b', r'\bcall me\b'],
-    "event_date":    [r'\bthe date\b', r'\bmy date\b', r'\bevent date\b', r'\bdate is\b', r'\bdate to\b',
-                      r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
-                      r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\b',
-                      r'\bnext\s+(week|month|saturday|sunday|monday|friday)\b'],
+    "event_date":    [r'\bthe date\b', r'\bmy date\b', r'\bevent date\b', r'\bdate is\b', r'\bdate to\b'],
     "guest_count":   [r'\bguests?\b', r'\bguest count\b', r'\bpeople\b', r'\battendees?\b'],
     "venue":         [r'\bvenue\b', r'\blocation\b', r'\bplace\b', r'\baddress\b', r'\bheld at\b'],
     "service_type":  [r'\bdrop.?off\b', r'\bon.?site\b', r'\bservice type\b'],
@@ -83,59 +83,32 @@ _ADD_TO_PREV_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Remove/delete intent on any previously-collected item → always route to check_modifications
-# Note: "drop" alone is excluded because "drop off" / "drop-off" is a valid service type selection
-_REMOVE_INTENT_PATTERN = re.compile(
-    r'\b(remove|delete|take out|drop\s+(?!off)(?!-off)\w+|i (added|selected|chose|picked).+by mistake|by mistake.+(remove|delete|take out))\b',
-    re.IGNORECASE,
-)
-
 
 def _detect_off_topic_correction(msg: str, current_slot: str | None, filled_slots: set[str]) -> bool:
     """Return True if the message looks like a correction targeting a slot OTHER than the current one.
 
-    Criteria (A, B, or C):
+    Criteria (either A or B):
     A) Contains a correction signal + a slot keyword for a different slot
     B) Contains a correction signal + an explicit "add to previous" phrase
        (e.g. "wait let me also add X to the appetizers" — even if slot keyword is missing)
-    C) Starts with "no" + references a different slot (e.g. "no the venue is my home")
-       — user is rejecting the current question and redirecting to a different slot
     """
+    if not _CORRECTION_SIGNALS.search(msg):
+        return False
+
     msg_lower = msg.lower()
 
     # B) "wait/actually" + "also add / let me add / add X to the" — route to check_modifications
-    if _CORRECTION_SIGNALS.search(msg) and _ADD_TO_PREV_PATTERN.search(msg_lower):
+    #    so it can figure out which slot the item belongs to
+    if _ADD_TO_PREV_PATTERN.search(msg_lower):
         return True
 
     # A) Correction signal + explicit slot keyword for a different slot
-    if _CORRECTION_SIGNALS.search(msg):
-        for slot, patterns in _SLOT_KEYWORDS.items():
-            if slot == current_slot:
-                continue
-            for pattern in patterns:
-                if re.search(pattern, msg_lower):
-                    return True
-
-    # C) "no [the/my/...] <slot-keyword>" — user correcting/redirecting mid-flow
-    if re.match(r'^no[\s,]', msg_lower):
-        for slot, patterns in _SLOT_KEYWORDS.items():
-            if slot == current_slot:
-                continue
-            for pattern in patterns:
-                if re.search(pattern, msg_lower):
-                    return True
-
-    # D) Message contains "not [number]" or "is [date] not" → date correction without signal word
-    #    e.g. "next saturday is 4th not 2nd", "its the 4th not the 2nd"
-    if re.search(r'\bnot\s+\d+|\bis\s+\w*\d+\w*\s+not\b', msg_lower):
-        if current_slot != "event_date":
-            for pattern in _SLOT_KEYWORDS.get("event_date", []):
-                if re.search(pattern, msg_lower):
-                    return True
-            # Also catch plain number corrections at date collection stage when a date is already filled
-            if "event_date" in filled_slots:
+    for slot, patterns in _SLOT_KEYWORDS.items():
+        if slot == current_slot:
+            continue  # Talking about the current slot is normal, not an off-topic correction
+        for pattern in patterns:
+            if re.search(pattern, msg_lower):
                 return True
-
     return False
 
 
@@ -160,11 +133,7 @@ def route_message(state: ConversationState) -> str:
 
     current = state.get("current_node", "start")
 
-    # 2. Remove/delete intent on any item → always route to check_modifications
-    if _REMOVE_INTENT_PATTERN.search(last_user_msg):
-        return "check_modifications"
-
-    # 3. Natural correction for a slot different from what we're currently asking
+    # 2. Natural correction for a slot different from what we're currently asking
     current_slot = _NODE_COLLECTS.get(current)
     filled_slots = {
         name for name, data in state.get("slots", {}).items()
@@ -173,27 +142,8 @@ def route_message(state: ConversationState) -> str:
     if _detect_off_topic_correction(last_user_msg, current_slot, filled_slots):
         return "check_modifications"
 
-
-    valid_nodes = {
-        "start", "collect_name", "collect_event_date", "select_service_type",
-        "select_event_type", "wedding_message", "collect_venue",
-        "collect_guest_count", "present_menu", "select_service_style",
-        "select_dishes", "ask_appetizers", "select_appetizers",
-        "menu_design", "ask_menu_changes", "collect_menu_changes",
-        "ask_utensils", "select_utensils",
-        "ask_desserts", "select_desserts", "ask_more_desserts",
-        "ask_rentals", "ask_florals",
-        "ask_special_requests", "collect_special_requests",
-        "collect_dietary", "ask_anything_else", "collect_anything_else",
-        "generate_contract", "check_modifications",
-    }
-
-    # "complete" means contract was already generated — stay at generate_contract
-    # so post-contract messages don't restart the flow
-    if current == "complete":
-        return "generate_contract"
-
-    if current in valid_nodes:
+    from agent.nodes import NODE_MAP
+    if current in NODE_MAP:
         return current
 
     return "start"

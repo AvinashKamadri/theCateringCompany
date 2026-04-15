@@ -8,11 +8,16 @@ import { useAuthStore } from '@/lib/store/auth-store';
 import { apiClient } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
-const ALL_NAVIGATION = [
-  { name: 'CRM',       href: '/crm',      icon: Users,        staffOnly: true,  clientOnly: false },
-  { name: 'AI Intake', href: '/chat',     icon: Sparkles,     staffOnly: false, clientOnly: true  },
-  { name: 'Projects',  href: '/projects', icon: FolderKanban, staffOnly: false, clientOnly: false },
-  { name: 'Contracts', href: '/contracts', icon: FileText,    staffOnly: false, clientOnly: true  },
+const hostNavigation = [
+  { name: 'AI Intake',  href: '/chat',       icon: Sparkles },
+  { name: 'Projects',   href: '/projects',   icon: FolderKanban },
+  { name: 'Contracts',  href: '/contracts',  icon: FileText },
+];
+
+const staffNavigation = [
+  { name: 'Projects',   href: '/projects',   icon: FolderKanban },
+  { name: 'Contracts',  href: '/contracts',  icon: FileText },
+  { name: 'CRM',        href: '/crm',        icon: Users },
 ];
 
 export function AppNav() {
@@ -27,6 +32,9 @@ export function AppNav() {
   });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  const isStaff = user?.email?.endsWith('@catering-company.com') ?? false;
+  const navigation = isStaff ? staffNavigation : hostNavigation;
+
   const handleLogout = async () => {
     try { await apiClient.post('/auth/logout', {}); } catch { /* continue */ }
     // Clear the JWT cookie so middleware stops treating this session as authenticated
@@ -35,53 +43,59 @@ export function AppNav() {
     router.push('/signin');
   };
 
-  const userInitial = user?.email?.charAt(0).toUpperCase() ?? '?';
+  // Display name: use email prefix formatted nicely
+  const emailPrefix = user?.email?.split('@')[0] ?? '';
+  const displayName = emailPrefix
+    .split(/[._-]/)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(' ');
+
+  const userInitial = displayName.charAt(0).toUpperCase() || '?';
 
   return (
     <nav className="bg-white border-b border-neutral-200 fixed top-0 left-0 right-0 z-50 h-14">
-      <div className="px-4 sm:px-6 lg:px-8 h-full flex items-center justify-between">
-        {/* Left: logo + nav */}
-        <div className="flex items-center gap-7">
-          <Link href="/projects" className="flex items-center gap-2 shrink-0">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-black">
-              <span className="text-xs font-bold text-white">TC</span>
-            </div>
-            <span className="text-sm font-semibold text-black hidden sm:block tracking-tight">
-              TheCateringCompany
-            </span>
-          </Link>
-
-          <div className="hidden md:flex items-center gap-0.5">
-            {navigation.map((item) => {
-              const isActive = item.href === '/chat'
-                ? pathname === '/chat'
-                : pathname.startsWith(item.href);
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                    isActive
-                      ? 'bg-black text-white'
-                      : 'text-neutral-600 hover:text-black hover:bg-neutral-100'
-                  )}
-                >
-                  <item.icon className="h-3.5 w-3.5" />
-                  {item.name}
-                </Link>
-              );
-            })}
+      <div className="relative px-4 sm:px-6 h-full flex items-center">
+        {/* Left: logo */}
+        <Link href="/projects" className="flex items-center gap-2 shrink-0">
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-black">
+            <span className="text-xs font-bold text-white">TC</span>
           </div>
+          <span className="text-sm font-semibold text-black hidden sm:block tracking-tight">
+            The Catering company
+          </span>
+        </Link>
+
+        {/* Center: nav */}
+        <div className="hidden md:flex items-center gap-0.5 absolute left-1/2 -translate-x-1/2">
+          {navigation.map((item) => {
+            const isActive = item.href === '/chat'
+              ? pathname === '/chat'
+              : pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-black text-white'
+                    : 'text-neutral-600 hover:text-black hover:bg-neutral-100'
+                )}
+              >
+                <item.icon className="h-3.5 w-3.5" />
+                {item.name}
+              </Link>
+            );
+          })}
         </div>
 
-        {/* Right: user + logout */}
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-100 border border-neutral-200">
-              <span className="text-xs font-semibold text-black">{userInitial}</span>
+        {/* Right: user display + logout */}
+        <div className="flex items-center gap-3 ml-auto">
+          <div className="hidden sm:flex items-center gap-2">
+            <span className="text-sm text-neutral-700 font-medium hidden lg:block">{displayName}</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 border border-neutral-700 shrink-0">
+              <span className="text-xs font-semibold text-white">{userInitial}</span>
             </div>
-            <span className="text-sm text-neutral-600 hidden lg:block">{user?.email}</span>
           </div>
           <button
             onClick={handleLogout}

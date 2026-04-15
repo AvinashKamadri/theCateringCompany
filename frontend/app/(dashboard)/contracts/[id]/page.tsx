@@ -225,347 +225,264 @@ export default function ContractDetailPage() {
   const isPending = contract.status === 'pending_staff_approval';
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
+    <div className="min-h-screen bg-neutral-50">
       {/* Reject modal */}
       {showRejectModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Reject Contract</h2>
-              <button onClick={() => setShowRejectModal(false)} className="text-gray-400 hover:text-gray-600">
+              <h2 className="text-base font-semibold text-neutral-900">Reject Contract</h2>
+              <button onClick={() => setShowRejectModal(false)} className="text-neutral-400 hover:text-neutral-700">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <p className="text-sm text-gray-600 mb-3">
-              Provide a reason so the client understands what needs to change.
-            </p>
+            <p className="text-sm text-neutral-500 mb-3">Provide a reason so the client understands what needs to change.</p>
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
               placeholder="e.g. Menu details are incomplete, guest count needs confirmation..."
               rows={4}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
+              className="w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black resize-none"
             />
             <div className="flex gap-3 mt-4">
-              <button
-                onClick={() => setShowRejectModal(false)}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm"
-              >
-                Cancel
-              </button>
+              <button onClick={() => setShowRejectModal(false)} className="flex-1 px-4 py-2 border border-neutral-200 text-neutral-700 rounded-xl hover:bg-neutral-50 text-sm">Cancel</button>
               <button
                 onClick={handleReject}
                 disabled={rejecting || !rejectReason.trim()}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
               >
                 {rejecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ThumbsDown className="h-4 w-4" />}
-                Reject Contract
+                Reject
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-
-        {/* Header */}
-        <div className="mb-6">
-          <button
-            onClick={() => router.push(isStaff ? '/crm' : '/contracts')}
-            className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 mb-4 transition-colors"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            {isStaff ? 'CRM' : 'Contracts'}
+      {/* Header */}
+      <div className="bg-white border-b border-neutral-200">
+        <div className="max-w-6xl mx-auto px-6 py-5">
+          <button onClick={() => router.back()} className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-900 mb-4 transition-colors">
+            <ArrowLeft className="h-3.5 w-3.5" /> Back
           </button>
-
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                {contract.title || `Contract v${contract.version_number}`}
-              </h1>
+              <h1 className="text-xl font-bold text-neutral-900">{contract.title || `Contract v${contract.version_number}`}</h1>
               {project && (
-                <button
-                  onClick={() => router.push(`/projects/${project.id}`)}
-                  className="text-sm text-blue-600 hover:underline mt-1"
-                >
+                <button onClick={() => router.push(`/projects/${project.id}`)} className="text-sm text-neutral-500 hover:text-black mt-0.5 transition-colors">
                   {project.title}
                 </button>
               )}
             </div>
-
-            <span className={cn(
-              'inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border self-start',
-              statusCfg.style,
-            )}>
+            <span className={cn('inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border self-start', statusCfg.style)}>
               <StatusIcon className="h-4 w-4" />
               {statusCfg.label}
             </span>
           </div>
         </div>
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="max-w-6xl mx-auto px-6 py-6">
 
-          {/* Left — main content */}
-          <div className="lg:col-span-2 space-y-6">
-
-            {/* Staff action banner — shown only when pending and user is staff */}
-            {isStaff && isPending && (
-              <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-5">
-                <p className="text-sm font-semibold text-yellow-900 mb-1">Staff Review Required</p>
-                <p className="text-sm text-yellow-700 mb-4">
-                  Review the contract details below. Preview the PDF first, then approve to send to the client for signature, or reject with a reason.
-                </p>
-                {/* Preview PDF */}
-                <button
-                  onClick={handlePreviewPdf}
-                  disabled={previewing}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 mb-3 bg-white border border-yellow-400 text-yellow-900 rounded-lg hover:bg-yellow-100 disabled:opacity-50 text-sm font-medium"
-                >
-                  {previewing
-                    ? <Loader2 className="h-4 w-4 animate-spin" />
-                    : <FileText className="h-4 w-4" />}
-                  {previewing ? 'Generating PDF...' : contract.pdf_path ? 'Regenerate & View PDF' : 'Preview PDF'}
+        {/* Staff review banner — full width */}
+        {isStaff && isPending && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-4">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <p className="text-sm font-semibold text-amber-900">Staff Review Required</p>
+                <p className="text-xs text-amber-700 mt-0.5">Review the details, set pricing, preview the PDF, then approve or reject.</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button onClick={handlePreviewPdf} disabled={previewing}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-amber-300 text-amber-900 rounded-xl hover:bg-amber-50 disabled:opacity-50 text-xs font-medium">
+                  {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                  {previewing ? 'Generating…' : contract.pdf_path ? 'Regenerate PDF' : 'Preview PDF'}
                 </button>
-                {/* Approve / Reject */}
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleApprove}
-                    disabled={approving}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-                  >
-                    {approving
-                      ? <Loader2 className="h-4 w-4 animate-spin" />
-                      : <ThumbsUp className="h-4 w-4" />}
-                    {approving ? 'Approving...' : 'Approve & Send'}
-                  </button>
-                  <button
-                    onClick={() => setShowRejectModal(true)}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium"
-                  >
-                    <ThumbsDown className="h-4 w-4" />
-                    Reject
-                  </button>
+                <button onClick={handleApprove} disabled={approving || !hasPricingSaved} title={!hasPricingSaved ? 'Save pricing first' : undefined}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold">
+                  {approving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsUp className="h-3.5 w-3.5" />}
+                  Approve & Send
+                </button>
+                <button onClick={() => setShowRejectModal(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 text-xs font-semibold">
+                  <ThumbsDown className="h-3.5 w-3.5" /> Reject
+                </button>
+              </div>
+            </div>
+            {!hasPricingSaved && (
+              <p className="text-xs text-amber-700 font-medium mb-3 flex items-center gap-1">
+                <AlertCircle className="h-3.5 w-3.5" /> Save pricing below before approving.
+              </p>
+            )}
+            {/* Pricing editor */}
+            <div className="bg-white rounded-xl border border-amber-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-semibold text-amber-900 flex items-center gap-1"><DollarSign className="h-3.5 w-3.5" /> Pricing</p>
+                <button onClick={handleAutoCalculate} disabled={calculatingPricing}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-900 text-amber-50 rounded-lg hover:bg-amber-950 disabled:opacity-50 text-xs font-medium">
+                  {calculatingPricing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Calculator className="h-3 w-3" />}
+                  {calculatingPricing ? 'Calculating…' : 'Auto-Calculate'}
+                </button>
+              </div>
+              <div className="flex gap-3 mb-3">
+                <div className="flex-1">
+                  <label className="block text-xs text-amber-800 font-medium mb-1">Tax %</label>
+                  <div className="relative">
+                    <input type="number" min={0} max={50} step={0.1} value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value) || 0)}
+                      className="w-full border border-amber-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-400 pr-6" />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-amber-700">%</span>
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs text-amber-800 font-medium mb-1">Gratuity %</label>
+                  <div className="relative">
+                    <input type="number" min={0} max={50} step={0.5} value={gratuityRate} onChange={(e) => setGratuityRate(Number(e.target.value) || 0)}
+                      className="w-full border border-amber-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-400 pr-6" />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-amber-700">%</span>
+                  </div>
                 </div>
               </div>
-            )}
-
-            {/* Event Details */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Event Details</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {eventDate && (
-                  <div className="flex items-start gap-3">
-                    <Calendar className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide">Date</p>
-                      <p className="font-medium text-gray-900">{eventDate}</p>
-                    </div>
+              {lineItems.length > 0 && (
+                <div className="bg-amber-50 rounded-lg p-3 mb-3 text-xs text-amber-900 space-y-1">
+                  {pricingBreakdown?.packageName && <div className="flex justify-between"><span className="text-amber-700">Package</span><span>{pricingBreakdown.packageName} (${pricingBreakdown.packagePerPersonRate}/pp)</span></div>}
+                  <div className="flex justify-between"><span className="text-amber-700">Subtotal</span><span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                  <div className="flex justify-between"><span className="text-amber-700">Tax ({taxRate}%)</span><span>${pricingTax.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span className="text-amber-700">Gratuity ({gratuityRate}%)</span><span>${pricingGratuity.toLocaleString()}</span></div>
+                  <div className="flex justify-between font-semibold border-t border-amber-200 pt-1"><span>Grand Total</span><span>${pricingGrandTotal.toLocaleString()}</span></div>
+                  <div className="flex justify-between text-amber-700"><span>50% Deposit</span><span>${pricingDeposit.toLocaleString()}</span></div>
+                </div>
+              )}
+              <div className="space-y-2">
+                {lineItems.map((item, idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <input type="text" placeholder="Description" value={item.description}
+                      onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
+                      className="flex-1 border border-amber-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                    <input type="number" placeholder="Qty" min={1} value={item.quantity}
+                      onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, quantity: Number(e.target.value) || 1 } : li))}
+                      className="w-14 border border-amber-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                    <input type="number" placeholder="Price" min={0} value={item.unitPrice}
+                      onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, unitPrice: Number(e.target.value) || 0 } : li))}
+                      className="w-20 border border-amber-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                    <button onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))} className="text-red-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>
-                )}
-                {guestCount != null && (
-                  <div className="flex items-start gap-3">
-                    <Users className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide">Guests</p>
-                      <p className="font-medium text-gray-900">{guestCount}</p>
-                    </div>
-                  </div>
-                )}
-                {eventType !== '—' && (
-                  <div className="flex items-start gap-3">
-                    <FileText className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide">Event Type</p>
-                      <p className="font-medium text-gray-900">{eventType}</p>
-                    </div>
-                  </div>
-                )}
-                {serviceType && (
-                  <div className="flex items-start gap-3">
-                    <Building2 className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide">Service Type</p>
-                      <p className="font-medium text-gray-900">{serviceType}</p>
-                    </div>
-                  </div>
-                )}
-                {venueName && (
-                  <div className="flex items-start gap-3 sm:col-span-2">
-                    <MapPin className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide">Venue</p>
-                      <p className="font-medium text-gray-900">{venueName}</p>
-                      {venueAddress && <p className="text-sm text-gray-500">{venueAddress}</p>}
-                    </div>
-                  </div>
+                ))}
+                <div className="flex gap-2">
+                  <button onClick={() => setLineItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }])}
+                    className="flex items-center gap-1 text-xs text-amber-800 hover:text-amber-900 font-medium">
+                    <Plus className="h-3.5 w-3.5" /> Add item
+                  </button>
+                  {lineItems.length > 0 && <span className="ml-auto text-xs font-semibold text-amber-900">Subtotal: ${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                </div>
+                {lineItems.length > 0 && (
+                  <button onClick={handleSavePricing} disabled={savingPricing}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-800 text-white rounded-lg hover:bg-amber-900 disabled:opacity-50 text-xs font-medium">
+                    {savingPricing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DollarSign className="h-3.5 w-3.5" />}
+                    {savingPricing ? 'Saving…' : 'Save Pricing'}
+                  </button>
                 )}
               </div>
             </div>
+          </div>
+        )}
 
-            {/* Menu */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Menu &amp; Services</h2>
-              {appetizers.length === 0 && mainDishes.length === 0 && desserts.length === 0 && !utensils && !rentals && !florals && (
-                <p className="text-sm text-gray-400 italic">No menu items specified</p>
-              )}
-              {appetizers.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Appetizers / Hors d&apos;Oeuvres</p>
-                  <ul className="space-y-1">
-                    {appetizers.map((item, i) => (
-                      <li key={i} className="flex items-center gap-2 text-gray-700 text-sm">
-                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />{item}
-                      </li>
-                    ))}
-                  </ul>
+        {/* Bento grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
+
+          {/* ── Event Details ── 2 cols */}
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-6">
+            <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Event Details</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
+              {eventDate && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-neutral-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</span>
+                  <span className="text-sm font-semibold text-neutral-900">{eventDate}</span>
                 </div>
               )}
-              {mainDishes.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Main Dishes</p>
-                  <ul className="space-y-1">
-                    {mainDishes.map((item, i) => (
-                      <li key={i} className="flex items-center gap-2 text-gray-700 text-sm">
-                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />{item}
-                      </li>
-                    ))}
-                  </ul>
+              {guestCount != null && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-neutral-400 flex items-center gap-1"><Users className="h-3 w-3" /> Guests</span>
+                  <span className="text-sm font-semibold text-neutral-900">{guestCount}</span>
                 </div>
               )}
-              {desserts.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Desserts</p>
-                  <ul className="space-y-1">
-                    {desserts.map((item, i) => (
-                      <li key={i} className="flex items-center gap-2 text-gray-700 text-sm">
-                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />{item}
-                      </li>
-                    ))}
-                  </ul>
+              {eventType !== '—' && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-neutral-400">Event Type</span>
+                  <span className="text-sm font-semibold text-neutral-900 capitalize">{eventType}</span>
                 </div>
               )}
-              {(utensils || rentals || florals) && (
-                <div className="space-y-1 text-sm text-gray-700 border-t border-gray-100 pt-3 mt-1">
-                  {utensils && <p><span className="font-medium text-gray-500">Utensils:</span> {utensils}</p>}
-                  {rentals && <p><span className="font-medium text-gray-500">Rentals:</span> {rentals}</p>}
-                  {florals && <p><span className="font-medium text-gray-500">Florals:</span> {florals}</p>}
+              {serviceType && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-neutral-400">Service</span>
+                  <span className="text-sm font-semibold text-neutral-900 capitalize">{serviceType}</span>
                 </div>
               )}
-              {dietaryRestrictions.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-gray-100">
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Dietary</p>
-                  <p className="text-sm text-gray-700">{dietaryRestrictions.join(', ')}</p>
+              {venueName && (
+                <div className="flex flex-col gap-1 sm:col-span-2">
+                  <span className="text-xs text-neutral-400 flex items-center gap-1"><MapPin className="h-3 w-3" /> Venue</span>
+                  <span className="text-sm font-semibold text-neutral-900">{venueName}</span>
+                  {venueAddress && <span className="text-xs text-neutral-400">{venueAddress}</span>}
                 </div>
               )}
             </div>
-
-            {/* Add-ons / Special Requests */}
-            {(addons.length > 0 || specialRequests.length > 0) && (
-              <div className="bg-white rounded-xl shadow-sm p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-3">Add-ons & Requests</h2>
-                {addons.length > 0 && (
-                  <div className="mb-3">
-                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Add-ons</p>
-                    <ul className="space-y-1">
-                      {addons.map((a, i) => (
-                        <li key={i} className="text-sm text-gray-700">{a}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {specialRequests.length > 0 && (
-                  <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Special Requests</p>
-                    <ul className="space-y-1">
-                      {specialRequests.map((r, i) => (
-                        <li key={i} className="text-sm text-gray-700">{r}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Contract Summary Text */}
-            {summary && (
-              <div className="bg-white rounded-xl shadow-sm p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-3">Contract Summary</h2>
-                <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap leading-relaxed">
-                  {summary}
-                </div>
+            {dietaryRestrictions.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-neutral-100">
+                <span className="text-xs text-neutral-400">Dietary</span>
+                <p className="text-sm text-neutral-700 mt-0.5">{dietaryRestrictions.join(', ')}</p>
               </div>
             )}
           </div>
 
-          {/* Right — sidebar */}
-          <div className="space-y-4">
-
-            {/* Status card */}
-            <div className="bg-white rounded-xl shadow-sm p-5">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Contract Info</h3>
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Version</span>
-                  <span className="font-medium text-gray-900">v{contract.version_number}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Created</span>
-                  <span className="font-medium text-gray-900">
-                    {new Date(contract.created_at).toLocaleDateString()}
-                  </span>
-                </div>
-                {contract.total_amount != null && (
-                  <div className="flex justify-between border-t border-gray-100 pt-2">
-                    <span className="font-semibold text-gray-900">Grand Total</span>
-                    <span className="font-semibold text-gray-900">
-                      ${Number(contract.total_amount).toLocaleString()}
-                    </span>
+          {/* ── Contract Info + Client ── 1 col */}
+          <div className="flex flex-col gap-4">
+            {/* Contract info tile */}
+            <div className="bg-white rounded-2xl border border-neutral-200 p-5">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Contract Info</p>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-neutral-400">Version</span><span className="font-semibold">v{contract.version_number}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-400">Created</span><span className="font-medium">{new Date(contract.created_at).toLocaleDateString()}</span></div>
+                {lineItems.length > 0 ? (
+                  <>
+                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Subtotal</span><span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Tax</span><span>${pricingTax.toLocaleString()}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Gratuity</span><span>${pricingGratuity.toLocaleString()}</span></div>
+                    <div className="flex justify-between border-t border-neutral-100 pt-2"><span className="font-semibold text-neutral-900">Grand Total</span><span className="font-bold text-neutral-900">${pricingGrandTotal.toLocaleString()}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-neutral-400">50% Deposit</span><span>${pricingDeposit.toLocaleString()}</span></div>
+                  </>
+                ) : contract.total_amount != null ? (
+                  <div className="flex justify-between border-t border-neutral-100 pt-2">
+                    <span className="font-semibold text-neutral-900">Grand Total</span>
+                    <span className="font-bold text-neutral-900">${Number(contract.total_amount).toLocaleString()}</span>
                   </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Contract ID</span>
-                  <span className="font-mono text-xs text-gray-500 truncate max-w-[120px]">{contract.id}</span>
-                </div>
+                ) : null}
+                <div className="flex justify-between pt-1"><span className="text-neutral-400 text-xs">Contract ID</span><span className="font-mono text-xs text-neutral-400 truncate max-w-[110px]">{contract.id}</span></div>
               </div>
             </div>
 
-            {/* Client card */}
+            {/* Client tile */}
             {(clientName !== '—' || clientInfo.email || clientInfo.phone) && (
-              <div className="bg-white rounded-xl shadow-sm p-5">
-                <h3 className="text-sm font-semibold text-gray-900 mb-3">Client</h3>
-                <div className="space-y-2 text-sm">
-                  {clientName !== '—' && (
-                    <p className="font-medium text-gray-900">{clientName}</p>
-                  )}
-                  {clientInfo.email && (
-                    <p className="text-gray-600">{clientInfo.email}</p>
-                  )}
-                  {clientInfo.phone && (
-                    <p className="text-gray-600">{clientInfo.phone}</p>
-                  )}
+              <div className="bg-white rounded-2xl border border-neutral-200 p-5">
+                <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Client</p>
+                <div className="space-y-1 text-sm">
+                  {clientName !== '—' && <p className="font-semibold text-neutral-900">{clientName}</p>}
+                  {clientInfo.email && <p className="text-neutral-500 text-xs">{clientInfo.email}</p>}
+                  {clientInfo.phone && <p className="text-neutral-500 text-xs">{clientInfo.phone}</p>}
                 </div>
               </div>
             )}
 
-            {/* Actions */}
-            <div className="bg-white rounded-xl shadow-sm p-5 space-y-2">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Actions</h3>
+            {/* Actions tile */}
+            <div className="bg-white rounded-2xl border border-neutral-200 p-5 space-y-2">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Actions</p>
               {isStaff && contract.pdf_path && (
-                <a
-                  href={`/api/contracts/${contract.id}/pdf`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
-                >
-                  <FileText className="h-4 w-4" />
-                  View PDF
+                <a href={`/api/contracts/${contract.id}/pdf`} target="_blank" rel="noopener noreferrer"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-white rounded-xl hover:bg-neutral-800 transition text-sm font-medium">
+                  <FileText className="h-4 w-4" /> View PDF
                 </a>
               )}
               {project && (
-                <button
-                  onClick={() => router.push(`/projects/${project.id}`)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition text-sm"
-                >
+                <button onClick={() => router.push(`/projects/${project.id}`)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-neutral-200 text-neutral-700 rounded-xl hover:bg-neutral-50 transition text-sm">
                   View Project
                 </button>
               )}
@@ -573,38 +490,106 @@ export default function ContractDetailPage() {
 
             {/* Status notes */}
             {!isStaff && isPending && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-                <p className="text-xs font-semibold text-yellow-800 mb-1">Awaiting Staff Review</p>
-                <p className="text-xs text-yellow-700">
-                  Our team will review and approve this contract before sending it to you for signature.
-                </p>
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <p className="text-xs font-semibold text-amber-800 mb-1">Awaiting Staff Review</p>
+                <p className="text-xs text-amber-700">Our team will review and approve this contract before sending it to you for signature.</p>
               </div>
             )}
-
             {contract.status === 'sent' && (
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-                <FileText className="h-5 w-5 text-purple-600 mb-2" />
+              <div className="bg-purple-50 border border-purple-200 rounded-2xl p-4">
                 <p className="text-xs font-semibold text-purple-800 mb-1">Sent for Signature</p>
                 <p className="text-xs text-purple-700">The client has been emailed a link to sign this contract.</p>
               </div>
             )}
-
             {contract.status === 'signed' && (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+              <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
                 <CheckCircle2 className="h-5 w-5 text-green-600 mb-2" />
                 <p className="text-xs font-semibold text-green-800 mb-1">Contract Signed</p>
                 <p className="text-xs text-green-700">This contract has been fully executed.</p>
               </div>
             )}
-
             {contract.status === 'rejected' && contract.metadata?.rejection_reason && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
                 <AlertCircle className="h-5 w-5 text-red-500 mb-2" />
                 <p className="text-xs font-semibold text-red-800 mb-1">Rejected</p>
                 <p className="text-xs text-red-700">{contract.metadata.rejection_reason}</p>
               </div>
             )}
           </div>
+
+          {/* ── Menu & Services ── 2 cols */}
+          {(appetizers.length > 0 || mainDishes.length > 0 || desserts.length > 0 || utensils || rentals || florals) && (
+            <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-6">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Menu & Services</p>
+              <div className="space-y-5">
+                {appetizers.length > 0 && (
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-2">Appetizers / Hors d'Oeuvres</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {appetizers.map((item, i) => <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>)}
+                    </div>
+                  </div>
+                )}
+                {mainDishes.length > 0 && (
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-2">Main Dishes</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {mainDishes.map((item, i) => <span key={i} className="px-2.5 py-1 bg-neutral-900 text-white rounded-lg text-xs font-medium">{item}</span>)}
+                    </div>
+                  </div>
+                )}
+                {desserts.length > 0 && (
+                  <div>
+                    <p className="text-xs text-neutral-400 mb-2">Desserts</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {desserts.map((item, i) => <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>)}
+                    </div>
+                  </div>
+                )}
+                {(utensils || rentals || florals) && (
+                  <div className="pt-3 border-t border-neutral-100 space-y-1 text-xs text-neutral-600">
+                    {utensils && <p><span className="font-medium text-neutral-400">Utensils: </span>{utensils}</p>}
+                    {rentals && <p><span className="font-medium text-neutral-400">Rentals: </span>{rentals}</p>}
+                    {florals && <p><span className="font-medium text-neutral-400">Florals: </span>{florals}</p>}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Add-ons & Requests ── 1 col */}
+          {(addons.length > 0 || specialRequests.length > 0) && (
+            <div className="bg-white rounded-2xl border border-neutral-200 p-6">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Add-ons & Requests</p>
+              {addons.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs text-neutral-400 mb-2">Add-ons</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {addons.map((a, i) => <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{a}</span>)}
+                  </div>
+                </div>
+              )}
+              {specialRequests.length > 0 && (
+                <div>
+                  <p className="text-xs text-neutral-400 mb-2">Special Requests</p>
+                  <ul className="space-y-1">
+                    {specialRequests.map((r, i) => <li key={i} className="text-xs text-neutral-700">{r}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Contract Summary ── full width */}
+          {summary && (
+            <div className="lg:col-span-3 bg-white rounded-2xl border border-neutral-200 p-6">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Contract Summary</p>
+              <div className="prose prose-sm max-w-none text-neutral-700 whitespace-pre-wrap leading-relaxed text-sm">
+                {summary}
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
     </div>

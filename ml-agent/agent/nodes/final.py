@@ -9,7 +9,7 @@ from datetime import datetime
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
     get_last_human_message, add_ai_message, llm_extract, llm_respond,
-    llm_extract_structured, is_null_extraction, is_affirmative, is_negative,
+    is_affirmative, is_negative,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 from tools.pricing import calculate_event_pricing
@@ -60,12 +60,11 @@ async def ask_special_requests_node(state: ConversationState) -> ConversationSta
 
 async def collect_special_requests_node(state: ConversationState) -> ConversationState:
     """Record special requests. Appends if there's already a value."""
-    from agent.nodes.helpers import is_done_confirming
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # If user says "that's all" / "nothing else" / "done", move on
-    if is_negative(user_msg) or is_done_confirming(user_msg):
+    # If user says "that's all" / "nothing else", keep existing value and move on
+    if is_negative(user_msg):
         existing = get_slot_value(state["slots"], "special_requests")
         if not existing or existing == "none":
             fill_slot(state["slots"], "special_requests", "none")
@@ -91,42 +90,14 @@ async def collect_special_requests_node(state: ConversationState) -> Conversatio
             "to dietary concerns?",
             context
         )
-        # Ask if they have more — but limit to 5 rounds max to prevent loops
-        request_count = len(combined.split(";"))
-        if request_count >= 5:
-            state["current_node"] = "collect_dietary"
-        else:
-            state["current_node"] = "collect_special_requests"
+        state["current_node"] = "collect_special_requests"
 
     state["messages"] = add_ai_message(state, response)
     return state
 
 
-_DIETARY_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "note": {
-            "type": "string",
-            "description": "Dietary note as a clear kitchen instruction",
-        },
-        "has_conflict": {
-            "type": "boolean",
-            "description": "True if any menu item conflicts with the dietary requirement",
-        },
-    },
-    "required": ["note", "has_conflict"],
-    "additionalProperties": False,
-}
-
-
 async def collect_dietary_node(state: ConversationState) -> ConversationState:
-    """Record dietary/health concerns — flags conflicts for user to decide.
-
-    Uses a single structured LLM call to extract both the dietary note and
-    conflict flag simultaneously, halving latency vs. two serial calls.
-    The conflict-attempt counter lives in state["dietary_conflict_attempts"]
-    (a proper schema field) so it persists correctly across turns.
-    """
+    """Record dietary/health concerns — flags conflicts for user to decide."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
     slots = _slots_context(state)
@@ -146,8 +117,6 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
             "Return ONLY the updated dietary note as a clear kitchen instruction.",
             user_msg,
         )
-        if is_null_extraction(updated):
-            updated = user_msg.strip()
         fill_slot(state["slots"], "dietary_concerns", updated)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nDietary note updated to: \"{updated}\". "
@@ -156,50 +125,45 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
         )
         state["current_node"] = "ask_anything_else"
     else:
-        # Single structured call: extract note + conflict flag together
-        result = await llm_extract_structured(
+        # First time — store what user said, flag any conflict for the user to decide
+        dietary_detail = await llm_extract(
             "You are recording dietary concerns for a catering event.\n"
             f"Customer said: {user_msg}\n"
             f"Current menu: {dishes}\n\n"
-            "Return a JSON object with:\n"
-            "  note: dietary note as a clear kitchen instruction capturing EXACTLY what "
-            "the customer requested. Do NOT assume any dishes need replacing.\n"
-            "  has_conflict: true if any menu item conflicts with the requirement "
-            "(e.g. halal requirement + pork dish on menu), false otherwise.",
+            "Write a dietary note capturing EXACTLY what the customer requested. "
+            "Do NOT assume any dishes need replacing — just note the dietary requirement. "
+            "If there's a potential conflict (e.g., halal + pork dish on menu), "
+            "note the conflict but do NOT decide for the customer.\n"
+            "Return ONLY the dietary note as a clear kitchen instruction.",
             user_msg,
-            _DIETARY_SCHEMA,
         )
-
-        dietary_detail = result.get("note", "").strip() or user_msg.strip()
-        has_conflict = result.get("has_conflict", False)
+        if dietary_detail.strip().upper() == "NONE":
+            dietary_detail = user_msg.strip()
 
         fill_slot(state["slots"], "dietary_concerns", dietary_detail)
 
-        if has_conflict:
-            dietary_attempts = state.get("dietary_conflict_attempts", 0)
-            if dietary_attempts >= 2:
-                # Auto-accept after 2 re-asks — note conflict and move on
-                updated_note = f"{dietary_detail} (menu conflicts noted, customer was informed)"
-                fill_slot(state["slots"], "dietary_concerns", updated_note)
-                response = await llm_respond(
-                    f"{SYSTEM_PROMPT}\n\nDietary concern noted with menu conflicts acknowledged. "
-                    "Move on. Ask: Is there anything else you need for your event?",
-                    f"Context: {_slots_context(state)}",
-                )
-                state["current_node"] = "ask_anything_else"
-            else:
-                state["dietary_conflict_attempts"] = dietary_attempts + 1
-                response = await llm_respond(
-                    f"{SYSTEM_PROMPT}\n\nThe customer wants: {user_msg}. "
-                    f"Their menu includes: {dishes}. "
-                    "There may be a conflict (e.g., pork and halal). "
-                    "POLITELY point out the potential conflict and ASK the customer "
-                    "how they'd like to handle it — keep the dish as-is (as an exception "
-                    "for guests who prefer it), or replace it? Do NOT decide for them. "
-                    "Let the customer choose.",
-                    f"Context: {_slots_context(state)}",
-                )
-                state["current_node"] = "collect_dietary"
+        # Check if there's a menu conflict to flag
+        conflict_check = await llm_extract(
+            "Does this menu have any items that conflict with the dietary requirement?\n"
+            f"Dietary requirement: {user_msg}\n"
+            f"Menu items: {dishes}\n\n"
+            "Return YES if there's a conflict, NO if there isn't. Just YES or NO.",
+            user_msg,
+        )
+
+        if "YES" in conflict_check.upper():
+            response = await llm_respond(
+                f"{SYSTEM_PROMPT}\n\nThe customer wants: {user_msg}. "
+                f"Their menu includes: {dishes}. "
+                "There may be a conflict (e.g., pork and halal). "
+                "POLITELY point out the potential conflict and ASK the customer "
+                "how they'd like to handle it — keep the dish as-is (as an exception "
+                "for guests who prefer it), or replace it? Do NOT decide for them. "
+                "Let the customer choose.",
+                f"Context: {_slots_context(state)}",
+            )
+            # Stay on collect_dietary so their answer updates the dietary slot
+            state["current_node"] = "collect_dietary"
         else:
             response = await llm_respond(
                 f"{SYSTEM_PROMPT}\n\nDietary concern noted: {dietary_detail}. "
@@ -214,65 +178,40 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
 
 
 async def ask_anything_else_node(state: ConversationState) -> ConversationState:
-    """Handle yes/no about anything else needed.
-
-    Key distinction: "yes that's correct" / "yep this works" = DONE (generate contract),
-    while "yes I want to add X" = wants more. Check done/negative FIRST.
-    """
-    from agent.nodes.helpers import is_done_confirming
+    """Handle yes/no about anything else needed."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_negative(user_msg) or is_done_confirming(user_msg):
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThat's everything! Tell the customer you have all the "
-            "information needed and their contract is being generated now. "
-            "Thank them warmly.",
-            f"All details: {_slots_context(state)}"
-        )
-        state["current_node"] = "generate_contract"
-    elif is_affirmative(user_msg):
+    # Use LLM to detect if user wants to add something or is done
+    intent = await llm_extract(
+        "The customer was asked 'Is there anything else you need for your event?' "
+        "Are they adding something or saying they're done? "
+        "Return ONLY: add or done",
+        user_msg
+    )
+    if intent.strip().lower() == "add":
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_anything_else']}",
             f"Customer wants to add something. Ask what else they need.\nSlots: {_slots_context(state)}"
         )
         state["current_node"] = "collect_anything_else"
     else:
-        # Ambiguous — treat as finalization (safer than looping)
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThat's everything! Tell the customer you have all the "
-            "information needed and their contract is being generated now. "
-            "Thank them warmly.",
-            f"All details: {_slots_context(state)}"
+            f"{SYSTEM_PROMPT}\n\nThat's everything! Keep it short — one line: "
+            "'We've got everything we need. Would you like to schedule a quick 10–15 minute call to go over the details?'",
+            f"Slots: {_slots_context(state)}"
         )
-        state["current_node"] = "generate_contract"
+        state["current_node"] = "offer_followup"
 
     state["messages"] = add_ai_message(state, response)
     return state
 
 
 async def collect_anything_else_node(state: ConversationState) -> ConversationState:
-    """Record additional notes and ask again.
-
-    If user says 'nothing else' / 'that's all' / 'done' here, go straight to contract
-    instead of storing it as a note and looping back.
-    """
-    from agent.nodes.helpers import is_done_confirming
+    """Record additional notes and ask again."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if is_negative(user_msg) or is_done_confirming(user_msg):
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThat's everything! Tell the customer you have all the "
-            "information needed and their contract is being generated now. "
-            "Thank them warmly.",
-            f"All details: {_slots_context(state)}"
-        )
-        state["current_node"] = "generate_contract"
-        state["messages"] = add_ai_message(state, response)
-        return state
-
-    # Actual additional notes — store and ask again
     existing = get_slot_value(state["slots"], "additional_notes") or ""
     new_notes = f"{existing}\n{user_msg}".strip() if existing else user_msg.strip()
     fill_slot(state["slots"], "additional_notes", new_notes)
@@ -283,6 +222,37 @@ async def collect_anything_else_node(state: ConversationState) -> ConversationSt
     )
 
     state["current_node"] = "ask_anything_else"
+    state["messages"] = add_ai_message(state, response)
+    return state
+
+
+async def offer_followup_node(state: ConversationState) -> ConversationState:
+    """Offer a follow-up call, then generate contract with pending_staff_review status."""
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+
+    intent = await llm_extract(
+        "The customer was asked if they'd like to schedule a follow-up call. "
+        "Did they say yes or no? Return ONLY: yes or no",
+        user_msg
+    )
+
+    if intent.strip().lower() == "yes":
+        fill_slot(state["slots"], "followup_call", "Requested — team will schedule")
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer wants a follow-up call. Confirm: "
+            "'We'll have someone reach out to set up a call. Your summary is being prepared — thanks!'",
+            f"Slots: {_slots_context(state)}"
+        )
+    else:
+        fill_slot(state["slots"], "followup_call", "no")
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nNo follow-up call needed. Confirm: "
+            "'Sounds good — your summary is being prepared and our team will review it. Thanks!'",
+            f"Slots: {_slots_context(state)}"
+        )
+
+    state["current_node"] = "generate_contract"
     state["messages"] = add_ai_message(state, response)
     return state
 
@@ -363,74 +333,70 @@ Prices are best estimates of future market value, subject to change."""
     contract_number = f"{config.CONTRACT_PREFIX}-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
     date_issued = datetime.now().strftime("%B %d, %Y")
 
-    contract_prompt = f"""Generate a CATERING SERVICE CONTRACT in the EXACT style of {config.COMPANY_NAME}.
+    # Build client-facing SHORT summary (no pricing — full contract goes to staff)
+    partner_line = f"\nPartner/Fiancé: {slots.get('partner_name')}" if slots.get('partner_name') else ""
+    company_line = f"\nCompany: {slots.get('company_name')}" if slots.get('company_name') else ""
+    honoree_line = f"\nBirthday Person: {slots.get('honoree_name')}" if slots.get('honoree_name') else ""
+    email_line = f"\nEmail: {slots.get('email')}" if slots.get('email') else ""
+    phone_line = f"\nPhone: {slots.get('phone')}" if slots.get('phone') else ""
+
+    contract_prompt = f"""Generate a SHORT EVENT SUMMARY for the client. NOT a full contract — no pricing, no billing, no legal terms.
+The full contract with pricing goes to our staff for review.
+
 Use ONLY the data below. Do NOT invent details.
 
-This should look like our real contracts (see Kelly Diep 2025 as reference):
-- NOT a formal legal document with "SECTION 1, SECTION 2" headers
-- A natural, professional catering contract with clear sections
-- Prices inline next to items (e.g. "Prime Rib - $42.25pp")
-- Billing summary at the bottom with tax and gratuity
-- Practical notes about service logistics
-
-IMPORTANT: Use these EXACT values — do NOT generate your own:
+IMPORTANT: Use these EXACT values:
 - Contract Number: {contract_number}
 - Date Issued: {date_issued}
 
 ---
 
-Client: {slots.get('name', 'N/A')}
-Date: {slots.get('event_date', 'N/A')}
+EVENT DETAILS:
+Client: {slots.get('name', 'N/A')}{email_line}{phone_line}{partner_line}{company_line}{honoree_line}
+Date of Event: {slots.get('event_date', 'N/A')}
 Location: {slots.get('venue', 'N/A')}
 Guest Count: {slots.get('guest_count', 'N/A')}
 Event Type: {slots.get('event_type', 'N/A')}
 Service Type: {slots.get('service_type', 'N/A')}
 Service Style: {slots.get('service_style', 'Not specified')}
+Appetizer Style: {slots.get('appetizer_style', 'Not specified')}
+Meal Style: {slots.get('meal_style', 'Not specified')}
 
-{package_note}
-
-Menu:
-{pricing_text}
-
+MENU (item names only — no prices):
+Main Dishes: {slots.get('selected_dishes', 'None')}
 Appetizers: {slots.get('appetizers', 'None')}
 Desserts: {slots.get('desserts', 'None')}
 Menu Notes: {slots.get('menu_notes', 'None')}
 
-Add-Ons:
-Utensils/Tableware: {slots.get('utensils', 'Not requested')}
+DRINKS & BAR:
+{slots.get('drinks', 'Water, Iced Tea, Lemonade (included)')}
+
+ADD-ONS:
+Utensils: {slots.get('utensils', 'Not requested')}
+Tableware: {slots.get('tableware', 'Standard Disposable')}
 Rentals: {slots.get('rentals', 'Not requested')}
+Labor Services: {slots.get('labor', 'Not requested')}
 
-Dietary & Special Instructions:
-{slots.get('dietary_concerns', 'None')}
-{slots.get('special_requests', 'None')}
-{slots.get('additional_notes', 'None')}
+NOTES:
+Dietary Concerns: {slots.get('dietary_concerns', 'None')}
+Special Requests: {slots.get('special_requests', 'None')}
+Additional Notes: {slots.get('additional_notes', 'None')}
+Follow-up Call: {slots.get('followup_call', 'Not requested')}
 
-Amendments:
-{mod_notes}
-
-{billing_summary}
+{mod_notes if mod_notes.strip() else ''}
 
 ---
 
-IMPORTANT FORMAT RULES:
-- Write in the NATURAL style of a real catering contract (NOT formal legal sections)
-- List each menu item with its per-person price (e.g. "Chicken Satay - $3.50pp")
-- Include the Billing Summary with the EXACT numbers above (tax, gratuity, total, deposit)
-- Add these standard policies at the bottom:
-  * Cancellation: {config.format_cancellation_policy()}
-  * Guest Count: If counts drop {config.GUEST_COUNT_VARIANCE_THRESHOLD*100:.0f}% below original, prices may vary
-  * Food Escalation: Costs subject to change to match market value
-  * Credit/Debit Fees: {config.CREDIT_CARD_FEE*100:.0f}% for cards, Venmo {config.VENMO_FEE*100:.0f}% fee, Checks to "{config.COMPANY_LEGAL_NAME}"
-  * Additional labor: ${config.ADDITIONAL_SERVER_RATE:.0f}/hr per server, ${config.ADDITIONAL_SUPERVISOR_RATE:.0f}/hr per supervisor over {config.OVERTIME_THRESHOLD_HOURS:.0f} hours onsite
-- Include signature block for both parties
-- Footer: "{'" and "'.join(config.CONTRACT_FOOTER_NOTES)}"
+FORMAT RULES:
+- Clean, organized event summary — NOT a legal contract
+- Item names only — NO prices, NO billing, NO tax calculations
+- End with: "Our team will finalize your quote and reach out within 24–48 hours."
 - Contact: {config.COMPANY_EMAIL}  {config.COMPANY_PHONE}
-- Do NOT add chatty commentary — just the contract."""
+- Keep it short and professional"""
 
     response = await llm_respond(
-        "You are a professional contract writer for a catering company. "
-        "Generate formal, legally-styled catering service agreements. "
-        "Be precise, thorough, and use proper contract formatting.",
+        f"{SYSTEM_PROMPT}\n\nGenerate a clean event summary for the client. "
+        "No pricing, no billing, no legal terms. Just a clear recap of everything they selected.",
         contract_prompt
     )
 
@@ -455,7 +421,7 @@ IMPORTANT FORMAT RULES:
         "summary": f"Catering contract for {client_name} — {slots.get('event_type', 'Event')} on {event_date}",
         "contract_text": response,
         "generated_at": datetime.now().isoformat(),
-        "status": "draft",
+        "status": "pending_staff_review",
     }
     state["is_complete"] = True
     state["current_node"] = "complete"

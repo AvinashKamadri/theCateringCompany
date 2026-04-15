@@ -25,7 +25,13 @@
       "Bash(powershell -Command \"Stop-Process -Id 23328 -Force; Start-Sleep -Seconds 2; Write-Host ''killed''\")",
       "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\avina\\\\AppData\\\\Local\\\\Temp\\\\backend2.log'' -Tail 5\")",
       "Bash(powershell -Command \"Get-Process node | Stop-Process -Force; Write-Host ''All node processes killed''\")",
-      "Bash(powershell -Command \"Remove-Item -Path ''C:\\\\Users\\\\avina\\\\projects\\\\flashback\\\\cateringCo\\\\backend\\\\dist'' -Recurse -Force -ErrorAction SilentlyContinue; Write-Host ''dist deleted''\")"
+      "Bash(powershell -Command \"Remove-Item -Path ''C:\\\\Users\\\\avina\\\\projects\\\\flashback\\\\cateringCo\\\\backend\\\\dist'' -Recurse -Force -ErrorAction SilentlyContinue; Write-Host ''dist deleted''\")",
+      "Bash(git -C \"c:\\\\Users\\\\avina\\\\projects\\\\flashback\\\\TheCateringCompany\" log --oneline -- backend-prod/)",
+      "Read(//c/Users/avina/Downloads/docs catering/**)",
+      "Bash(xargs grep:*)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\avina\\projects\\flashback\\TheCateringCompanyAgent\\agent\\nodes"
     ]
   }
 }

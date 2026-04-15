@@ -37,6 +37,8 @@ export class CrmService {
         AND p.title NOT ILIKE 'AI Catering Intake%'
         AND p.title NOT ILIKE 'AI Intake%'
         AND p.title NOT ILIKE 'Chat Project%'
+        AND p.title NOT ILIKE '%intake%draft%'
+        AND p.title NOT ILIKE '%AI Intake (draft)%'
       ORDER BY p.created_at DESC
       LIMIT 500
     `;

@@ -31,7 +31,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  async validate(payload: { sub: string; sessionId: string; email: string }) {
+  async validate(payload: { sub: string; sessionId: string; email: string; role?: string }) {
     const user = await this.authService.validateUser(payload.sub);
     if (!user) {
       throw new UnauthorizedException('User not found or inactive');
@@ -40,6 +40,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       userId: payload.sub,
       sessionId: payload.sessionId,
       email: payload.email,
+      role: payload.role ?? (payload.email.endsWith('@catering-company.com') ? 'staff' : 'host'),
     };
   }
 }

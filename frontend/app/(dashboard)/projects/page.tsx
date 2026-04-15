@@ -87,7 +87,7 @@ export default function ProjectsPage() {
                 Join
               </Link>
               <Link
-                href="/projects/new"
+                href="/chat"
                 className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-black rounded-lg hover:bg-neutral-800 transition-colors"
               >
                 <Plus className="h-4 w-4" />
@@ -139,7 +139,7 @@ export default function ProjectsPage() {
             </p>
             {!searchQuery && (
               <Link
-                href="/projects/new"
+                href="/chat"
                 className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-black rounded-lg hover:bg-neutral-800 transition-colors"
               >
                 <Plus className="h-4 w-4" />

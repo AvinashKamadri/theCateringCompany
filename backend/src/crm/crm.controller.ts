@@ -17,4 +17,9 @@ export class CrmController {
   getStats(@CurrentUser() user: { userId: string; email: string }) {
     return this.crmService.getStats(user.email);
   }
+
+  @Get('analytics')
+  getAnalytics(@CurrentUser() user: { userId: string; email: string }) {
+    return this.crmService.getAnalytics(user.email);
+  }
 }

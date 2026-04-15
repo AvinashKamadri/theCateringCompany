@@ -5,12 +5,13 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Calendar, Users, MapPin, FileText,
   Clock, CheckCircle2, AlertCircle, Loader2, Building2,
-  ThumbsUp, ThumbsDown, X,
+  ThumbsUp, ThumbsDown, X, Plus, Trash2, DollarSign, Calculator,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import BentoInfoCard from '@/components/ui/BentoInfoCard';
 
 const STAFF_DOMAINS = ['@catering-company.com', '@catering-company.com'];
 
@@ -85,11 +86,24 @@ export default function ContractDetailPage() {
   const [previewing, setPreviewing] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [savingPricing, setSavingPricing] = useState(false);
+  const [calculatingPricing, setCalculatingPricing] = useState(false);
+  const [pricingBreakdown, setPricingBreakdown] = useState<any>(null);
+  const [lineItems, setLineItems] = useState<Array<{ description: string; quantity: number; unitPrice: number }>>([]);
+  const [taxRate, setTaxRate] = useState(9.4);
+  const [onsiteServiceRate, setOnsiteServiceRate] = useState(6.5);
+  const [gratuityRate, setGratuityRate] = useState(15);
+
   useEffect(() => {
     const controller = new AbortController();
     apiClient.get(`/contracts/${contractId}`, { signal: controller.signal })
       .then((data: any) => {
         setContract(data);
+        const pricing = (data.body as any)?.pricing;
+        if (Array.isArray(pricing?.lineItems) && pricing.lineItems.length > 0) setLineItems(pricing.lineItems);
+        if (pricing?.taxRate != null) setTaxRate(Number(pricing.taxRate));
+        if (pricing?.onsiteServiceRate != null) setOnsiteServiceRate(Number(pricing.onsiteServiceRate));
+        if (pricing?.gratuityRate != null) setGratuityRate(Number(pricing.gratuityRate));
       })
       .catch((err: any) => {
         if (controller.signal.aborted) return;
@@ -149,6 +163,106 @@ export default function ContractDetailPage() {
     }
   };
 
+  const pricingTotal        = lineItems.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+  const pricingTax          = Math.round(pricingTotal * (taxRate / 100) * 100) / 100;
+  const pricingOnsiteSvc    = Math.round(pricingTotal * (onsiteServiceRate / 100) * 100) / 100;
+  const pricingGratuity     = Math.round(pricingTotal * (gratuityRate / 100) * 100) / 100;
+  const pricingGrandTotal   = pricingTotal + pricingTax + pricingOnsiteSvc + pricingGratuity;
+  const pricingDeposit      = Math.round(pricingGrandTotal * 0.50 * 100) / 100;
+
+  const STAFFING_KEYWORDS = ['Table & Chair Setup', 'Table Preset', 'Reception Cleanup', 'Trash Removal', 'China Service Staffing', 'Travel Fee', 'On-site Service & Labor'];
+  const isStaffingRow = (desc: string) => STAFFING_KEYWORDS.some((kw) => desc.includes(kw));
+
+  const handleAutoCalculate = async () => {
+    setCalculatingPricing(true);
+    try {
+      const result: any = await apiClient.post(`/staff/contracts/${contractId}/calculate-pricing`, {});
+      setPricingBreakdown(result);
+      if (Array.isArray(result.lineItems) && result.lineItems.length > 0) {
+        const menuItems = result.lineItems.map((li: any) => ({
+          description: li.description,
+          quantity: li.quantity,
+          unitPrice: li.unitPrice,
+        }));
+        if (result.serviceSurcharge > 0) {
+          menuItems.push({ description: 'On-site Service & Labor', quantity: 1, unitPrice: result.serviceSurcharge });
+        }
+        // Preserve existing staffing rows — only replace menu/package rows
+        const existingStaffing = lineItems.filter((li) => isStaffingRow(li.description));
+        setLineItems([...menuItems, ...existingStaffing]);
+        toast.success(`Calculated: $${Number(result.grandTotal).toLocaleString()} total — review and save`);
+      } else {
+        toast.info('No menu items matched in pricing database. Add items manually.');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to calculate pricing');
+    } finally {
+      setCalculatingPricing(false);
+    }
+  };
+
+  const handleSavePricing = async () => {
+    setSavingPricing(true);
+    try {
+      const grandTotal = pricingGrandTotal;
+      await apiClient.patch(`/staff/contracts/${contractId}/pricing`, {
+        pricing: { lineItems, subtotal: pricingTotal, total: grandTotal, taxRate, onsiteServiceRate, gratuityRate },
+      });
+      toast.success('Pricing saved');
+      const updated: any = await apiClient.get(`/contracts/${contractId}`);
+      setContract(updated);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save pricing');
+    } finally {
+      setSavingPricing(false);
+    }
+  };
+
+  const handlePrefillStaffing = () => {
+    const body   = contract?.body || {};
+    const slots  = body.slots || {};
+    const evDet  = body.event_details || {};
+    const guests = Number(evDet.guest_count || slots.guest_count || contract?.projects_contracts_project_idToprojects?.guest_count || 0);
+    const svcType = (evDet.service_type || slots.service_type || '').toLowerCase();
+    const isOnsite = svcType.includes('on') || svcType.includes('onsite');
+    const hasChina = (slots.utensils || '').toLowerCase().includes('china') ||
+                     (evDet.serviceware || '').toLowerCase().includes('china');
+
+    if (!guests) { toast.error('No guest count on contract — cannot pre-fill staffing'); return; }
+
+    const items: { description: string; quantity: number; unitPrice: number }[] = [];
+
+    if (isOnsite) {
+      items.push({ description: 'Table & Chair Setup (tables, chairs, linens) — $2.00/pp', quantity: guests, unitPrice: 2.00 });
+      items.push({ description: 'Table Preset (plates, napkins, cutlery) — $1.75/pp',       quantity: guests, unitPrice: 1.75 });
+      items.push({ description: 'Reception Cleanup — $3.75/pp',                              quantity: guests, unitPrice: 3.75 });
+      items.push({ description: 'Trash Removal (flat)',                                       quantity: 1,      unitPrice: 175  });
+
+      if (hasChina) {
+        const chinaStaffing =
+          guests <= 50  ? 175 :
+          guests <= 75  ? 250 :
+          guests <= 100 ? 325 :
+          guests <= 125 ? 425 : 550;
+        items.push({ description: `China Service Staffing (~${guests} guests)`, quantity: 1, unitPrice: chinaStaffing });
+        // China bumps gratuity to 18%
+        setGratuityRate(18);
+      }
+    } else {
+      // Drop-off: minimal staffing
+      items.push({ description: 'Trash Removal (flat)', quantity: 1, unitPrice: 175 });
+    }
+
+    // Travel placeholder — staff fills in actual distance bucket
+    items.push({ description: 'Travel Fee (confirm distance: $150 / $250 / $375+)', quantity: 1, unitPrice: 0 });
+
+    // Merge: keep any existing line items, append staffing ones (avoid duplicates by description prefix)
+    const existing = lineItems.filter(
+      (li) => !items.some((s) => li.description.startsWith(s.description.split('—')[0].trim()))
+    );
+    setLineItems([...existing, ...items]);
+    toast.success(`${items.length} staffing line items added — review and adjust as needed`);
+  };
 
   if (loading) {
     return (
@@ -223,6 +337,7 @@ export default function ContractDetailPage() {
   const specialRequests: string[] = body.additional?.modifications || [];
 
   const isPending = contract.status === 'pending_staff_approval';
+  const hasPricingSaved = !!(contract.total_amount && Number(contract.total_amount) > 0);
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -284,104 +399,148 @@ export default function ContractDetailPage() {
 
       <div className="max-w-6xl mx-auto px-6 py-6">
 
-        {/* Staff review banner — full width */}
+        {/* Staff review panel — full width */}
         {isStaff && isPending && (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-4">
-            <div className="flex items-start justify-between gap-4 mb-4">
-              <div>
-                <p className="text-sm font-semibold text-amber-900">Staff Review Required</p>
-                <p className="text-xs text-amber-700 mt-0.5">Review the details, set pricing, preview the PDF, then approve or reject.</p>
+          <div className="bg-white border border-neutral-200 rounded-2xl mb-4 overflow-hidden">
+            {/* Panel header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-100">
+              <div className="flex items-center gap-3">
+                <div className="w-2 h-2 rounded-full bg-black animate-pulse" />
+                <div>
+                  <p className="text-sm font-semibold text-neutral-900">Staff Review Required</p>
+                  <p className="text-xs text-neutral-400 mt-0.5">Set pricing, preview the PDF, then approve or reject.</p>
+                </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button onClick={handlePreviewPdf} disabled={previewing}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-amber-300 text-amber-900 rounded-xl hover:bg-amber-50 disabled:opacity-50 text-xs font-medium">
+                  className="flex items-center gap-1.5 px-3 py-2 bg-neutral-100 text-neutral-700 rounded-xl hover:bg-neutral-200 disabled:opacity-50 text-xs font-medium transition-colors">
                   {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
                   {previewing ? 'Generating…' : contract.pdf_path ? 'Regenerate PDF' : 'Preview PDF'}
                 </button>
                 <button onClick={handleApprove} disabled={approving || !hasPricingSaved} title={!hasPricingSaved ? 'Save pricing first' : undefined}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold">
+                  className="flex items-center gap-1.5 px-4 py-2 bg-black text-white rounded-xl hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold transition-colors">
                   {approving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsUp className="h-3.5 w-3.5" />}
                   Approve & Send
                 </button>
                 <button onClick={() => setShowRejectModal(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 text-xs font-semibold">
+                  className="flex items-center gap-1.5 px-4 py-2 border border-neutral-200 text-neutral-700 rounded-xl hover:bg-neutral-50 text-xs font-semibold transition-colors">
                   <ThumbsDown className="h-3.5 w-3.5" /> Reject
                 </button>
               </div>
             </div>
-            {!hasPricingSaved && (
-              <p className="text-xs text-amber-700 font-medium mb-3 flex items-center gap-1">
-                <AlertCircle className="h-3.5 w-3.5" /> Save pricing below before approving.
-              </p>
-            )}
+
             {/* Pricing editor */}
-            <div className="bg-white rounded-xl border border-amber-200 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-semibold text-amber-900 flex items-center gap-1"><DollarSign className="h-3.5 w-3.5" /> Pricing</p>
-                <button onClick={handleAutoCalculate} disabled={calculatingPricing}
-                  className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-900 text-amber-50 rounded-lg hover:bg-amber-950 disabled:opacity-50 text-xs font-medium">
-                  {calculatingPricing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Calculator className="h-3 w-3" />}
-                  {calculatingPricing ? 'Calculating…' : 'Auto-Calculate'}
-                </button>
-              </div>
-              <div className="flex gap-3 mb-3">
-                <div className="flex-1">
-                  <label className="block text-xs text-amber-800 font-medium mb-1">Tax %</label>
-                  <div className="relative">
-                    <input type="number" min={0} max={50} step={0.1} value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value) || 0)}
-                      className="w-full border border-amber-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-400 pr-6" />
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-amber-700">%</span>
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <label className="block text-xs text-amber-800 font-medium mb-1">Gratuity %</label>
-                  <div className="relative">
-                    <input type="number" min={0} max={50} step={0.5} value={gratuityRate} onChange={(e) => setGratuityRate(Number(e.target.value) || 0)}
-                      className="w-full border border-amber-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-400 pr-6" />
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-amber-700">%</span>
-                  </div>
-                </div>
-              </div>
-              {lineItems.length > 0 && (
-                <div className="bg-amber-50 rounded-lg p-3 mb-3 text-xs text-amber-900 space-y-1">
-                  {pricingBreakdown?.packageName && <div className="flex justify-between"><span className="text-amber-700">Package</span><span>{pricingBreakdown.packageName} (${pricingBreakdown.packagePerPersonRate}/pp)</span></div>}
-                  <div className="flex justify-between"><span className="text-amber-700">Subtotal</span><span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                  <div className="flex justify-between"><span className="text-amber-700">Tax ({taxRate}%)</span><span>${pricingTax.toLocaleString()}</span></div>
-                  <div className="flex justify-between"><span className="text-amber-700">Gratuity ({gratuityRate}%)</span><span>${pricingGratuity.toLocaleString()}</span></div>
-                  <div className="flex justify-between font-semibold border-t border-amber-200 pt-1"><span>Grand Total</span><span>${pricingGrandTotal.toLocaleString()}</span></div>
-                  <div className="flex justify-between text-amber-700"><span>50% Deposit</span><span>${pricingDeposit.toLocaleString()}</span></div>
-                </div>
+            <div className="px-6 py-5">
+              {!hasPricingSaved && (
+                <p className="text-xs text-neutral-500 font-medium mb-4 flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5 text-neutral-400" /> Save pricing below before approving.
+                </p>
               )}
-              <div className="space-y-2">
+
+              {/* Toolbar */}
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
+                  <DollarSign className="h-3.5 w-3.5 text-neutral-400" /> Line Items
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={handlePrefillStaffing}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-neutral-100 text-neutral-700 border border-neutral-200 rounded-lg hover:bg-neutral-200 text-xs font-medium transition-colors">
+                    <Users className="h-3 w-3" /> Pre-fill Staffing
+                  </button>
+                  <button onClick={handleAutoCalculate} disabled={calculatingPricing}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-black text-white rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-xs font-medium transition-colors">
+                    {calculatingPricing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Calculator className="h-3 w-3" />}
+                    {calculatingPricing ? 'Calculating…' : 'Auto-Calculate'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Rate inputs */}
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                {[
+                  { label: 'Sales & Meals Tax', value: taxRate, setter: setTaxRate, step: 0.1 },
+                  { label: 'Onsite Service Fee', value: onsiteServiceRate, setter: setOnsiteServiceRate, step: 0.5 },
+                  { label: 'Gratuity', value: gratuityRate, setter: setGratuityRate, step: 0.5 },
+                ].map(({ label, value, setter, step }) => (
+                  <div key={label}>
+                    <label className="block text-xs text-neutral-500 font-medium mb-1">{label}</label>
+                    <div className="relative">
+                      <input type="number" min={0} max={50} step={step} value={value}
+                        onChange={(e) => setter(Number(e.target.value) || 0)}
+                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-black pr-6" />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-neutral-400">%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Line items table */}
+              <div className="space-y-1.5 mb-4">
                 {lineItems.map((item, idx) => (
                   <div key={idx} className="flex gap-2 items-center">
                     <input type="text" placeholder="Description" value={item.description}
                       onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
-                      className="flex-1 border border-amber-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                      className="flex-1 border border-neutral-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-black" />
                     <input type="number" placeholder="Qty" min={1} value={item.quantity}
                       onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, quantity: Number(e.target.value) || 1 } : li))}
-                      className="w-14 border border-amber-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                      className="w-14 border border-neutral-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-black" />
                     <input type="number" placeholder="Price" min={0} value={item.unitPrice}
                       onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, unitPrice: Number(e.target.value) || 0 } : li))}
-                      className="w-20 border border-amber-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-400" />
-                    <button onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))} className="text-red-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+                      className="w-20 border border-neutral-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-black" />
+                    <button onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))} className="text-neutral-300 hover:text-red-500 transition-colors">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 ))}
-                <div className="flex gap-2">
-                  <button onClick={() => setLineItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }])}
-                    className="flex items-center gap-1 text-xs text-amber-800 hover:text-amber-900 font-medium">
-                    <Plus className="h-3.5 w-3.5" /> Add item
-                  </button>
-                  {lineItems.length > 0 && <span className="ml-auto text-xs font-semibold text-amber-900">Subtotal: ${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
-                </div>
-                {lineItems.length > 0 && (
-                  <button onClick={handleSavePricing} disabled={savingPricing}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-800 text-white rounded-lg hover:bg-amber-900 disabled:opacity-50 text-xs font-medium">
-                    {savingPricing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DollarSign className="h-3.5 w-3.5" />}
-                    {savingPricing ? 'Saving…' : 'Save Pricing'}
-                  </button>
-                )}
+                <button onClick={() => setLineItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }])}
+                  className="flex items-center gap-1 text-xs text-neutral-500 hover:text-black font-medium transition-colors mt-1">
+                  <Plus className="h-3.5 w-3.5" /> Add item
+                </button>
               </div>
+
+              {/* Pricing summary */}
+              {lineItems.length > 0 && (
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4 mb-4 text-xs space-y-1.5">
+                  {pricingBreakdown?.packageName && (
+                    <div className="flex justify-between text-neutral-500">
+                      <span>Package</span>
+                      <span>{pricingBreakdown.packageName} (${pricingBreakdown.packagePerPersonRate}/pp)</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-neutral-600">
+                    <span>Subtotal</span>
+                    <span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-500">
+                    <span>Sales & Meals Tax ({taxRate}%)</span>
+                    <span>${pricingTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-500">
+                    <span>Onsite Service Fee ({onsiteServiceRate}%)</span>
+                    <span>${pricingOnsiteSvc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-500">
+                    <span>Gratuity ({gratuityRate}%)</span>
+                    <span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-neutral-900 border-t border-neutral-200 pt-2">
+                    <span>Grand Total</span>
+                    <span>${pricingGrandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-400">
+                    <span>50% Deposit Due</span>
+                    <span>${pricingDeposit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              )}
+
+              {lineItems.length > 0 && (
+                <button onClick={handleSavePricing} disabled={savingPricing}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-black text-white rounded-xl hover:bg-neutral-800 disabled:opacity-50 text-xs font-semibold transition-colors">
+                  {savingPricing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DollarSign className="h-3.5 w-3.5" />}
+                  {savingPricing ? 'Saving…' : 'Save Pricing'}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -390,7 +549,7 @@ export default function ContractDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
 
           {/* ── Event Details ── 2 cols */}
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-6">
+          <BentoInfoCard className="lg:col-span-2 p-6">
             <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Event Details</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
               {eventDate && (
@@ -431,12 +590,12 @@ export default function ContractDetailPage() {
                 <p className="text-sm text-neutral-700 mt-0.5">{dietaryRestrictions.join(', ')}</p>
               </div>
             )}
-          </div>
+          </BentoInfoCard>
 
           {/* ── Contract Info + Client ── 1 col */}
           <div className="flex flex-col gap-4">
             {/* Contract info tile */}
-            <div className="bg-white rounded-2xl border border-neutral-200 p-5">
+            <BentoInfoCard className="p-5">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Contract Info</p>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-neutral-400">Version</span><span className="font-semibold">v{contract.version_number}</span></div>
@@ -444,8 +603,9 @@ export default function ContractDetailPage() {
                 {lineItems.length > 0 ? (
                   <>
                     <div className="flex justify-between text-xs"><span className="text-neutral-400">Subtotal</span><span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Tax</span><span>${pricingTax.toLocaleString()}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Gratuity</span><span>${pricingGratuity.toLocaleString()}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Tax ({taxRate}%)</span><span>${pricingTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Onsite Fee ({onsiteServiceRate}%)</span><span>${pricingOnsiteSvc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Gratuity ({gratuityRate}%)</span><span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
                     <div className="flex justify-between border-t border-neutral-100 pt-2"><span className="font-semibold text-neutral-900">Grand Total</span><span className="font-bold text-neutral-900">${pricingGrandTotal.toLocaleString()}</span></div>
                     <div className="flex justify-between text-xs"><span className="text-neutral-400">50% Deposit</span><span>${pricingDeposit.toLocaleString()}</span></div>
                   </>
@@ -457,22 +617,22 @@ export default function ContractDetailPage() {
                 ) : null}
                 <div className="flex justify-between pt-1"><span className="text-neutral-400 text-xs">Contract ID</span><span className="font-mono text-xs text-neutral-400 truncate max-w-[110px]">{contract.id}</span></div>
               </div>
-            </div>
+            </BentoInfoCard>
 
             {/* Client tile */}
             {(clientName !== '—' || clientInfo.email || clientInfo.phone) && (
-              <div className="bg-white rounded-2xl border border-neutral-200 p-5">
+              <BentoInfoCard className="p-5">
                 <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Client</p>
                 <div className="space-y-1 text-sm">
                   {clientName !== '—' && <p className="font-semibold text-neutral-900">{clientName}</p>}
                   {clientInfo.email && <p className="text-neutral-500 text-xs">{clientInfo.email}</p>}
                   {clientInfo.phone && <p className="text-neutral-500 text-xs">{clientInfo.phone}</p>}
                 </div>
-              </div>
+              </BentoInfoCard>
             )}
 
             {/* Actions tile */}
-            <div className="bg-white rounded-2xl border border-neutral-200 p-5 space-y-2">
+            <BentoInfoCard className="p-5 space-y-2" enableTilt={false}>
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Actions</p>
               {isStaff && contract.pdf_path && (
                 <a href={`/api/contracts/${contract.id}/pdf`} target="_blank" rel="noopener noreferrer"
@@ -486,7 +646,7 @@ export default function ContractDetailPage() {
                   View Project
                 </button>
               )}
-            </div>
+            </BentoInfoCard>
 
             {/* Status notes */}
             {!isStaff && isPending && (
@@ -519,7 +679,7 @@ export default function ContractDetailPage() {
 
           {/* ── Menu & Services ── 2 cols */}
           {(appetizers.length > 0 || mainDishes.length > 0 || desserts.length > 0 || utensils || rentals || florals) && (
-            <div className="lg:col-span-2 bg-white rounded-2xl border border-neutral-200 p-6">
+            <BentoInfoCard className="lg:col-span-2 p-6">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Menu & Services</p>
               <div className="space-y-5">
                 {appetizers.length > 0 && (
@@ -554,12 +714,12 @@ export default function ContractDetailPage() {
                   </div>
                 )}
               </div>
-            </div>
+            </BentoInfoCard>
           )}
 
           {/* ── Add-ons & Requests ── 1 col */}
           {(addons.length > 0 || specialRequests.length > 0) && (
-            <div className="bg-white rounded-2xl border border-neutral-200 p-6">
+            <BentoInfoCard className="p-6">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Add-ons & Requests</p>
               {addons.length > 0 && (
                 <div className="mb-3">
@@ -577,17 +737,17 @@ export default function ContractDetailPage() {
                   </ul>
                 </div>
               )}
-            </div>
+            </BentoInfoCard>
           )}
 
           {/* ── Contract Summary ── full width */}
           {summary && (
-            <div className="lg:col-span-3 bg-white rounded-2xl border border-neutral-200 p-6">
+            <BentoInfoCard className="lg:col-span-3 p-6" enableTilt={false}>
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Contract Summary</p>
               <div className="prose prose-sm max-w-none text-neutral-700 whitespace-pre-wrap leading-relaxed text-sm">
                 {summary}
               </div>
-            </div>
+            </BentoInfoCard>
           )}
 
         </div>

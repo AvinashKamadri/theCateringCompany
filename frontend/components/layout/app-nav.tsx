@@ -33,7 +33,7 @@ export function AppNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const isStaff = user?.email?.endsWith('@catering-company.com') ?? false;
-  const navigation = isStaff ? staffNavigation : hostNavigation;
+  const navItems = isStaff ? staffNavigation : hostNavigation;
 
   const handleLogout = async () => {
     try { await apiClient.post('/auth/logout', {}); } catch { /* continue */ }
@@ -67,7 +67,7 @@ export function AppNav() {
 
         {/* Center: nav */}
         <div className="hidden md:flex items-center gap-0.5 absolute left-1/2 -translate-x-1/2">
-          {navigation.map((item) => {
+          {navItems.map((item) => {
             const isActive = item.href === '/chat'
               ? pathname === '/chat'
               : pathname.startsWith(item.href);
@@ -117,7 +117,7 @@ export function AppNav() {
       {isMobileMenuOpen && (
         <div className="md:hidden border-t border-neutral-200 bg-white">
           <div className="px-4 py-2 space-y-0.5">
-            {navigation.map((item) => {
+            {navItems.map((item) => {
               const isActive = item.href === '/chat'
                 ? pathname === '/chat'
                 : pathname.startsWith(item.href);

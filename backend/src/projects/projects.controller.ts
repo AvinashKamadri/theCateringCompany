@@ -6,9 +6,11 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ProjectsService, CollaboratorRole } from './projects.service';
@@ -29,6 +31,21 @@ export class ProjectsController {
   }
 
   // ─── Literal routes must come BEFORE :id to avoid param collision ───────────
+
+  /**
+   * GET /projects/search?q=...
+   * Search across the user's projects by title, venue, or event type.
+   */
+  @Get('search')
+  async search(
+    @CurrentUser() user: { userId: string },
+    @Query('q') q: string,
+  ) {
+    if (!q || q.trim().length < 2) {
+      throw new BadRequestException('Query must be at least 2 characters');
+    }
+    return this.projectsService.search(user.userId, q.trim());
+  }
 
   /**
    * GET /projects/by-code/:code

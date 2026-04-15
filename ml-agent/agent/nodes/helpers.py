@@ -143,7 +143,25 @@ async def llm_respond(system_prompt: str, context: str) -> str:
     Automatically injects a slot-authority instruction so the LLM always
     uses CURRENT slot values over stale conversation history (important
     after @AI modifications change a slot mid-flow).
+
+    Also injects a random variation seed so the LLM varies phrasing
+    across conversations even at temperature=0.
     """
+    import random
+    _STYLES = [
+        "Start with a short acknowledgment, then ask the question.",
+        "Lead with the question directly, keep it punchy.",
+        "Use a casual transition word first (like 'Alright', 'So', 'Cool'), then the question.",
+        "Acknowledge what they said warmly, then move to the next thing.",
+        "Keep it super brief — one short sentence max before the question.",
+        "Be a little playful in tone, but still professional.",
+        "Use a dash or em-dash mid-sentence for a natural texting feel.",
+    ]
+    style = random.choice(_STYLES)
+    variation = (
+        f"\n\nRESPONSE STYLE FOR THIS MESSAGE: {style} "
+        "Do NOT copy this instruction literally — just let it influence your phrasing."
+    )
     slot_authority = (
         "\n\nCRITICAL: Always use the CURRENT slot/event values provided in the context below, "
         "NOT what was discussed earlier in the conversation. If a value was modified mid-conversation "
@@ -151,7 +169,7 @@ async def llm_respond(system_prompt: str, context: str) -> str:
     )
     start = time.monotonic()
     response = await llm.ainvoke([
-        SystemMessage(content=system_prompt + slot_authority),
+        SystemMessage(content=system_prompt + variation + slot_authority),
         HumanMessage(content=context),
     ])
     latency_ms = int((time.monotonic() - start) * 1000)

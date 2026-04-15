@@ -258,8 +258,17 @@ async def get_dessert_context(state) -> str:
     dessert_items = []
     for cat_name, items in menu.items():
         cat_lower = cat_name.lower()
-        if any(kw in cat_lower for kw in ["dessert", "coffee"]):
-            dessert_items.extend(items)
+        if any(kw in cat_lower for kw in ["dessert"]):
+            for item in items:
+                # Expand mini dessert bundle into individual items
+                if "mini desserts" in item["name"].lower() and item.get("description"):
+                    for sub in item["description"].split(","):
+                        sub = sub.strip()
+                        if sub:
+                            dessert_items.append({"name": sub, "unit_price": item["unit_price"],
+                                                  "price_type": item["price_type"]})
+                else:
+                    dessert_items.append(item)
         elif is_wedding and "cake" in cat_lower:
             dessert_items.extend(items)
 
@@ -318,10 +327,19 @@ async def collect_meal_style_node(state: ConversationState) -> ConversationState
 
     choice = await llm_extract(
         "The customer was asked if they want plated or buffet style. "
-        "Return ONLY: plated or buffet. If unclear, return buffet.",
+        "This is a REQUIRED choice — they must pick one. 'no', 'neither', 'skip' are NOT valid. "
+        "Return ONLY: plated, buffet, or unclear.",
         user_msg
     )
     choice = choice.strip().lower()
+    if choice == "unclear":
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer didn't pick between plated or buffet — this is required. "
+            "Explain casually that you need one of the two, then re-ask: plated or buffet?",
+            f"Customer said: {user_msg}"
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
     fill_slot(state["slots"], "meal_style", choice.capitalize())
 
     if "plated" in choice:
@@ -457,27 +475,18 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
 
 
 async def ask_appetizers_node(state: ConversationState) -> ConversationState:
-    """Handle yes/no response about appetizers."""
+    """Present appetizer menu directly — always show the full menu on first entry."""
     import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    mentions_appetizers = bool(_re.search(r'\bappetizers?\b|\bhors\s+d\'?oeuvres?\b|\bstarters?\b', user_msg, _re.IGNORECASE))
-    if is_affirmative(user_msg) or (mentions_appetizers and not is_negative(user_msg)):
-        appetizer_context = await get_appetizer_context(state)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            "The customer said YES to appetizers. Present the appetizer items from the "
-            "database below as a numbered list. Tell them to select as many as they'd like. "
-            "Do NOT ask again whether they want appetizers — they already said yes. "
-            "Do NOT make up items — use ONLY the exact items listed below.",
-            appetizer_context
-        )
-        state["current_node"] = "select_appetizers"
-    else:
+    # Only skip if user EXPLICITLY says "no appetizers" or "skip appetizers"
+    # Note: on first entry the user_msg is their answer to guest count/service style, NOT about appetizers
+    # So we only skip if they very specifically mention skipping appetizers
+    skip_words = _re.search(r'\b(no appetizers|skip appetizers|skip apps|don.?t want appetizers)\b', user_msg, _re.IGNORECASE)
+    if skip_words:
         fill_slot(state["slots"], "appetizers", "none")
-        # Immediately fetch and present the real main menu so the LLM
-        # doesn't fabricate dishes when told "show them the menu".
+        # Skip appetizers — go straight to main menu
         menu_context = await get_main_dishes_context(state)
         event_slots = {
             k: v["value"] for k, v in state["slots"].items()
@@ -496,6 +505,17 @@ async def ask_appetizers_node(state: ConversationState) -> ConversationState:
             context
         )
         state["current_node"] = "select_dishes"
+    else:
+        # Default: show the FULL appetizer menu directly — don't ask, just present
+        appetizer_context = await get_appetizer_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_appetizers']}\n\n"
+            "Present ALL appetizer items from the database as a numbered list. "
+            "Show EVERY item — do not summarize or skip any. "
+            "CRITICAL: Use ONLY the exact items from the database context below.",
+            appetizer_context
+        )
+        state["current_node"] = "select_appetizers"
 
     state["messages"] = add_ai_message(state, response)
     return state
@@ -572,9 +592,18 @@ async def collect_appetizer_style_node(state: ConversationState) -> Conversation
 
     style = await llm_extract(
         "The customer was asked if they want appetizers passed around or at a station. "
-        "Return ONLY: passed or station. If unclear, return station.",
+        "This is a REQUIRED choice — they must pick one. 'no', 'neither', 'skip' are NOT valid. "
+        "Return ONLY: passed, station, or unclear.",
         user_msg
     )
+    if style.strip().lower() == "unclear":
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer didn't pick between passed or station — this is required. "
+            "Explain casually that you need one of the two, then re-ask: passed around or set up at a station?",
+            f"Customer said: {user_msg}"
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
     fill_slot(state["slots"], "appetizer_style", style.strip().capitalize())
 
     # Wedding → plated vs buffet; Non-wedding → straight to main menu

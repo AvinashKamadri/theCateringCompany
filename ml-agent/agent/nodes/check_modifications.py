@@ -37,8 +37,8 @@ _CONDITIONAL_NODES = {
 def _adjust_node_for_slot_change(node: str, slots: dict) -> str:
     """Re-route conditional nodes when the underlying slot no longer matches.
 
-    For example, if event_type changed from Wedding to Birthday,
-    'wedding_message' should become 'collect_venue' instead.
+    For example, if event_type changed from Corporate to Wedding,
+    'collect_company_name' should become 'collect_fiance_name' instead.
     """
     rule = _CONDITIONAL_NODES.get(node)
     if not rule:
@@ -49,6 +49,17 @@ def _adjust_node_for_slot_change(node: str, slots: dict) -> str:
     current_value = slot_data.get("value")
 
     if not condition_fn(current_value):
+        # For event_type changes, route to the NEW event type's context node
+        if slot_name == "event_type" and current_value:
+            val = str(current_value).lower()
+            if "wedding" in val:
+                fallback = "collect_fiance_name"
+            elif "birthday" in val:
+                fallback = "collect_birthday_person"
+            elif "corporate" in val:
+                fallback = "collect_company_name"
+            else:
+                fallback = "collect_event_date"
         print(f"[CHECK_MODIFICATIONS] Rerouting {node} -> {fallback} (slot '{slot_name}' = '{current_value}')")
         return fallback
 
@@ -289,6 +300,16 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                 state["slots"][target_slot]["value"] = normalized_value
                 state["slots"][target_slot]["filled"] = True
                 state["slots"][target_slot]["modified_at"] = datetime.now().isoformat()
+
+                # Clear stale context slots when event_type changes
+                if target_slot == "event_type":
+                    _CONTEXT_SLOTS = ["partner_name", "company_name", "honoree_name"]
+                    for stale in _CONTEXT_SLOTS:
+                        if stale in state["slots"] and state["slots"][stale].get("filled"):
+                            state["slots"][stale] = {
+                                "value": None, "filled": False,
+                                "modified_at": None, "modification_history": [],
+                            }
 
                 slot_label = _get_slot_label(target_slot)
 

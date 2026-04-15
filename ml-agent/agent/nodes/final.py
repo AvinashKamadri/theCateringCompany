@@ -333,74 +333,70 @@ Prices are best estimates of future market value, subject to change."""
     contract_number = f"{config.CONTRACT_PREFIX}-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
     date_issued = datetime.now().strftime("%B %d, %Y")
 
-    contract_prompt = f"""Generate a CATERING SERVICE CONTRACT in the EXACT style of {config.COMPANY_NAME}.
+    # Build client-facing SHORT summary (no pricing — full contract goes to staff)
+    partner_line = f"\nPartner/Fiancé: {slots.get('partner_name')}" if slots.get('partner_name') else ""
+    company_line = f"\nCompany: {slots.get('company_name')}" if slots.get('company_name') else ""
+    honoree_line = f"\nBirthday Person: {slots.get('honoree_name')}" if slots.get('honoree_name') else ""
+    email_line = f"\nEmail: {slots.get('email')}" if slots.get('email') else ""
+    phone_line = f"\nPhone: {slots.get('phone')}" if slots.get('phone') else ""
+
+    contract_prompt = f"""Generate a SHORT EVENT SUMMARY for the client. NOT a full contract — no pricing, no billing, no legal terms.
+The full contract with pricing goes to our staff for review.
+
 Use ONLY the data below. Do NOT invent details.
 
-This should look like our real contracts (see Kelly Diep 2025 as reference):
-- NOT a formal legal document with "SECTION 1, SECTION 2" headers
-- A natural, professional catering contract with clear sections
-- Prices inline next to items (e.g. "Prime Rib - $42.25pp")
-- Billing summary at the bottom with tax and gratuity
-- Practical notes about service logistics
-
-IMPORTANT: Use these EXACT values — do NOT generate your own:
+IMPORTANT: Use these EXACT values:
 - Contract Number: {contract_number}
 - Date Issued: {date_issued}
 
 ---
 
-Client: {slots.get('name', 'N/A')}
-Date: {slots.get('event_date', 'N/A')}
+EVENT DETAILS:
+Client: {slots.get('name', 'N/A')}{email_line}{phone_line}{partner_line}{company_line}{honoree_line}
+Date of Event: {slots.get('event_date', 'N/A')}
 Location: {slots.get('venue', 'N/A')}
 Guest Count: {slots.get('guest_count', 'N/A')}
 Event Type: {slots.get('event_type', 'N/A')}
 Service Type: {slots.get('service_type', 'N/A')}
 Service Style: {slots.get('service_style', 'Not specified')}
+Appetizer Style: {slots.get('appetizer_style', 'Not specified')}
+Meal Style: {slots.get('meal_style', 'Not specified')}
 
-{package_note}
-
-Menu:
-{pricing_text}
-
+MENU (item names only — no prices):
+Main Dishes: {slots.get('selected_dishes', 'None')}
 Appetizers: {slots.get('appetizers', 'None')}
 Desserts: {slots.get('desserts', 'None')}
 Menu Notes: {slots.get('menu_notes', 'None')}
 
-Add-Ons:
-Utensils/Tableware: {slots.get('utensils', 'Not requested')}
+DRINKS & BAR:
+{slots.get('drinks', 'Water, Iced Tea, Lemonade (included)')}
+
+ADD-ONS:
+Utensils: {slots.get('utensils', 'Not requested')}
+Tableware: {slots.get('tableware', 'Standard Disposable')}
 Rentals: {slots.get('rentals', 'Not requested')}
+Labor Services: {slots.get('labor', 'Not requested')}
 
-Dietary & Special Instructions:
-{slots.get('dietary_concerns', 'None')}
-{slots.get('special_requests', 'None')}
-{slots.get('additional_notes', 'None')}
+NOTES:
+Dietary Concerns: {slots.get('dietary_concerns', 'None')}
+Special Requests: {slots.get('special_requests', 'None')}
+Additional Notes: {slots.get('additional_notes', 'None')}
+Follow-up Call: {slots.get('followup_call', 'Not requested')}
 
-Amendments:
-{mod_notes}
-
-{billing_summary}
+{mod_notes if mod_notes.strip() else ''}
 
 ---
 
-IMPORTANT FORMAT RULES:
-- Write in the NATURAL style of a real catering contract (NOT formal legal sections)
-- List each menu item with its per-person price (e.g. "Chicken Satay - $3.50pp")
-- Include the Billing Summary with the EXACT numbers above (tax, gratuity, total, deposit)
-- Add these standard policies at the bottom:
-  * Cancellation: {config.format_cancellation_policy()}
-  * Guest Count: If counts drop {config.GUEST_COUNT_VARIANCE_THRESHOLD*100:.0f}% below original, prices may vary
-  * Food Escalation: Costs subject to change to match market value
-  * Credit/Debit Fees: {config.CREDIT_CARD_FEE*100:.0f}% for cards, Venmo {config.VENMO_FEE*100:.0f}% fee, Checks to "{config.COMPANY_LEGAL_NAME}"
-  * Additional labor: ${config.ADDITIONAL_SERVER_RATE:.0f}/hr per server, ${config.ADDITIONAL_SUPERVISOR_RATE:.0f}/hr per supervisor over {config.OVERTIME_THRESHOLD_HOURS:.0f} hours onsite
-- Include signature block for both parties
-- Footer: "{'" and "'.join(config.CONTRACT_FOOTER_NOTES)}"
+FORMAT RULES:
+- Clean, organized event summary — NOT a legal contract
+- Item names only — NO prices, NO billing, NO tax calculations
+- End with: "Our team will finalize your quote and reach out within 24–48 hours."
 - Contact: {config.COMPANY_EMAIL}  {config.COMPANY_PHONE}
-- Do NOT add chatty commentary — just the contract."""
+- Keep it short and professional"""
 
     response = await llm_respond(
-        "You are a professional contract writer for a catering company. "
-        "Generate formal, legally-styled catering service agreements. "
-        "Be precise, thorough, and use proper contract formatting.",
+        f"{SYSTEM_PROMPT}\n\nGenerate a clean event summary for the client. "
+        "No pricing, no billing, no legal terms. Just a clear recap of everything they selected.",
         contract_prompt
     )
 
@@ -425,7 +421,7 @@ IMPORTANT FORMAT RULES:
         "summary": f"Catering contract for {client_name} — {slots.get('event_type', 'Event')} on {event_date}",
         "contract_text": response,
         "generated_at": datetime.now().isoformat(),
-        "status": "draft",
+        "status": "pending_staff_review",
     }
     state["is_complete"] = True
     state["current_node"] = "complete"

@@ -32,29 +32,33 @@
 }
 
 .folder.open .paper:nth-child(1) {
-  transform: translate(-140%, -110%) rotateZ(-20deg);
+  transform: translate(-115%, -145%) rotateZ(-18deg);
+  width: 90%;
+  height: 95%;
 }
 
 .folder.open .paper:nth-child(1):hover {
-  transform: translate(-140%, -110%) rotateZ(-20deg) scale(1.08);
+  transform: translate(-115%, -145%) rotateZ(-18deg) scale(1.06);
 }
 
 .folder.open .paper:nth-child(2) {
-  transform: translate(40%, -110%) rotateZ(20deg);
-  height: 80%;
+  transform: translate(20%, -145%) rotateZ(18deg);
+  width: 90%;
+  height: 95%;
 }
 
 .folder.open .paper:nth-child(2):hover {
-  transform: translate(40%, -110%) rotateZ(20deg) scale(1.08);
+  transform: translate(20%, -145%) rotateZ(18deg) scale(1.06);
 }
 
 .folder.open .paper:nth-child(3) {
-  transform: translate(-50%, -130%) rotateZ(0deg);
-  height: 85%;
+  transform: translate(-50%, -160%) rotateZ(0deg);
+  width: 92%;
+  height: 95%;
 }
 
 .folder.open .paper:nth-child(3):hover {
-  transform: translate(-50%, -130%) rotateZ(0deg) scale(1.08);
+  transform: translate(-50%, -160%) rotateZ(0deg) scale(1.06);
 }
 
 .folder.open .folder__front {

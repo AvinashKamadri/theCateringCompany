@@ -49,6 +49,19 @@ function isMultiSelect(items: ListItem[]): boolean {
   return (withPrices > 0 && items.length > 5) || items.length > 6;
 }
 
+// Confirmation messages list selected items — should be read-only, not interactive.
+const CONFIRM_PATTERNS = [
+  /just to confirm/i,
+  /your (menu|selection|order|choices?) (includes?|contains?|is)/i,
+  /to confirm.{0,30}(your|the) (menu|selection)/i,
+  /here'?s? (a )?summary/i,
+  /you('ve| have) selected/i,
+  /confirming your/i,
+];
+function isConfirmationMessage(intro: string): boolean {
+  return CONFIRM_PATTERNS.some((p) => p.test(intro));
+}
+
 function splitAtList(content: string): { intro: string } {
   const firstListLine = content.search(/^(?:\d+\.|[-•*])\s+/m);
   if (firstListLine === -1) return { intro: content };
@@ -129,23 +142,23 @@ function ItemSelector({
   selected,
   onSelectionChange,
   multi,
+  maxSelect,
 }: {
   items: ListItem[];
   selected: string[];
   onSelectionChange: (names: string[]) => void;
   multi: boolean;
+  maxSelect?: number;
 }) {
-  const MAX_SELECT = 4;
   const toggle = (name: string) => {
     if (multi) {
       const isSelected = selected.includes(name);
       if (isSelected) {
         onSelectionChange(selected.filter((n) => n !== name));
-      } else if (selected.length < MAX_SELECT) {
+      } else if (!maxSelect || selected.length < maxSelect) {
         onSelectionChange([...selected, name]);
       }
     } else {
-      // Single-select: toggle off if already selected, else replace
       onSelectionChange(selected.includes(name) ? [] : [name]);
     }
   };
@@ -160,7 +173,8 @@ function ItemSelector({
         </div>
         {selected.length > 0 && (
           <p className="text-xs text-neutral-500 mt-2">
-            <span className="font-medium text-neutral-800">{selected.length}</span>/{MAX_SELECT} selected — hit Send to confirm
+            <span className="font-medium text-neutral-800">{selected.length}</span>
+            {maxSelect ? `/${maxSelect}` : ''} selected — hit Send to confirm
           </p>
         )}
       </div>
@@ -513,7 +527,31 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
 
             if (msg.role === 'ai' && listItems) {
               const { intro } = splitAtList(msg.content);
+              const isConfirm = isConfirmationMessage(intro);
+
+              // Confirmation messages: render as plain read-only list, not interactive cards
+              if (isConfirm) {
+                return (
+                  <div key={idx} className="flex justify-start gap-2.5">
+                    <div className="flex flex-col items-center gap-1 shrink-0">
+                      <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
+                        <Sparkles className="w-3.5 h-3.5 text-white" />
+                      </div>
+                      <span className="text-[10px] text-neutral-400">AI</span>
+                    </div>
+                    <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-neutral-100 text-neutral-900">
+                      <MarkdownMessage content={msg.content} />
+                      <span className="text-xs mt-1 block text-neutral-400">{time}</span>
+                    </div>
+                  </div>
+                );
+              }
+
               const multi = isMultiSelect(listItems);
+              // Only cap desserts (items with no prices but exactly the dessert count ≤8)
+              const isDesserts = !listItems.some((i) => i.price) && listItems.length <= 8 && listItems.length > 6;
+              const maxSelect = isDesserts ? 4 : undefined;
+
               return (
                 <div key={idx} className="flex justify-start gap-2.5">
                   <div className="flex flex-col items-center gap-1 shrink-0">
@@ -533,6 +571,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       selected={menuSelections}
                       onSelectionChange={handleMenuSelectionChange}
                       multi={multi}
+                      maxSelect={maxSelect}
                     />
                     <span className="text-xs text-neutral-400 mt-1 block">{time}</span>
                   </div>

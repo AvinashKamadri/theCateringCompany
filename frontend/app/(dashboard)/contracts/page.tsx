@@ -136,37 +136,37 @@ export default function ContractsPage() {
 
               const folderItems = [
                 // Paper 1 — event date & guests
-                <div key="p1" style={{ padding: '4px 5px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div key="p1" style={{ padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {project?.event_date && (
-                    <span style={{ fontSize: 8, color: '#555', fontWeight: 600, lineHeight: 1.3 }}>
+                    <span style={{ fontSize: 11, color: '#333', fontWeight: 700, lineHeight: 1.3 }}>
                       {new Date(project.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
                   )}
                   {project?.guest_count != null && (
-                    <span style={{ fontSize: 8, color: '#777', lineHeight: 1.3 }}>
+                    <span style={{ fontSize: 10, color: '#666', lineHeight: 1.3 }}>
                       {project.guest_count} guests
                     </span>
                   )}
                   {!project?.event_date && !project?.guest_count && (
-                    <span style={{ fontSize: 8, color: '#999', lineHeight: 1.3 }}>No event info</span>
+                    <span style={{ fontSize: 10, color: '#999', lineHeight: 1.3 }}>No event info</span>
                   )}
                 </div>,
                 // Paper 2 — amount
-                <div key="p2" style={{ padding: '4px 5px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div key="p2" style={{ padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {contract.total_amount != null ? (
                     <>
-                      <span style={{ fontSize: 7, color: '#888', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total</span>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: '#222', lineHeight: 1.2 }}>
+                      <span style={{ fontSize: 9, color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>Total</span>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: '#111', lineHeight: 1.2 }}>
                         ${contract.total_amount.toLocaleString()}
                       </span>
                     </>
                   ) : (
-                    <span style={{ fontSize: 8, color: '#999' }}>No amount</span>
+                    <span style={{ fontSize: 10, color: '#999' }}>No amount</span>
                   )}
                 </div>,
                 // Paper 3 — status
-                <div key="p3" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                  <span style={{ fontSize: 7, fontWeight: 700, color: '#333', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center' }}>
+                <div key="p3" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '4px' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#222', textTransform: 'uppercase' as const, letterSpacing: '0.06em', textAlign: 'center' as const }}>
                     {statusLabel}
                   </span>
                 </div>,
@@ -179,7 +179,7 @@ export default function ContractsPage() {
                   className="flex flex-col items-center gap-3 group"
                 >
                   {/* Fixed-size box so scaled folder doesn't bleed into adjacent cells */}
-                  <div className="w-[180px] h-[155px] flex items-center justify-center" style={{ transformOrigin: 'top center' }}>
+                  <div className="w-[200px] h-[200px] flex items-end justify-center pb-2" style={{ transformOrigin: 'top center' }}>
                     <Folder color={FOLDER_COLOR} size={1.8} items={folderItems} />
                   </div>
 

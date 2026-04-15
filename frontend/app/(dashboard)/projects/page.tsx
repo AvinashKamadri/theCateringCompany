@@ -156,28 +156,28 @@ export default function ProjectsPage() {
 
               const folderItems = [
                 // Paper 1 — date & guests
-                <div key="p1" style={{ padding: '4px 5px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span style={{ fontSize: 8, color: '#555', fontWeight: 600, lineHeight: 1.3 }}>
+                <div key="p1" style={{ padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 11, color: '#333', fontWeight: 700, lineHeight: 1.3 }}>
                     {project.event_date
                       ? new Date(project.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                       : 'Date TBD'}
                   </span>
-                  <span style={{ fontSize: 8, color: '#777', lineHeight: 1.3 }}>
+                  <span style={{ fontSize: 10, color: '#666', lineHeight: 1.3 }}>
                     {project.guest_count != null ? `${project.guest_count} guests` : 'Guests TBD'}
                   </span>
                 </div>,
                 // Paper 2 — venue & event type
-                <div key="p2" style={{ padding: '4px 5px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span style={{ fontSize: 8, color: '#555', fontWeight: 600, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div key="p2" style={{ padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 11, color: '#333', fontWeight: 700, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                     {project.venue_name || 'Venue TBD'}
                   </span>
-                  <span style={{ fontSize: 8, color: '#777', lineHeight: 1.3, textTransform: 'capitalize' }}>
+                  <span style={{ fontSize: 10, color: '#666', lineHeight: 1.3, textTransform: 'capitalize' as const }}>
                     {project.event_type || '—'}
                   </span>
                 </div>,
                 // Paper 3 — status
-                <div key="p3" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                  <span style={{ fontSize: 7, fontWeight: 700, color: '#333', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center' }}>
+                <div key="p3" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '4px' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#222', textTransform: 'uppercase' as const, letterSpacing: '0.06em', textAlign: 'center' as const }}>
                     {STATUS_LABELS[project.status] ?? project.status}
                   </span>
                 </div>,
@@ -190,7 +190,7 @@ export default function ProjectsPage() {
                   className="flex flex-col items-center gap-3 group"
                 >
                   {/* Fixed-size box so scaled folder doesn't bleed into adjacent cells */}
-                  <div className="w-[180px] h-[155px] flex items-center justify-center">
+                  <div className="w-[200px] h-[200px] flex items-end justify-center pb-2">
                     <Folder color={FOLDER_COLOR} size={1.8} items={folderItems} />
                   </div>
 

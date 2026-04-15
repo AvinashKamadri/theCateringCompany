@@ -42,10 +42,24 @@ function parseListItems(content: string): ListItem[] | null {
   return items.length >= 2 ? items : null;
 }
 
-// Multi-select: many items with prices. Single-select: few options or no prices.
+// Multi-select: items with prices OR more than 6 options (e.g. desserts).
+// Single-select: few options like event types (≤6 items, no prices).
 function isMultiSelect(items: ListItem[]): boolean {
   const withPrices = items.filter((i) => i.price).length;
-  return withPrices > 0 && items.length > 5;
+  return (withPrices > 0 && items.length > 5) || items.length > 6;
+}
+
+// Confirmation messages list selected items — should be read-only, not interactive.
+const CONFIRM_PATTERNS = [
+  /just to confirm/i,
+  /your (menu|selection|order|choices?) (includes?|contains?|is)/i,
+  /to confirm.{0,30}(your|the) (menu|selection)/i,
+  /here'?s? (a )?summary/i,
+  /you('ve| have) selected/i,
+  /confirming your/i,
+];
+function isConfirmationMessage(intro: string): boolean {
+  return CONFIRM_PATTERNS.some((p) => p.test(intro));
 }
 
 function splitAtList(content: string): { intro: string } {
@@ -54,7 +68,7 @@ function splitAtList(content: string): { intro: string } {
   return { intro: content.slice(0, firstListLine).trimEnd() };
 }
 
-// ─── Option card (single-select) ──────────────────────────────────────────────
+// ─── Option card (single-select square) ───────────────────────────────────────
 
 function OptionCard({
   item,
@@ -68,19 +82,23 @@ function OptionCard({
   return (
     <button
       onClick={onToggle}
-      className={`relative flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left transition-all focus:outline-none w-full ${
+      className={`relative flex flex-col items-start justify-end h-20 rounded-xl border-2 p-3 text-left transition-all focus:outline-none w-full ${
         selected
           ? 'border-black bg-black text-white'
           : 'border-neutral-200 bg-white hover:border-neutral-400 text-neutral-900'
       }`}
     >
-      <span className="text-sm font-medium flex-1">{item.name}</span>
+      {selected && (
+        <div className="absolute top-2.5 right-2.5 w-5 h-5 bg-white rounded-full flex items-center justify-center shadow">
+          <Check className="w-3 h-3 text-black" strokeWidth={3} />
+        </div>
+      )}
+      <span className="text-sm font-semibold leading-tight">{item.name}</span>
       {item.price && (
-        <span className={`text-xs shrink-0 ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
+        <span className={`text-xs mt-0.5 ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
           {item.price}
         </span>
       )}
-      {selected && <Check className="w-4 h-4 shrink-0" strokeWidth={3} />}
     </button>
   );
 }
@@ -124,18 +142,23 @@ function ItemSelector({
   selected,
   onSelectionChange,
   multi,
+  maxSelect,
 }: {
   items: ListItem[];
   selected: string[];
   onSelectionChange: (names: string[]) => void;
   multi: boolean;
+  maxSelect?: number;
 }) {
   const toggle = (name: string) => {
     if (multi) {
-      const next = selected.includes(name) ? selected.filter((n) => n !== name) : [...selected, name];
-      onSelectionChange(next);
+      const isSelected = selected.includes(name);
+      if (isSelected) {
+        onSelectionChange(selected.filter((n) => n !== name));
+      } else if (!maxSelect || selected.length < maxSelect) {
+        onSelectionChange([...selected, name]);
+      }
     } else {
-      // Single-select: toggle off if already selected, else replace
       onSelectionChange(selected.includes(name) ? [] : [name]);
     }
   };
@@ -150,7 +173,8 @@ function ItemSelector({
         </div>
         {selected.length > 0 && (
           <p className="text-xs text-neutral-500 mt-2">
-            <span className="font-medium text-neutral-800">{selected.length}</span> selected — hit Send to confirm
+            <span className="font-medium text-neutral-800">{selected.length}</span>
+            {maxSelect ? `/${maxSelect}` : ''} selected — hit Send to confirm
           </p>
         )}
       </div>
@@ -158,10 +182,12 @@ function ItemSelector({
   }
 
   return (
-    <div className="mt-2 w-full space-y-2">
-      {items.map((item) => (
-        <OptionCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
-      ))}
+    <div className="mt-2 w-full">
+      <div className="grid grid-cols-3 gap-2">
+        {items.map((item) => (
+          <OptionCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
+        ))}
+      </div>
       {selected.length > 0 && (
         <p className="text-xs text-neutral-500 mt-1">Hit Send to confirm</p>
       )}
@@ -501,7 +527,31 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
 
             if (msg.role === 'ai' && listItems) {
               const { intro } = splitAtList(msg.content);
+              const isConfirm = isConfirmationMessage(intro);
+
+              // Confirmation messages: render as plain read-only list, not interactive cards
+              if (isConfirm) {
+                return (
+                  <div key={idx} className="flex justify-start gap-2.5">
+                    <div className="flex flex-col items-center gap-1 shrink-0">
+                      <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
+                        <Sparkles className="w-3.5 h-3.5 text-white" />
+                      </div>
+                      <span className="text-[10px] text-neutral-400">AI</span>
+                    </div>
+                    <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-neutral-100 text-neutral-900">
+                      <MarkdownMessage content={msg.content} />
+                      <span className="text-xs mt-1 block text-neutral-400">{time}</span>
+                    </div>
+                  </div>
+                );
+              }
+
               const multi = isMultiSelect(listItems);
+              // Only cap desserts (items with no prices but exactly the dessert count ≤8)
+              const isDesserts = !listItems.some((i) => i.price) && listItems.length <= 8 && listItems.length > 6;
+              const maxSelect = isDesserts ? 4 : undefined;
+
               return (
                 <div key={idx} className="flex justify-start gap-2.5">
                   <div className="flex flex-col items-center gap-1 shrink-0">
@@ -521,6 +571,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       selected={menuSelections}
                       onSelectionChange={handleMenuSelectionChange}
                       multi={multi}
+                      maxSelect={maxSelect}
                     />
                     <span className="text-xs text-neutral-400 mt-1 block">{time}</span>
                   </div>

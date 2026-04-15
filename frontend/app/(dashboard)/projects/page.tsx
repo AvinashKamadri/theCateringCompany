@@ -3,20 +3,12 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  Plus,
-  Search,
-  Calendar,
-  Users,
-  MapPin,
-  FileText,
-  KeyRound,
-  DollarSign,
-} from 'lucide-react';
+import { Plus, Search, FileText, KeyRound } from 'lucide-react';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { projectsApi, type Project } from '@/lib/api/projects';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import Folder from '@/components/ui/Folder';
 
 const STATUS_LABELS: Record<string, string> = {
   inquiry: 'Inquiry',
@@ -25,6 +17,16 @@ const STATUS_LABELS: Record<string, string> = {
   completed: 'Completed',
   draft: 'Draft',
 };
+
+const STATUS_STYLES: Record<string, string> = {
+  confirmed:     'bg-neutral-900 text-white',
+  completed:     'bg-neutral-800 text-white',
+  proposal_sent: 'bg-neutral-200 text-neutral-800',
+  inquiry:       'bg-neutral-100 text-neutral-600',
+  draft:         'bg-neutral-100 text-neutral-500',
+};
+
+const FOLDER_COLOR = '#1a1a1a';
 
 export default function ProjectsPage() {
   const router = useRouter();
@@ -35,10 +37,7 @@ export default function ProjectsPage() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.push('/signin');
-      return;
-    }
+    if (!isAuthenticated) { router.push('/signin'); return; }
     const load = async () => {
       try {
         setIsLoading(true);
@@ -54,7 +53,6 @@ export default function ProjectsPage() {
   }, [isAuthenticated, router]);
 
   const filtered = projects.filter((p) => {
-    // Hide nameless AI intake drafts — they haven't collected an event name yet
     if (p.name === 'AI Intake (draft)') return false;
     const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
     const matchStatus = filterStatus === 'all' || p.status === filterStatus;
@@ -80,9 +78,7 @@ export default function ProjectsPage() {
           <div className="flex items-center justify-between mb-5">
             <div>
               <h1 className="text-xl font-bold text-black">Projects</h1>
-              <p className="text-sm text-neutral-400 mt-0.5">
-                {user?.email}
-              </p>
+              <p className="text-sm text-neutral-400 mt-0.5">{user?.email}</p>
             </div>
             <div className="flex items-center gap-2">
               <Link
@@ -131,7 +127,7 @@ export default function ProjectsPage() {
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-6 py-6">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         {filtered.length === 0 ? (
           <div className="bg-white rounded-xl border border-neutral-200 p-16 text-center">
             <div className="flex justify-center mb-4">
@@ -154,82 +150,67 @@ export default function ProjectsPage() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((project) => (
-              <Link
-                key={project.id}
-                href={`/projects/${project.id}`}
-                className="bg-white rounded-xl border border-neutral-200 hover:border-black hover:shadow-sm transition-all group"
-              >
-                <div className="p-5">
-                  {/* Card header */}
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-semibold text-black truncate group-hover:text-black">
-                        {project.name}
-                      </h3>
-                      <p className="text-xs text-neutral-400 capitalize mt-0.5">{project.event_type ?? '—'}</p>
-                    </div>
-                    <span
-                      className={cn(
-                        'ml-3 shrink-0 px-2 py-0.5 rounded-md text-xs font-medium border',
-                        project.status === 'confirmed'
-                          ? 'bg-black text-white border-black'
-                          : project.status === 'completed'
-                          ? 'bg-neutral-800 text-white border-neutral-800'
-                          : 'bg-neutral-100 text-neutral-600 border-neutral-200'
-                      )}
-                    >
-                      {STATUS_LABELS[project.status] ?? project.status}
-                    </span>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+            {filtered.map((project) => {
+              const statusStyle = STATUS_STYLES[project.status] ?? STATUS_STYLES.draft;
+
+              const folderItems = [
+                // Paper 1 — date & guests
+                <div key="p1" style={{ padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 11, color: '#333', fontWeight: 700, lineHeight: 1.3 }}>
+                    {project.event_date
+                      ? new Date(project.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      : 'Date TBD'}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#666', lineHeight: 1.3 }}>
+                    {project.guest_count != null ? `${project.guest_count} guests` : 'Guests TBD'}
+                  </span>
+                </div>,
+                // Paper 2 — venue & event type
+                <div key="p2" style={{ padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 11, color: '#333', fontWeight: 700, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                    {project.venue_name || 'Venue TBD'}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#666', lineHeight: 1.3, textTransform: 'capitalize' as const }}>
+                    {project.event_type || '—'}
+                  </span>
+                </div>,
+                // Paper 3 — status
+                <div key="p3" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '4px' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#222', textTransform: 'uppercase' as const, letterSpacing: '0.06em', textAlign: 'center' as const }}>
+                    {STATUS_LABELS[project.status] ?? project.status}
+                  </span>
+                </div>,
+              ];
+
+              return (
+                <Link
+                  key={project.id}
+                  href={`/projects/${project.id}`}
+                  className="flex flex-col items-center gap-3 group"
+                >
+                  {/* Fixed-size box so scaled folder doesn't bleed into adjacent cells */}
+                  <div className="w-[200px] h-[200px] flex items-end justify-center pb-2">
+                    <Folder color={FOLDER_COLOR} size={1.8} items={folderItems} />
                   </div>
 
-                  {/* Meta */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-xs text-neutral-500">
-                      <Calendar className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-                      {project.event_date
-                        ? new Date(project.event_date).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric',
-                          })
-                        : 'Date TBD'}
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-neutral-500">
-                      <Users className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-                      {project.guest_count != null ? `${project.guest_count} guests` : 'Guests TBD'}
-                    </div>
-                    {project.venue_name && (
-                      <div className="flex items-center gap-2 text-xs text-neutral-500">
-                        <MapPin className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-                        <span className="truncate">{project.venue_name}</span>
-                      </div>
+                  {/* Label below folder */}
+                  <div className="text-center w-[180px] px-1">
+                    <p className="text-sm font-semibold text-neutral-900 truncate group-hover:text-black leading-snug">
+                      {project.name}
+                    </p>
+                    {project.event_type && (
+                      <p className="text-xs text-neutral-400 capitalize mt-0.5">{project.event_type}</p>
                     )}
-                    {project.total_price != null && (
-                      <div className="flex items-center gap-2 text-xs font-semibold text-black">
-                        <DollarSign className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-                        ${project.total_price.toLocaleString()}
-                      </div>
-                    )}
+                    <div className="flex items-center justify-center gap-2 mt-1 flex-wrap">
+                      <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-medium', statusStyle)}>
+                        {STATUS_LABELS[project.status] ?? project.status}
+                      </span>
+                    </div>
                   </div>
-
-                  {/* Footer */}
-                  <div className="mt-4 pt-4 border-t border-neutral-100">
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        router.push(`/projects/${project.id}`);
-                      }}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-black hover:bg-neutral-100 rounded-md transition-colors"
-                    >
-                      <FileText className="h-3.5 w-3.5" />
-                      Details
-                    </button>
-                  </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>

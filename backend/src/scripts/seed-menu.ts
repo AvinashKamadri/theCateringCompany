@@ -145,12 +145,15 @@ const menuData: MenuCategory[] = [
     name: 'Desserts & Coffee',
     sort_order: 8,
     items: [
-      {
-        name: 'Mini Dessert Display',
-        description: 'Select 4: Mousse Cups, Cannolis, Brownie Bites, Fruit Tarts, Mini Cupcakes, or Choc-Dipped Strawberries.',
-        unit_price: 5.25,
-        price_type: 'per_person',
-      },
+      // Individual desserts — guests select up to 4; price is per person for the dessert course
+      { name: 'Flavored Mousse Cup',        unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
+      { name: 'Lemon Bars',                 unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
+      { name: 'Blondies',                   unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
+      { name: '7-Layer Bars',               unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
+      { name: 'Brownies',                   unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
+      { name: 'Chocolate Chip Cookie Bars', unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
+      { name: 'Mini Assorted Cheesecakes',  unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
+      { name: 'Fruit Tarts',                unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
       {
         name: 'Coffee Bar',
         description: 'Dunkin\' Donuts Regular/Decaf, Hot Tea, Hot Chocolate, Syrups (Vanilla/Caramel/Hazelnut), and Creamers.',

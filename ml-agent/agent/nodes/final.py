@@ -9,7 +9,6 @@ from datetime import datetime
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
     get_last_human_message, add_ai_message, llm_extract, llm_respond,
-    is_affirmative, is_negative,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 from tools.pricing import calculate_event_pricing
@@ -25,10 +24,17 @@ async def ask_special_requests_node(state: ConversationState) -> ConversationSta
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # Check if the user already provided a request (not just "yes"/"no")
-    has_substance = len(user_msg.split()) > 4 and not is_negative(user_msg)
+    # Classify: did the user give an actual request, say yes (will tell us next), or decline?
+    intent = await llm_extract(
+        "The customer was asked if they have any special requests for their event. "
+        "Did they: (a) provide a specific request in their message, "
+        "(b) say yes but not specify what, or (c) decline/say no?\n\n"
+        "Return ONLY: request, yes, or no",
+        user_msg
+    )
+    intent_val = intent.strip().lower()
 
-    if has_substance:
+    if intent_val == "request":
         # User gave the actual request inline — store it directly
         fill_slot(state["slots"], "special_requests", user_msg.strip())
         response = await llm_respond(
@@ -38,7 +44,7 @@ async def ask_special_requests_node(state: ConversationState) -> ConversationSta
             f"Context: {_slots_context(state)}"
         )
         state["current_node"] = "collect_dietary"
-    elif is_affirmative(user_msg):
+    elif intent_val == "yes":
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nThe customer has special requests. "
             "Ask them to tell you about their special requests.",
@@ -63,8 +69,16 @@ async def collect_special_requests_node(state: ConversationState) -> Conversatio
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # If user says "that's all" / "nothing else", keep existing value and move on
-    if is_negative(user_msg):
+    # Only loop back if user is explicitly adding another request.
+    # Default to done — don't store vague/done responses as requests.
+    is_adding = await llm_extract(
+        "The customer was asked if they have more special requests. "
+        "Are they adding another specific request, or are they done? "
+        "Return ONLY: add or done",
+        user_msg
+    )
+
+    if is_adding.strip().lower() != "add":
         existing = get_slot_value(state["slots"], "special_requests")
         if not existing or existing == "none":
             fill_slot(state["slots"], "special_requests", "none")
@@ -182,10 +196,11 @@ async def ask_anything_else_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # Use LLM to detect if user wants to add something or is done
+    # Only route to collect_anything_else if user is explicitly naming/adding something.
+    # Default to done — vague/ambiguous responses proceed to followup.
     intent = await llm_extract(
-        "The customer was asked 'Is there anything else you need for your event?' "
-        "Are they adding something or saying they're done? "
+        "The customer was asked if they need anything else for their event. "
+        "Are they explicitly naming or requesting something new to add, or are they done? "
         "Return ONLY: add or done",
         user_msg
     )
@@ -426,6 +441,6 @@ FORMAT RULES:
         "status": "pending_staff_review",
     }
     state["is_complete"] = True
-    state["current_node"] = "complete"
+    state["current_node"] = "generate_contract"
     state["messages"] = add_ai_message(state, response)
     return state

@@ -353,12 +353,22 @@ async def load_menu_items(active_only: bool = True) -> list[dict]:
         include={"menu_categories": True},
         order={"name": "asc"},
     )
+    def _cat_display(cat) -> str:
+        if not cat:
+            return "Uncategorized"
+        section = cat.section or ""
+        name = cat.name or ""
+        if section and section != name:
+            return f"{section} - {name}"
+        return name
+
     return [
         {
             "id": row.id,
             "name": row.name,
             "description": row.description,
-            "category": row.menu_categories.name if row.menu_categories else "Uncategorized",
+            "section": row.menu_categories.section if row.menu_categories else "",
+            "category": _cat_display(row.menu_categories),
             "unit_price": float(row.unit_price) if row.unit_price else None,
             "price_type": str(row.price_type) if row.price_type else None,
             "minimum_quantity": row.minimum_quantity,
@@ -387,11 +397,17 @@ async def load_menu_by_category(active_only: bool = True) -> dict[str, list[dict
         items.sort(key=lambda i: i.name)
         if not items:
             continue
-        result[cat.name] = [
+        # Build display key: "Section - Name" when they differ, else just "Name"
+        section = cat.section or ""
+        name = cat.name or ""
+        display_key = f"{section} - {name}" if section and section != name else name
+        result[display_key] = [
             {
                 "id": item.id,
                 "name": item.name,
                 "description": item.description,
+                "section": section,
+                "category": name,
                 "unit_price": float(item.unit_price) if item.unit_price else None,
                 "price_type": str(item.price_type) if item.price_type else None,
                 "allergens": item.allergens,
@@ -410,7 +426,14 @@ async def load_menu_categories() -> list[dict]:
         where={"active": True},
         order={"sort_order": "asc"},
     )
-    return [{"id": row.id, "name": row.name} for row in rows]
+    return [
+        {
+            "id": row.id,
+            "section": row.section or "",
+            "name": row.name,
+        }
+        for row in rows
+    ]
 
 
 async def load_dessert_items() -> list[dict]:
@@ -420,6 +443,9 @@ async def load_dessert_items() -> list[dict]:
         where={
             "active": True,
             "OR": [
+                {"section": {"contains": "Dessert", "mode": "insensitive"}},
+                {"section": {"contains": "Coffee", "mode": "insensitive"}},
+                {"section": {"contains": "Cake", "mode": "insensitive"}},
                 {"name": {"contains": "Dessert", "mode": "insensitive"}},
                 {"name": {"contains": "Coffee", "mode": "insensitive"}},
                 {"name": {"contains": "Cake", "mode": "insensitive"}},

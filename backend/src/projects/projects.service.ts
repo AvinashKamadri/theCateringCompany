@@ -34,6 +34,12 @@ export class ProjectsService {
     const projects = await this.prisma.projects.findMany({
       where: {
         deleted_at: null,
+        NOT: [
+          { title: { startsWith: 'AI Catering Intake', mode: 'insensitive' } },
+          { title: { startsWith: 'AI Intake', mode: 'insensitive' } },
+          { title: { startsWith: 'Chat Project', mode: 'insensitive' } },
+          { title: { contains: 'intake', mode: 'insensitive' } },
+        ],
         OR: [
           { owner_user_id: userId },
           {

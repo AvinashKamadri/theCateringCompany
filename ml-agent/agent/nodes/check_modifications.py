@@ -382,7 +382,7 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
             print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] target_slot={target_slot}, raw new_value={new_value}")
             if target_slot == "event_date" and _contains_relative_date(resolved_value):
                 print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Resolving relative date: {resolved_value}")
-                resolved_value = await _resolve_relative_date(resolved_value)
+                resolved_value = _resolve_relative_date(resolved_value)
                 print(f"[CHECK_MODIFICATIONS {_MOD_VERSION}] Resolved to: {resolved_value}")
 
             validation_result = await validate_slot.ainvoke({

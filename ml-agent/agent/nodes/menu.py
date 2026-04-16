@@ -9,7 +9,7 @@ in slots, so pricing and contract generation work correctly.
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
     get_last_human_message, add_ai_message, llm_respond, llm_extract,
-    is_affirmative, is_negative,
+    build_numbered_list,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS, EXTRACTION_PROMPTS
 from database.db_manager import load_menu_by_category, load_dessert_items
@@ -17,6 +17,49 @@ from database.db_manager import load_menu_by_category, load_dessert_items
 
 def _slots_context(state):
     return {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+
+
+async def get_appetizer_items() -> list[dict]:
+    """Get flat list of all appetizer items from DB."""
+    menu = await load_menu_by_category()
+    items = []
+    for cat_name, cat_items in menu.items():
+        if _is_appetizer_category(cat_name):
+            items.extend(cat_items)
+    return items
+
+
+async def get_main_dish_items() -> tuple[list[dict], dict]:
+    """Get flat list + categorized dict of main dish items from DB."""
+    menu = await load_menu_by_category()
+    flat = []
+    categorized = {}
+    for cat_name, cat_items in menu.items():
+        if not _is_non_dish_category(cat_name) and not _is_appetizer_category(cat_name):
+            categorized[cat_name] = cat_items
+            flat.extend(cat_items)
+    return flat, categorized
+
+
+async def get_dessert_items(is_wedding: bool = False) -> list[dict]:
+    """Get flat list of dessert items, expanding mini desserts bundle."""
+    menu = await load_menu_by_category()
+    items = []
+    for cat_name, cat_items in menu.items():
+        cat_lower = cat_name.lower()
+        if "dessert" in cat_lower:
+            for item in cat_items:
+                if "mini desserts" in item["name"].lower() and item.get("description"):
+                    for sub in item["description"].split(","):
+                        sub = sub.strip()
+                        if sub:
+                            items.append({"name": sub, "unit_price": item["unit_price"],
+                                          "price_type": item["price_type"]})
+                else:
+                    items.append(item)
+        elif is_wedding and "cake" in cat_lower:
+            items.extend(cat_items)
+    return items
 
 
 def _is_appetizer_category(cat_name: str) -> bool:
@@ -39,6 +82,7 @@ def _is_non_dish_category(cat_name: str) -> bool:
         "corsage", "arbor", "center piece", "centerpiece", "table runner",
         "coffee", "beverage", "drink", "bar setup",
         "utensil", "rental", "linen", "chair", "table",
+        "bar supplies", "bar supply",
     ])
 
 
@@ -388,20 +432,18 @@ async def collect_meal_style_node(state: ConversationState) -> ConversationState
     else:
         note = ""
 
-    # Present the main menu
-    menu_context = await get_main_dishes_context(state)
-    response = await llm_respond(
+    # Python builds the main menu list
+    _, categorized = await get_main_dish_items()
+    menu_list = build_numbered_list([], categories=categorized, category_headers=True)
+    plated_note = " While these menus are shown buffet-style, just pick what's closest — we'll fine-tune on a quick call." if "plated" in choice else ""
+
+    intro = await llm_respond(
         f"{SYSTEM_PROMPT}\n\nMeal style: {choice}. {note} "
-        "Now present the main dish menu using the EXACT grouped format from the database context:\n"
-        "- Use section headers exactly as named (Signature Combinations, BBQ Menus, Tasty & Casual, Global Inspirations, Soup / Salad / Sandwich)\n"
-        "- Keep global sequential numbering — numbers continue across sections\n"
-        "- Show the price per item\n"
-        "- Do NOT collapse sections or merge categories\n"
-        "Add at the end: 'Think of this as a starting point — we can customize everything once you're booked.' "
-        "If plated, also add: 'While these menus are shown buffet-style, just pick what's closest — we'll fine-tune on a quick call.' "
-        "CRITICAL: Only list items from the database context.",
-        menu_context
+        f"Write a 1-line casual intro for the main menu.{plated_note} "
+        "Do NOT list any items — the list will be appended automatically.",
+        f"Meal style: {choice}"
     )
+    response = f"{intro}\n\n{menu_list}\n\nThink of this as a starting point — we can customize later. Pick 3 to 5 dishes!"
     state["current_node"] = "select_dishes"
     state["messages"] = add_ai_message(state, response)
     return state
@@ -416,8 +458,15 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # Custom menu escape hatch
-    if _re.search(r'\b(custom|none of these|schedule a call|nothing here|don.?t see)\b', user_msg.lower()):
+    # Custom menu escape hatch — LLM detects if user wants something not on the menu
+    custom_check = await llm_extract(
+        "The customer was shown a menu of dishes to choose from. "
+        "Are they requesting a CUSTOM menu or saying nothing on the list works for them? "
+        "Or are they picking items from the menu?\n\n"
+        "Return ONLY: custom or picking",
+        user_msg
+    )
+    if custom_check.strip().lower() == "custom":
         fill_slot(state["slots"], "menu_notes", "Custom menu requested — schedule call")
         fill_slot(state["slots"], "selected_dishes", "Custom menu — to be finalized on call")
         response = await llm_respond(
@@ -451,61 +500,20 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
 
     numbered_str = "\n".join(name_lines)
 
-    # Guard: reject non-food messages (corrections, slot updates) before processing
-    _NON_FOOD_SIGNALS = _re.compile(
-        r'\b(change|update|guest\s+count|guest count|venue|address|event date|service type|'
-        r'actually|wait|correction|i meant|no the|no my)\b',
-        _re.IGNORECASE,
-    )
-    if _NON_FOOD_SIGNALS.search(user_msg):
-        menu_context = await get_main_dishes_context(state)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            "The customer sent a message that is not a dish selection. "
-            "Politely redirect: remind them we are choosing main dishes right now, "
-            "and ask them to select 3 to 5 dishes by name from the list below.",
-            menu_context
+    # Fast path: user typed numbers → resolve directly without LLM
+    bare_numbers = _re.findall(r"\b(\d+)\b", user_msg)
+    if bare_numbers and all(n in number_to_name for n in bare_numbers):
+        extraction = ", ".join(number_to_name[n] for n in bare_numbers)
+    else:
+        extraction = await llm_extract(
+            "Extract the dish selections from this customer message. "
+            "The customer may refer to items by number or by name. "
+            "Use the numbered list below to map numbers to exact item names. "
+            "Return ONLY a comma-separated list of item names (no numbers, no extra text). "
+            "If the customer selected a whole category, return all item names in that category.\n\n"
+            f"Numbered menu:\n{numbered_str}",
+            user_msg
         )
-        state["messages"] = add_ai_message(state, response)
-        return state
-
-    # Guard: if user message is too short/vague (e.g. just "entrée", "ok", "yes"),
-    # re-present the menu instead of letting the LLM hallucinate all dishes as selected.
-    vague_msg = user_msg.strip().lower()
-    is_vague = (
-        len(vague_msg.split()) <= 2
-        and not any(item_name.lower() in vague_msg for item_name in all_item_names)
-    )
-    if is_vague and not _re.search(r'\b(skip|pass|none|no)\b', vague_msg):
-        menu_context = await get_main_dishes_context(state)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThe customer hasn't selected specific dishes yet. "
-            "Re-present the main dishes menu below and ask them to choose 3 to 5 dishes by name.",
-            menu_context
-        )
-        state["messages"] = add_ai_message(state, response)
-        return state
-
-    extraction = await llm_respond(
-        "You are a menu selection parser. Extract ONLY dish selections from this message.\n"
-        "Selections must be by item name only — do NOT accept numbers as selections.\n"
-        "Match customer input to the closest item name from the menu list below.\n"
-        "Return ONLY a comma-separated list of exact item names (no explanation).\n"
-        "If the message is NOT selecting dishes (e.g. it's a correction, question, or "
-        "unrelated topic), return exactly: NONE\n\n"
-        f"Available dishes:\n{numbered_str}",
-        f"Customer message: {user_msg}"
-    )
-    if extraction.strip().upper() == "NONE" or not extraction.strip():
-        menu_context = await get_main_dishes_context(state)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            "The customer's message did not select any dishes. "
-            "Politely ask them to choose 3 to 5 main dishes by name from the list below.",
-            menu_context
-        )
-        state["messages"] = add_ai_message(state, response)
-        return state
 
     # Build a MAIN-DISHES-ONLY menu so appetizer items can't accidentally be selected here
     main_dishes_menu = {
@@ -514,28 +522,13 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
     }
 
     # Check if user is trying to skip — main dishes are mandatory
-    skip_patterns = r'\b(skip|pass|no|none|next|move on|forget|skip menu|no menu|skip dishes?)\b'
-    is_trying_to_skip = bool(
-        _re.search(skip_patterns, user_msg, _re.IGNORECASE)
+    skip_check = await llm_extract(
+        "The customer was shown a main dish menu and asked to pick 3-5 dishes. "
+        "Are they trying to SKIP or decline the menu entirely, or are they making selections?\n\n"
+        "Return ONLY: skip or selecting",
+        user_msg
     )
-
-    # Guard: detect copy-paste (message contains bullet • or numbered list patterns)
-    # If the user pasted the whole menu back, reject it and ask them to type their choices
-    is_copy_paste = bool(
-        _re.search(r'•\s*\w', user_msg) or
-        _re.search(r'\d+\.\s+\w.+\$\d+', user_msg)  # "1. Item Name ($X.XX)"
-    )
-    if is_copy_paste:
-        menu_context = await get_main_dishes_context(state)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            "The customer appears to have copy-pasted the menu list. "
-            "Politely ask them to type ONLY the names of the 3 to 5 dishes they want, "
-            "separated by commas. Example: 'Southern Comfort, Marsala Menu, Burger Bar'.",
-            menu_context
-        )
-        state["messages"] = add_ai_message(state, response)
-        return state
+    is_trying_to_skip = skip_check.strip().lower() == "skip" and not bare_numbers
 
     # Resolve ONLY against main-dish categories (prevents appetizer items sneaking in)
     matched_items, resolved_text = await _resolve_to_db_items(extraction, main_dishes_menu)
@@ -585,9 +578,15 @@ async def ask_appetizers_node(state: ConversationState) -> ConversationState:
 
     # Only skip if user EXPLICITLY says "no appetizers" or "skip appetizers"
     # Note: on first entry the user_msg is their answer to guest count/service style, NOT about appetizers
-    # So we only skip if they very specifically mention skipping appetizers
-    skip_words = _re.search(r'\b(no appetizers|skip appetizers|skip apps|don.?t want appetizers)\b', user_msg, _re.IGNORECASE)
-    if skip_words:
+    skip_check = await llm_extract(
+        "The customer just answered a question (about guest count or service style). "
+        "Their response is being checked: did they EXPLICITLY say they want to skip appetizers? "
+        "Only return 'skip' if they clearly say 'no appetizers', 'skip appetizers', etc. "
+        "If they're just answering the previous question normally, return 'continue'.\n\n"
+        "Return ONLY: skip or continue",
+        user_msg
+    )
+    if skip_check.strip().lower() == "skip":
         fill_slot(state["slots"], "appetizers", "none")
         # Skip appetizers — go straight to main menu
         menu_context = await get_main_dishes_context(state)
@@ -669,43 +668,19 @@ async def select_appetizers_node(state: ConversationState) -> ConversationState:
 
     appetizer_names_str = "\n".join(name_lines)
 
-    # Guard: detect copy-paste (message contains bullet • or numbered list format)
-    is_copy_paste = bool(
-        _re.search(r'•\s*\w', user_msg) or
-        _re.search(r'\d+\.\s+\w.+\$\d+', user_msg)
-    )
-    if is_copy_paste:
-        appetizer_context = await get_appetizer_context(state)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            "The customer appears to have copy-pasted the menu list. "
-            "Politely ask them to type ONLY the names of the appetizers they want, "
-            "separated by commas. Example: 'Chicken Tikka Skewers, Deviled Egg, Bruschetta'.",
-            appetizer_context
+    # Fast path: user typed numbers → resolve directly without LLM
+    bare_numbers = _re.findall(r"\b(\d+)\b", user_msg)
+    if bare_numbers and all(n in number_to_name for n in bare_numbers):
+        extraction = ", ".join(number_to_name[n] for n in bare_numbers)
+    else:
+        extraction = await llm_extract(
+            "Extract the appetizer selections from this customer message. "
+            "The customer may refer to items by number or by name. "
+            "Use the numbered list below to map numbers to exact item names. "
+            "Return ONLY a comma-separated list of item names (no numbers).\n\n"
+            f"Numbered appetizer menu:\n{numbered_str}",
+            user_msg
         )
-        state["messages"] = add_ai_message(state, response)
-        return state
-
-    extraction = await llm_respond(
-        "You are a menu selection parser. Extract ONLY appetizer selections from this message.\n"
-        "Selections must be by item name only — do NOT accept numbers as selections.\n"
-        "Match customer input to the closest item name from the list below.\n"
-        "Return ONLY a comma-separated list of exact item names (no explanation).\n"
-        "If the message is NOT selecting appetizers (e.g. it's a correction, question, or "
-        "unrelated topic), return exactly: NONE\n\n"
-        f"Available appetizers:\n{appetizer_names_str}",
-        f"Customer message: {user_msg}"
-    )
-    if extraction.strip().upper() == "NONE" or not extraction.strip():
-        appetizer_context = await get_appetizer_context(state)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            "The customer's message did not select any appetizers. "
-            "Politely ask them to choose appetizers by name from the list below.",
-            appetizer_context
-        )
-        state["messages"] = add_ai_message(state, response)
-        return state
 
     matched_items, resolved_text = await _resolve_to_db_items(extraction, menu)
 
@@ -768,18 +743,17 @@ async def collect_appetizer_style_node(state: ConversationState) -> Conversation
         )
         state["current_node"] = "collect_meal_style"
     else:
-        menu_context = await get_main_dishes_context(state)
-        response = await llm_respond(
+        # Python builds the main menu list
+        _, categorized = await get_main_dish_items()
+        menu_list = build_numbered_list([], categories=categorized, category_headers=True)
+
+        intro = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nGot it — {style.strip()} style. "
-            "Now present the main dish menu using the EXACT grouped format from the database context:\n"
-            "- Use section headers exactly as named (Signature Combinations, BBQ Menus, Tasty & Casual, Global Inspirations, Soup / Salad / Sandwich)\n"
-            "- Keep global sequential numbering (numbers continue across sections)\n"
-            "- Show the price per item\n"
-            "- Do NOT collapse or merge categories\n"
-            "Add: 'Think of this as a starting point — we can customize later.' "
-            "CRITICAL: Only list items from the database context.",
-            menu_context
+            "Write ONE casual statement confirming the appetizer style. "
+            "Do NOT ask any question. Do NOT list any items. The menu is appended automatically.",
+            f"Appetizer style: {style}"
         )
+        response = f"{intro}\n\n{menu_list}\n\nThink of this as a starting point — we can customize later. Pick 3 to 5 dishes!"
         state["current_node"] = "select_dishes"
 
     state["messages"] = add_ai_message(state, response)
@@ -829,13 +803,15 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
 
     user_lower = user_msg.lower()
 
-    # Detect direct change action words ("add X", "remove X", "also include", etc.)
-    change_action_patterns = [
-        r'\badd\b', r'\bremove\b', r'\breplace\b', r'\bswap\b',
-        r'\balso\b', r'\binstead\b', r'\bswitch\b',
-        r'\bcan you (?:also|add|remove|include)\b',
-    ]
-    directly_requesting_change = any(_re.search(p, user_lower) for p in change_action_patterns)
+    # Detect if the user is directly requesting a change with specific details
+    direct_change_check = await llm_extract(
+        "The customer was asked if they want to make changes to their menu selections. "
+        "Are they directly requesting a specific change (add, remove, swap, replace an item) "
+        "or are they just saying yes/no/looks good?\n\n"
+        "Return ONLY: direct_change or response",
+        user_msg
+    )
+    directly_requesting_change = direct_change_check.strip().lower() == "direct_change"
 
     # If the user directly requested a change WITH details already in the message,
     # forward immediately to collect_menu_changes_node — no need to ask what they want.
@@ -853,17 +829,14 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
         return await collect_menu_changes_node(state)
 
     # Use LLM to determine: happy with selections (finalize) vs want to redo (re-show menu)
-    from agent.nodes.helpers import llm_extract
     intent = await llm_extract(
-        "The customer was shown their menu selections and asked 'Anything to tweak, or rolling with this?' "
-        "Does their reply mean: "
-        "A) They're HAPPY and want to move on (e.g. 'looks good', 'perfect', 'rolling', 'ok', 'yes', 'let's go') "
-        "B) They want to REDO/CHANGE selections (e.g. 'no', 'nah', 'nope', 'not really', 'show me again', 'redo') "
-        "Return ONLY: happy or redo",
+        "The customer was asked if they want to make changes to their dish selections. "
+        "Do they want to change something, or are they done and ready to move on? "
+        "Return ONLY: change or done",
         user_msg
     )
 
-    if intent.strip().lower() == "redo":
+    if intent.strip().lower() == "change":
         if total_revisions >= MAX_REVISIONS:
             response = await llm_respond(
                 f"{SYSTEM_PROMPT}\n\n"
@@ -872,14 +845,15 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
             )
             state["current_node"] = "ask_desserts"
         else:
-            # Re-show the full menu
-            menu_context = await get_main_dishes_context(state)
-            response = await llm_respond(
-                f"{SYSTEM_PROMPT}\n\nCustomer wants to re-select dishes. Re-present the full menu as a numbered list. "
-                "Ask them to pick 3–5 dishes. "
-                "CRITICAL: Only list items from the database context. Do NOT invent any item.",
-                menu_context
+            # Re-show the full menu — Python built
+            _, categorized = await get_main_dish_items()
+            menu_list = build_numbered_list([], categories=categorized, category_headers=True)
+            intro = await llm_respond(
+                f"{SYSTEM_PROMPT}\n\nCustomer wants to re-select dishes. "
+                "Write a casual 1-line transition. Do NOT list items.",
+                f"Current menu: {_slots_context(state)}"
             )
+            response = f"{intro}\n\n{menu_list}\n\nPick 3 to 5 dishes!"
             state["current_node"] = "select_dishes"
     else:
         response = await llm_respond(
@@ -919,14 +893,14 @@ async def collect_menu_changes_node(state: ConversationState) -> ConversationSta
     menu = await load_menu_by_category()
 
     # --- Step 1: Use LLM to parse intent, items, and target slot ---
-    extraction = await llm_respond(
+    extraction = await llm_extract(
         "You are a menu change parser. Analyze the customer's change request and return a JSON object with:\n"
         '- "action": one of "add", "remove", "replace"\n'
         '- "items": comma-separated names of items to add or remove\n'
         '- "replace_with": (only for replace action) comma-separated new item names\n'
         '- "slot": "dishes" if they are changing main dishes/entrees, "appetizers" if changing appetizers/hors d\'oeuvres\n'
         "Return ONLY valid JSON with no markdown, no explanation.",
-        f"Customer change request: {user_msg}"
+        user_msg
     )
 
     try:

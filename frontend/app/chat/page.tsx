@@ -49,8 +49,10 @@ function removeSession(threadId: string) {
 }
 
 /** Right-side event plan panel */
-function EventPlanPanel({ slots }: {
+function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
   slots: Partial<ContractData>;
+  mobileOpen?: boolean;
+  onMobileToggle?: () => void;
 }) {
   const [itemsOpen, setItemsOpen] = useState(false);
   const hasDate     = !!slots.event_date;
@@ -78,172 +80,156 @@ function EventPlanPanel({ slots }: {
     } catch { return d; }
   };
 
-  return (
-    <div className="w-72 xl:w-80 bg-white border-l border-neutral-200 flex flex-col overflow-y-auto shrink-0">
-      {/* Panel header */}
-      <div className="px-5 pt-6 pb-4 border-b border-neutral-100">
-        <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">
-          Your Event Plan
-        </p>
-      </div>
-
-      <div className="px-5 py-5 flex-1">
-        {!hasAnyDetail ? (
-          /* Empty state */
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center mb-3">
-              <UtensilsCrossed className="w-5 h-5 text-neutral-300" />
+  const panelContent = (
+    <div className="space-y-5">
+      {!hasAnyDetail ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <div className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center mb-3">
+            <UtensilsCrossed className="w-5 h-5 text-neutral-300" />
+          </div>
+          <p className="text-sm text-neutral-400 leading-relaxed">
+            Your event details will<br />appear here as we chat.
+          </p>
+        </div>
+      ) : (
+        <>
+          {(hasName || hasEventType || hasDate || hasGuests || hasVenue) && (
+            <div className="space-y-3">
+              {hasName && (
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <Users className="w-3.5 h-3.5 text-neutral-500" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Client</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.name}</p>
+                  </div>
+                </div>
+              )}
+              {hasEventType && (
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-500" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Event</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.event_type}</p>
+                  </div>
+                </div>
+              )}
+              {hasDate && (
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <CalendarDays className="w-3.5 h-3.5 text-neutral-500" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Date</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{formatDate(slots.event_date!)}</p>
+                  </div>
+                </div>
+              )}
+              {hasGuests && (
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <Users className="w-3.5 h-3.5 text-neutral-500" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Guests</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.guest_count} Attendees</p>
+                  </div>
+                </div>
+              )}
+              {hasVenue && (
+                <div className="flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <MapPin className="w-3.5 h-3.5 text-neutral-500" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Location</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.venue}</p>
+                  </div>
+                </div>
+              )}
             </div>
-            <p className="text-sm text-neutral-400 leading-relaxed">
-              Your event details will<br />appear here as we chat.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-5">
-            {/* Core event details */}
-            {(hasName || hasEventType || hasDate || hasGuests || hasVenue) && (
-              <div className="space-y-3">
-                {hasName && (
-                  <div className="flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
-                      <Users className="w-3.5 h-3.5 text-neutral-500" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Client</p>
-                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.name}</p>
-                    </div>
-                  </div>
-                )}
+          )}
 
-                {hasEventType && (
-                  <div className="flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
-                      <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-500" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Event</p>
-                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.event_type}</p>
-                    </div>
-                  </div>
-                )}
-
-                {hasDate && (
-                  <div className="flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
-                      <CalendarDays className="w-3.5 h-3.5 text-neutral-500" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Date</p>
-                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{formatDate(slots.event_date!)}</p>
-                    </div>
-                  </div>
-                )}
-
-                {hasGuests && (
-                  <div className="flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
-                      <Users className="w-3.5 h-3.5 text-neutral-500" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Guests</p>
-                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.guest_count} Attendees</p>
-                    </div>
-                  </div>
-                )}
-
-                {hasVenue && (
-                  <div className="flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
-                      <MapPin className="w-3.5 h-3.5 text-neutral-500" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Location</p>
-                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.venue}</p>
-                    </div>
-                  </div>
-                )}
+          {foodItems.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">Selected Items</p>
+                <span className="text-xs text-neutral-400 tabular-nums">{foodItems.length}</span>
               </div>
-            )}
-
-            {/* Food items — peek 4.5 items, expand on click */}
-            {foodItems.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">
-                    Selected Items
-                  </p>
-                  <span className="text-xs text-neutral-400 tabular-nums">{foodItems.length}</span>
-                </div>
-                <div className="relative">
-                  <div
-                    className={`space-y-2 overflow-hidden transition-all duration-300 ${
-                      itemsOpen ? 'max-h-[2000px]' : 'max-h-[198px]'
-                    }`}
-                  >
-                    {foodItems.map((item, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100"
-                      >
-                        <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
-                          <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
-                        </div>
-                        <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
+              <div className="relative">
+                <div className={`space-y-2 overflow-hidden transition-all duration-300 ${itemsOpen ? 'max-h-[2000px]' : 'max-h-[198px]'}`}>
+                  {foodItems.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100">
+                      <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
+                        <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
                       </div>
-                    ))}
-                  </div>
-
-                  {/* Blur + arrow overlay when collapsed and more items exist */}
-                  {!itemsOpen && foodItems.length > 4 && (
-                    <div className="absolute bottom-0 left-0 right-0 h-16 bg-linear-to-t from-white to-transparent pointer-events-none" />
-                  )}
+                      <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
+                    </div>
+                  ))}
                 </div>
-
-                {foodItems.length > 4 && (
-                  <button
-                    onClick={() => setItemsOpen((o) => !o)}
-                    className="mt-1 w-full flex items-center justify-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 py-1 transition-colors"
-                  >
-                    <ChevronDown
-                      className={`w-3.5 h-3.5 transition-transform ${itemsOpen ? 'rotate-180' : ''}`}
-                    />
-                    {itemsOpen ? 'Show less' : `View all ${foodItems.length} items`}
-                  </button>
+                {!itemsOpen && foodItems.length > 4 && (
+                  <div className="absolute bottom-0 left-0 right-0 h-16 bg-linear-to-t from-white to-transparent pointer-events-none" />
                 )}
               </div>
-            )}
+              {foodItems.length > 4 && (
+                <button onClick={() => setItemsOpen((o) => !o)} className="mt-1 w-full flex items-center justify-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 py-1 transition-colors">
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${itemsOpen ? 'rotate-180' : ''}`} />
+                  {itemsOpen ? 'Show less' : `View all ${foodItems.length} items`}
+                </button>
+              )}
+            </div>
+          )}
 
-            {/* Additional details */}
-            {slots.service_type && (
-              <div>
-                <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">
-                  Service
-                </p>
-                <p className="text-sm text-neutral-800 capitalize">{slots.service_type.replace('-', ' ')}</p>
-              </div>
-            )}
-
-            {slots.dietary_concerns && slots.dietary_concerns !== 'none' && (
-              <div>
-                <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">
-                  Dietary Notes
-                </p>
-                <p className="text-sm text-neutral-800">{slots.dietary_concerns}</p>
-              </div>
-            )}
-
-            {slots.special_requests && slots.special_requests !== 'none' && (
-              <div>
-                <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">
-                  Special Requests
-                </p>
-                <p className="text-sm text-neutral-800">{slots.special_requests}</p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+          {slots.service_type && (
+            <div>
+              <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">Service</p>
+              <p className="text-sm text-neutral-800 capitalize">{slots.service_type.replace('-', ' ')}</p>
+            </div>
+          )}
+          {slots.dietary_concerns && slots.dietary_concerns !== 'none' && (
+            <div>
+              <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">Dietary Notes</p>
+              <p className="text-sm text-neutral-800">{slots.dietary_concerns}</p>
+            </div>
+          )}
+          {slots.special_requests && slots.special_requests !== 'none' && (
+            <div>
+              <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">Special Requests</p>
+              <p className="text-sm text-neutral-800">{slots.special_requests}</p>
+            </div>
+          )}
+        </>
+      )}
     </div>
+  );
+
+  return (
+    <>
+      {/* Mobile: slide-up bottom sheet (shown when mobileOpen) */}
+      {mobileOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={onMobileToggle} />
+          <div className="relative bg-white rounded-t-2xl max-h-[75vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-neutral-100 shrink-0">
+              <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">Your Event Plan</p>
+              <button onClick={onMobileToggle} className="text-sm text-neutral-500 hover:text-black px-2 py-1">Close</button>
+            </div>
+            <div className="overflow-y-auto px-5 py-4 flex-1">{panelContent}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Desktop: right sidebar */}
+      <div className="hidden lg:flex w-72 xl:w-80 bg-white border-l border-neutral-200 flex-col overflow-y-auto shrink-0">
+        <div className="px-5 pt-6 pb-4 border-b border-neutral-100">
+          <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">Your Event Plan</p>
+        </div>
+        <div className="px-5 py-5 flex-1">{panelContent}</div>
+      </div>
+    </>
   );
 }
 
@@ -263,6 +249,7 @@ function AiIntakeContent() {
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [currentSlots, setCurrentSlots] = useState<Partial<ContractData>>({});
   const [, setProgress] = useState<{ filled: number; total: number }>({ filled: 0, total: 20 });
+  const [mobileEventPlanOpen, setMobileEventPlanOpen] = useState(false);
 
   const isStaff = user?.role === 'staff' || user?.email?.toLowerCase().endsWith('@catering-company.com');
 
@@ -393,9 +380,9 @@ function AiIntakeContent() {
     <div className="h-screen flex flex-col bg-neutral-50">
       <AppNav />
 
-      <div className="flex flex-1 overflow-hidden pt-14">
+      <div className="flex flex-1 overflow-hidden pt-14 min-h-0">
         {/* Left: main content area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Thin top bar for session switching + saving indicator */}
           {(view === 'chat' && sessions.filter((s) => !s.error).length > 0) || isSaving ? (
             <div className="bg-white border-b border-neutral-100 px-6 py-2 flex items-center justify-between shrink-0">
@@ -422,9 +409,9 @@ function AiIntakeContent() {
 
           {/* Session Picker */}
           {view === 'picker' && !loadingSessions && (
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-6">
               <div className="max-w-lg mx-auto bg-white rounded-xl border border-neutral-200 overflow-hidden">
-                <div className="px-6 py-5 border-b border-neutral-100">
+                <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-neutral-100">
                   <h2 className="font-semibold text-neutral-900">Your intake sessions</h2>
                   <p className="text-sm text-neutral-500 mt-0.5">Continue where you left off, or start fresh</p>
                 </div>
@@ -525,8 +512,23 @@ function AiIntakeContent() {
           )}
         </div>
 
-        {/* Right: event plan panel */}
-        <EventPlanPanel slots={currentSlots} />
+        {/* Right: event plan panel (desktop sidebar + mobile sheet) */}
+        <EventPlanPanel
+          slots={currentSlots}
+          mobileOpen={mobileEventPlanOpen}
+          onMobileToggle={() => setMobileEventPlanOpen((o) => !o)}
+        />
+
+        {/* Mobile: floating pill to open event plan */}
+        {Object.keys(currentSlots).length > 0 && (
+          <button
+            onClick={() => setMobileEventPlanOpen(true)}
+            className="lg:hidden fixed bottom-24 right-4 z-40 flex items-center gap-1.5 bg-black text-white text-xs font-medium px-3 py-2 rounded-full shadow-lg"
+          >
+            <UtensilsCrossed className="w-3.5 h-3.5" />
+            View Plan
+          </button>
+        )}
       </div>
     </div>
   );

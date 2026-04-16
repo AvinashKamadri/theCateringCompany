@@ -28,7 +28,7 @@ SLOT_KEYWORDS = {
     "event_type": ["wedding", "corporate", "birthday", "event type"],
     "special_requests": ["dietary", "halal", "vegan", "allergy", "allergies", "restrictions"],
     "appetizers": ["appetizer", "hors d'oeuvres", "hors doeuvres", "starter", "starters", "apps"],
-    "selected_dishes": ["dish", "dishes", "entree", "entrees", "main course", "main dish", "food selection"],
+    "selected_dishes": ["dish", "dishes", "entree", "entrees", "main course", "main dish", "food selection", "menu", "the menu", "main menu"],
     "desserts": ["dessert", "desserts", "cake", "cupcake", "brownie", "cookie", "mousse", "cheesecake", "lemon bar", "blondie", "fruit tart", "mini dessert"],
     "utensils": ["utensil", "utensils", "bamboo", "plastic", "eco-friendly", "silverware", "flatware"],
     "rentals": ["rental", "rentals", "linen", "linens", "table", "tables", "chair", "chairs"],
@@ -167,7 +167,7 @@ The user is trying to modify one of these fields:
 - guest_count: Number of guests
 - special_requests: Dietary restrictions, allergies, special requests
 - appetizers: Appetizer / hors d'oeuvres selections (add or remove specific items)
-- selected_dishes: Main dish / entrée selections (add or remove specific items)
+- selected_dishes: Main dish / entrée / menu selections (add or remove specific items; "the menu" or "main menu" refers to this)
 - desserts: Dessert selections (add or remove items like brownies, mousse cup, cake, etc.)
 - utensils: Utensil type (bamboo, plastic, eco-friendly)
 - rentals: Rental items (linens, tables, chairs)
@@ -176,6 +176,7 @@ The user is trying to modify one of these fields:
 - honoree_name: Birthday person name
 
 For appetizers, selected_dishes, and desserts, the new_value should be a comma-separated list of the item names the user wants to ADD or the full instruction (e.g. "add Brownies" or "remove Chicken Satay").
+For special_requests, dietary_concerns, and additional_notes, new_value must contain ONLY the new information mentioned in the user's current message — do NOT include any existing values already in the slot context.
 
 Analyze the user's message and identify:
 1. Which field they want to modify

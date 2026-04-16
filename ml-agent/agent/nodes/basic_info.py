@@ -9,9 +9,10 @@ from datetime import datetime, timedelta
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
     get_last_human_message, add_ai_message, llm_extract, llm_respond,
+    build_numbered_list,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS, EXTRACTION_PROMPTS
-from agent.nodes.menu import get_main_dishes_context, get_appetizer_context
+from agent.nodes.menu import get_main_dishes_context, get_appetizer_context, get_appetizer_items, get_main_dish_items, get_dessert_items
 
 
 async def _extract_and_respond(state, slot_name, next_node, node_key):
@@ -125,12 +126,15 @@ async def collect_contact_node(state: ConversationState) -> ConversationState:
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
 
+    event_type_list = "1. Wedding\n2. Birthday\n3. Corporate\n4. Social\n5. Custom"
+
     if final_email and final_phone:
-        response = await llm_respond(
+        intro = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nGot email and phone. Confirm briefly, then ask what kind of event they're planning. "
-            "Show numbered options:\n1. Wedding\n2. Birthday\n3. Corporate\n4. Social\n5. Custom",
+            "Do NOT list the event types — the list will be appended automatically.",
             f"Email: {final_email}, Phone: {final_phone}\nSlots: {slots_summary}"
         )
+        response = f"{intro}\n\n{event_type_list}"
         state["current_node"] = "select_event_type"
     elif final_email and not final_phone:
         response = await llm_respond(
@@ -511,24 +515,19 @@ async def collect_guest_count_node(state: ConversationState) -> ConversationStat
         state["current_node"] = "select_service_style"
     else:
         # Non-wedding: confirm guest count AND show appetizer menu directly (no wait)
-        appetizer_context = await get_appetizer_context(state)
-        context = (
-            f"Guest count confirmed: {extracted}\n"
-            f"Event type: {event_type}\n\n"
-            f"{appetizer_context}"
+        # Python builds the list — LLM only generates the intro
+        app_items = await get_appetizer_items()
+        app_list = build_numbered_list(app_items, show_price=True)
+        favorites = ", ".join(i["name"] for i in app_items[:3])
+
+        intro = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nConfirm {extracted} guests in one brief line. "
+            f"Then write a casual 1-line intro for the appetizer menu. "
+            f"Mention these crowd favorites: {favorites}. "
+            "Do NOT list any items — the list will be appended automatically.",
+            f"Guest count: {extracted}, Event: {event_type}"
         )
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nConfirm the guest count in one brief line. "
-            "Then present the FULL appetizer menu from the database using this EXACT grouped format:\n"
-            "- Bold section headers matching the group names (Chicken, Pork, Beef, Seafood, Canapes, Vegetarian)\n"
-            "- Show the group price on the header when all items share the same price (e.g. '$3.50 pp/option')\n"
-            "- Keep global sequential numbering — numbers continue across groups\n"
-            "- For Seafood, Canapes, and Vegetarian show individual price per item since they vary\n"
-            "- Show EVERY item — no skipping\n"
-            "Add a casual intro mentioning crowd favorites, and end with: 'pick as many as you'd like — or say skip to go straight to the main menu.'\n"
-            "CRITICAL: Only list items from the database. Show ALL items.",
-            context,
-        )
+        response = f"{intro}\n\n{app_list}\n\nPick as many as you'd like! If you don't want appetizers, just say skip."
         state["current_node"] = "select_appetizers"
 
     state["messages"] = add_ai_message(state, response)
@@ -584,24 +583,19 @@ async def select_service_style_node(state: ConversationState) -> ConversationSta
         f"CURRENT slot values: {slots_summary}"
     )
     # Confirm service style AND show appetizer menu directly (no wait)
-    appetizer_context = await get_appetizer_context(state)
-    combined_context = (
-        f"Service style confirmed: {extracted}\n"
-        f"Slots: {slots_summary}\n\n"
-        f"{appetizer_context}"
+    # Python builds the list — LLM only generates the intro
+    app_items = await get_appetizer_items()
+    app_list = build_numbered_list(app_items, show_price=True)
+    favorites = ", ".join(i["name"] for i in app_items[:3])
+
+    intro = await llm_respond(
+        f"{SYSTEM_PROMPT}\n\nConfirm {extracted} service style in one brief line. "
+        f"Then write a casual 1-line intro for the cocktail hour appetizers. "
+        f"Mention these crowd favorites: {favorites}. "
+        "Do NOT list any items — the list will be appended automatically.",
+        f"Service style: {extracted}"
     )
-    response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\nConfirm the service style briefly. "
-        "Then present the FULL appetizer menu from the database using this EXACT grouped format:\n"
-        "- Bold section headers matching the group names (Chicken, Pork, Beef, Seafood, Canapes, Vegetarian)\n"
-        "- Show the group price on the header when all items share the same price (e.g. '$3.50 pp/option')\n"
-        "- Keep global sequential numbering — numbers continue across groups\n"
-        "- For Seafood, Canapes, and Vegetarian show individual price per item since they vary\n"
-        "- Show EVERY item — no skipping\n"
-        "Mention crowd favorites from the list. Say 'pick as many as you'd like'.\n"
-        "CRITICAL: Only list items from the database. Show ALL items.",
-        combined_context,
-    )
+    response = f"{intro}\n\n{app_list}\n\nPick as many as you'd like!"
 
     state["current_node"] = "select_appetizers"
     state["messages"] = add_ai_message(state, response)

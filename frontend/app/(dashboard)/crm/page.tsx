@@ -16,6 +16,13 @@ import {
   AlertCircle,
   BarChart3,
   MessageSquare,
+  Loader2,
+  ThumbsUp,
+  ThumbsDown,
+  DollarSign,
+  Calculator,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { apiClient } from '@/lib/api/client';
@@ -203,6 +210,17 @@ export default function CRMPage() {
   const [pendingContracts, setPendingContracts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'overview' | 'pipeline' | 'list'>('overview');
+  const [lineItems, setLineItems] = useState<Array<{ description: string; quantity: number; unitPrice: number }>>([]);
+  const [taxRate, setTaxRate] = useState(9.4);
+  const [gratuityRate, setGratuityRate] = useState(20);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
+  const [activeContract, setActiveContract] = useState<any>(null);
+  const [tab, setTab] = useState<Tab>('pipeline');
+  const [pipelineView, setPipelineView] = useState<PipelineView>('kanban');
+  const [calculating, setCalculating] = useState(false);
+  const [savingPricing, setSavingPricing] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) { router.push('/signin'); return; }
@@ -362,7 +380,7 @@ export default function CRMPage() {
   };
 
   // Analytics
-  const analytics = useMemo(() => {
+  const analyticsComputed = useMemo(() => {
     const byStatus = stats?.by_status ?? {};
     const donutData = STAGES.map(([key, cfg]) => ({
       label: cfg.label,
@@ -852,22 +870,23 @@ export default function CRMPage() {
                           className="block bg-white border border-neutral-200 rounded-xl p-3.5 hover:shadow-md hover:border-neutral-300 transition-all duration-150 group"
                           style={{ borderLeft: `3px solid ${color}` }}
                         >
-                          {/* Title */}
-                          <p className="text-xs font-semibold text-black leading-snug line-clamp-2 group-hover:text-neutral-700 mb-2">
-                            {lead.title}
-                          </h4>
-                          <ExternalLink className="h-3 w-3 text-neutral-300 shrink-0 mt-0.5" />
-                        </div>
-                        <p className="text-xs text-neutral-500 truncate">
-                          {lead.client_name || lead.client_email}
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1">
-                          {lead.event_date && (
-                            <span className="flex items-center gap-0.5 text-xs text-neutral-400">
-                              <Calendar className="h-3 w-3" />
-                              {new Date(lead.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            </span>
-                          )}
+                          <div className="flex items-start justify-between gap-1.5 mb-2">
+                            <p className="text-xs font-semibold text-black leading-snug line-clamp-2 group-hover:text-neutral-700">
+                              {lead.title}
+                            </p>
+                            <ExternalLink className="h-3 w-3 text-neutral-300 shrink-0 mt-0.5" />
+                          </div>
+                          <p className="text-xs text-neutral-500 truncate">
+                            {lead.client_name || lead.client_email}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1">
+                            {lead.event_date && (
+                              <span className="flex items-center gap-0.5 text-xs text-neutral-400">
+                                <Calendar className="h-3 w-3" />
+                                {new Date(lead.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              </span>
+                            )}
+                          </div>
                         </Link>
                       );
                     })}
@@ -1257,12 +1276,12 @@ export default function CRMPage() {
               {[
                 {
                   label: 'Conversion Rate',
-                  value: `${analytics.convRate}%`,
+                  value: `${analyticsComputed.convRate}%`,
                   sub: `${stats.by_status.completed ?? 0} completed of ${stats.total} total`,
                 },
                 {
                   label: 'AI Adoption',
-                  value: `${analytics.aiRate}%`,
+                  value: `${analyticsComputed.aiRate}%`,
                   sub: `${stats.via_ai} leads via AI intake`,
                 },
                 {
@@ -1286,9 +1305,9 @@ export default function CRMPage() {
                 <h3 className="text-sm font-semibold text-black mb-0.5">Projects by Status</h3>
                 <p className="text-xs text-neutral-400 mb-5">Distribution across all pipeline stages</p>
                 <div className="flex items-center gap-8">
-                  <DonutChart data={analytics.donutData} />
+                  <DonutChart data={analyticsComputed.donutData} />
                   <div className="space-y-3 flex-1">
-                    {analytics.donutData.map(({ label, value, color }) => (
+                    {analyticsComputed.donutData.map(({ label, value, color }) => (
                       <div key={label} className="flex items-center gap-2.5">
                         <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                         <span className="text-xs text-neutral-600 flex-1">{label}</span>
@@ -1303,7 +1322,7 @@ export default function CRMPage() {
               <div className="bg-white rounded-xl border border-neutral-200 p-6">
                 <h3 className="text-sm font-semibold text-black mb-0.5">Events by Month</h3>
                 <p className="text-xs text-neutral-400 mb-5">Based on event dates across all projects</p>
-                <MonthlyBarChart data={analytics.monthBar} />
+                <MonthlyBarChart data={analyticsComputed.monthBar} />
               </div>
 
               {/* Lead source */}
@@ -1312,8 +1331,8 @@ export default function CRMPage() {
                 <p className="text-xs text-neutral-400 mb-6">AI intake vs manually created projects</p>
                 <div className="space-y-4">
                   {[
-                    { label: 'AI Intake', count: stats.via_ai, pct: analytics.aiRate, icon: Sparkles, dark: true },
-                    { label: 'Manual Entry', count: stats.total - stats.via_ai, pct: 100 - analytics.aiRate, icon: FileText, dark: false },
+                    { label: 'AI Intake', count: stats.via_ai, pct: analyticsComputed.aiRate, icon: Sparkles, dark: true },
+                    { label: 'Manual Entry', count: stats.total - stats.via_ai, pct: 100 - analyticsComputed.aiRate, icon: FileText, dark: false },
                   ].map(({ label, count, pct, icon: Icon, dark }) => (
                     <div key={label}>
                       <div className="flex justify-between items-center mb-1.5">
@@ -1333,11 +1352,11 @@ export default function CRMPage() {
                 </div>
                 <div className="mt-6 pt-5 border-t border-neutral-100 grid grid-cols-2 gap-4">
                   <div className="text-center">
-                    <p className="text-3xl font-bold text-black">{analytics.aiRate}%</p>
+                    <p className="text-3xl font-bold text-black">{analyticsComputed.aiRate}%</p>
                     <p className="text-xs text-neutral-400 mt-1">AI-generated</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-3xl font-bold text-black">{100 - analytics.aiRate}%</p>
+                    <p className="text-3xl font-bold text-black">{100 - analyticsComputed.aiRate}%</p>
                     <p className="text-xs text-neutral-400 mt-1">Manual entry</p>
                   </div>
                 </div>

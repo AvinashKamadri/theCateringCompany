@@ -547,36 +547,36 @@ export default function ContractDetailPage() {
         {/* Bento grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
 
-          {/* ── Event Details ── 2 cols */}
-          <BentoInfoCard className="lg:col-span-2 p-6">
-            <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Event Details</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
+          {/* ── Event Details ── 2 cols, compact */}
+          <BentoInfoCard className="lg:col-span-2 p-4">
+            <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Event Details</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {eventDate && (
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-0.5">
                   <span className="text-xs text-neutral-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</span>
                   <span className="text-sm font-semibold text-neutral-900">{eventDate}</span>
                 </div>
               )}
               {guestCount != null && (
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-0.5">
                   <span className="text-xs text-neutral-400 flex items-center gap-1"><Users className="h-3 w-3" /> Guests</span>
                   <span className="text-sm font-semibold text-neutral-900">{guestCount}</span>
                 </div>
               )}
               {eventType !== '—' && (
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-0.5">
                   <span className="text-xs text-neutral-400">Event Type</span>
                   <span className="text-sm font-semibold text-neutral-900 capitalize">{eventType}</span>
                 </div>
               )}
               {serviceType && (
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-0.5">
                   <span className="text-xs text-neutral-400">Service</span>
                   <span className="text-sm font-semibold text-neutral-900 capitalize">{serviceType}</span>
                 </div>
               )}
               {venueName && (
-                <div className="flex flex-col gap-1 sm:col-span-2">
+                <div className="flex flex-col gap-0.5 sm:col-span-2">
                   <span className="text-xs text-neutral-400 flex items-center gap-1"><MapPin className="h-3 w-3" /> Venue</span>
                   <span className="text-sm font-semibold text-neutral-900">{venueName}</span>
                   {venueAddress && <span className="text-xs text-neutral-400">{venueAddress}</span>}
@@ -584,7 +584,7 @@ export default function ContractDetailPage() {
               )}
             </div>
             {dietaryRestrictions.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-neutral-100">
+              <div className="mt-3 pt-3 border-t border-neutral-100">
                 <span className="text-xs text-neutral-400">Dietary</span>
                 <p className="text-sm text-neutral-700 mt-0.5">{dietaryRestrictions.join(', ')}</p>
               </div>
@@ -676,43 +676,43 @@ export default function ContractDetailPage() {
             )}
           </div>
 
-          {/* ── Menu & Services ── 2 cols */}
+          {/* ── Menu & Services ── full width, prominent */}
           {(appetizers.length > 0 || mainDishes.length > 0 || desserts.length > 0 || utensils || rentals || florals) && (
-            <BentoInfoCard className="lg:col-span-2 p-6">
-              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Menu & Services</p>
-              <div className="space-y-5">
+            <BentoInfoCard className="lg:col-span-3 p-8">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-5">Menu & Services</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
                 {appetizers.length > 0 && (
                   <div>
-                    <p className="text-xs text-neutral-400 mb-2">Appetizers / Hors d'Oeuvres</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {appetizers.map((item, i) => <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>)}
+                    <p className="text-xs text-neutral-400 mb-3">Appetizers / Hors d'Oeuvres</p>
+                    <div className="flex flex-wrap gap-2">
+                      {appetizers.map((item, i) => <span key={i} className="px-3 py-1.5 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>)}
                     </div>
                   </div>
                 )}
                 {mainDishes.length > 0 && (
                   <div>
-                    <p className="text-xs text-neutral-400 mb-2">Main Dishes</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {mainDishes.map((item, i) => <span key={i} className="px-2.5 py-1 bg-neutral-900 text-white rounded-lg text-xs font-medium">{item}</span>)}
+                    <p className="text-xs text-neutral-400 mb-3">Main Dishes</p>
+                    <div className="flex flex-wrap gap-2">
+                      {mainDishes.map((item, i) => <span key={i} className="px-3 py-1.5 bg-neutral-900 text-white rounded-lg text-xs font-medium">{item}</span>)}
                     </div>
                   </div>
                 )}
                 {desserts.length > 0 && (
                   <div>
-                    <p className="text-xs text-neutral-400 mb-2">Desserts</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {desserts.map((item, i) => <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>)}
+                    <p className="text-xs text-neutral-400 mb-3">Desserts</p>
+                    <div className="flex flex-wrap gap-2">
+                      {desserts.map((item, i) => <span key={i} className="px-3 py-1.5 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>)}
                     </div>
                   </div>
                 )}
-                {(utensils || rentals || florals) && (
-                  <div className="pt-3 border-t border-neutral-100 space-y-1 text-xs text-neutral-600">
-                    {utensils && <p><span className="font-medium text-neutral-400">Utensils: </span>{utensils}</p>}
-                    {rentals && <p><span className="font-medium text-neutral-400">Rentals: </span>{rentals}</p>}
-                    {florals && <p><span className="font-medium text-neutral-400">Florals: </span>{florals}</p>}
-                  </div>
-                )}
               </div>
+              {(utensils || rentals || florals) && (
+                <div className="mt-6 pt-5 border-t border-neutral-100 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-neutral-600">
+                  {utensils && <p><span className="font-medium text-neutral-400">Utensils: </span>{utensils}</p>}
+                  {rentals && <p><span className="font-medium text-neutral-400">Rentals: </span>{rentals}</p>}
+                  {florals && <p><span className="font-medium text-neutral-400">Florals: </span>{florals}</p>}
+                </div>
+              )}
             </BentoInfoCard>
           )}
 

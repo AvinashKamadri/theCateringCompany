@@ -73,7 +73,9 @@
       "Bash(find C:UsersavinaOneDriveDesktopTheCateringCompanyagentnodes -type f -name *.py)",
       "Bash(find C:UsersavinaprojectsflashbackTheCateringCompanyAgentagentnodes -type f -name *.py)",
       "Bash(xargs basename:*)",
-      "Bash(find C:UsersavinaOneDriveDesktopTheCateringCompanydatabase -name *.py)"
+      "Bash(find C:UsersavinaOneDriveDesktopTheCateringCompanydatabase -name *.py)",
+      "Bash(git restore:*)",
+      "Bash(npx vercel:*)"
     ]
   }
 }

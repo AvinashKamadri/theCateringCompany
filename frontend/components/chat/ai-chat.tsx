@@ -22,11 +22,192 @@ interface AiChatProps {
 
 const STORAGE_KEY = 'tc_chat_sessions';
 
+// ─── Static menu category map (keyed by lowercase item name) ─────────────────
+const ITEM_CATEGORY_MAP: Record<string, string> = {
+  // Chicken
+  'maple bacon chicken pops': 'Chicken',
+  'chicken tikka skewers': 'Chicken',
+  'adobo lime chicken bites': 'Chicken',
+  'chicken satay': 'Chicken',
+  'chicken banh mi slider w/ jalapeno slaw': 'Chicken',
+  'chicken bahn mi slider w/ jalapeno slaw': 'Chicken',
+  'bbq chicken slider': 'Chicken',
+  // Pork
+  'smoked pork belly dippers': 'Pork',
+  'bacon bourbon meatballs': 'Pork',
+  'pulled pork sliders': 'Pork',
+  'chorizo stuffed baby peppers': 'Pork',
+  'twice baked potato bites': 'Pork',
+  // Beef
+  'asian roast beef crostini w/ wasabi aioli': 'Beef',
+  'adobo steak skewers': 'Beef',
+  'meatballs (bbq, swedish, sweet and sour)': 'Beef',
+  'mexican stuffed peppers w/ cojito cheese': 'Beef',
+  'filet tip crostini': 'Beef',
+  // Seafood
+  'grilled shrimp cocktail': 'Seafood',
+  'crab stuffed cucumbers': 'Seafood',
+  'south west shrimp crostini': 'Seafood',
+  'shrimp and mango bites': 'Seafood',
+  'firecracker shrimp': 'Seafood',
+  'crab cakes': 'Seafood',
+  'crab dip': 'Seafood',
+  'ahi tuna bites': 'Seafood',
+  'bacon shrimp': 'Seafood',
+  // Canapes
+  'smoked salmon phyllo cups': 'Canapes',
+  'tropical cucumber cups': 'Canapes',
+  'deviled egg': 'Canapes',
+  'caviar egg': 'Canapes',
+  'caviar and cream crisp': 'Canapes',
+  'charred tomato and pesto': 'Canapes',
+  // Vegetarian
+  'bruschetta': 'Vegetarian',
+  'hummus and pita': 'Vegetarian',
+  'chips and salsa': 'Vegetarian',
+  'chips & guacamole': 'Vegetarian',
+  'chips and guacamole': 'Vegetarian',
+  'white bean tapenade w/ crostini': 'Vegetarian',
+  'artichoke tapenade w/ crostini': 'Vegetarian',
+  'caprese skewers': 'Vegetarian',
+  'parmesan artichoke dip': 'Vegetarian',
+  'spanakopita': 'Vegetarian',
+  'soft pretzel bites w/ beer cheese': 'Vegetarian',
+  'mac & cheese shooters': 'Vegetarian',
+  'brie bites': 'Vegetarian',
+  'double stuffed mushrooms': 'Vegetarian',
+  'gazpacho shooters': 'Vegetarian',
+  // misc legacy names
+  'bite bites': 'Vegetarian',
+  'brie & cranberry puff cheese': 'Vegetarian',
+  'par pardon': 'Vegetarian',
+  'tomato & guacamole': 'Vegetarian',
+  'tomatoes and feta': 'Vegetarian',
+};
+
+// Main menu item → category map
+const MAIN_ITEM_CATEGORY_MAP: Record<string, string> = {
+  // Platters
+  'vegetable platter': 'Platters',
+  'fruit platter': 'Platters',
+  'assorted finger sandwiches': 'Platters',
+  'cheese platter': 'Platters',
+  'antipasto platter': 'Platters',
+  'charcuterie boards': 'Platters',
+  'charcuterie board': 'Platters',
+  // Signature Combinations
+  'prime rib & salmon': 'Signature Combos',
+  'prime rib and salmon': 'Signature Combos',
+  'chicken & ham': 'Signature Combos',
+  'chicken and ham': 'Signature Combos',
+  'grilled chicken and ham': 'Signature Combos',
+  'chicken piccata': 'Signature Combos',
+  'chicken piccata and red wine braised beef': 'Signature Combos',
+  'chicken piccata & red wine braised beef': 'Signature Combos',
+  // BBQ Menus
+  'beef brisket & chicken': 'BBQ Menus',
+  'beef brisket and chicken': 'BBQ Menus',
+  'pork & chicken': 'BBQ Menus',
+  'pork and chicken': 'BBQ Menus',
+  // Tasty & Casual
+  'burger bar': 'Tasty & Casual',
+  'southern comfort': 'Tasty & Casual',
+  // Global Inspirations
+  'mexican char grilled': 'Global Inspirations',
+  'fiesta taco bar': 'Global Inspirations',
+  'mediterranean bar': 'Global Inspirations',
+  'souvlaki bar': 'Global Inspirations',
+  'marsala menu': 'Global Inspirations',
+  'ravioli menu': 'Global Inspirations',
+  'grilled pasta menu': 'Global Inspirations',
+  // Soup / Salad / Sandwich
+  'soup / salad / sandwich menu': 'Soup / Salad / Sandwich',
+  'soup/salad/sandwich menu': 'Soup / Salad / Sandwich',
+  'soup salad sandwich menu': 'Soup / Salad / Sandwich',
+};
+
+const CATEGORY_ORDER = ['Chicken', 'Pork', 'Beef', 'Seafood', 'Canapes', 'Vegetarian'];
+const MAIN_CATEGORY_ORDER = ['Platters', 'Signature Combos', 'BBQ Menus', 'Tasty & Casual', 'Global Inspirations', 'Soup / Salad / Sandwich'];
+
+function groupItemsByCategory(items: ListItem[]): CategoryGroup[] | null {
+  const map = new Map<string, ListItem[]>();
+  const uncategorizedItems: ListItem[] = [];
+  // Try appetizer map first, then main menu map
+  for (const item of items) {
+    const key = item.name.toLowerCase();
+    const cat = ITEM_CATEGORY_MAP[key] ?? MAIN_ITEM_CATEGORY_MAP[key];
+    if (!cat) { uncategorizedItems.push(item); continue; }
+    if (!map.has(cat)) map.set(cat, []);
+    map.get(cat)!.push(item);
+  }
+  if (map.size < 2 || uncategorizedItems.length > items.length * 0.4) return null;
+  // Use appetizer order if appetizer categories present, else main menu order
+  const isMain = [...map.keys()].some((k) => MAIN_CATEGORY_ORDER.includes(k));
+  const order = isMain ? MAIN_CATEGORY_ORDER : CATEGORY_ORDER;
+  const groups = order
+    .filter((c) => map.has(c))
+    .map((c) => ({ category: c, items: map.get(c)! }));
+  // Append any uncategorized items under "Other"
+  if (uncategorizedItems.length > 0) {
+    groups.push({ category: 'Other', items: uncategorizedItems });
+  }
+  return groups;
+}
+
 // ─── List parsing ─────────────────────────────────────────────────────────────
 
 interface ListItem {
   name: string;
   price?: string;
+}
+
+interface CategoryGroup {
+  category: string;
+  items: ListItem[];
+}
+
+function parseCategorizedItems(content: string): CategoryGroup[] | null {
+  const lines = content.split('\n');
+  const groups: CategoryGroup[] = [];
+  let current: CategoryGroup | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Category header: a line that's NOT a numbered item, has text, no leading number+dot
+    // e.g. "Chicken ($3.50 pp/option)" or "Beef" or "Vegetarian"
+    const isNumbered = /^(\d+)\.\s+/.test(trimmed);
+    const isBullet = /^[-•*]\s+/.test(trimmed);
+    const looksLikeCategory = !isNumbered && !isBullet && trimmed.length > 1 && trimmed.length < 60
+      && /^[A-Z]/.test(trimmed) && !/^(Pick|Choose|Are|Here|Got|Sounds|The|I |You|We |If |Please)/i.test(trimmed);
+
+    if (looksLikeCategory && !isNumbered) {
+      // Extract category name (strip price annotation)
+      const catName = trimmed.replace(/\s*\(.*?\)\s*$/, '').trim();
+      if (catName.length > 1) {
+        current = { category: catName, items: [] };
+        groups.push(current);
+        continue;
+      }
+    }
+
+    // Parse item line
+    const withPrice = trimmed.match(/^(?:\d+\.|[-•*])\s+(.+?)\s+\((\$[\d.,]+[^)]*)\)/);
+    if (withPrice) {
+      if (!current) { current = { category: '', items: [] }; groups.push(current); }
+      current.items.push({ name: withPrice[1].trim(), price: withPrice[2].trim() });
+      continue;
+    }
+    const plain = trimmed.match(/^(\d+)\.\s+(.{2,80})$/);
+    if (plain) {
+      if (!current) { current = { category: '', items: [] }; groups.push(current); }
+      current.items.push({ name: plain[2].trim() });
+    }
+  }
+
+  const valid = groups.filter((g) => g.items.length > 0);
+  return valid.length >= 2 ? valid : null;
 }
 
 function parseListItems(content: string): ListItem[] | null {
@@ -148,12 +329,14 @@ function MenuItemCard({
 
 function ItemSelector({
   items,
+  categories,
   selected,
   onSelectionChange,
   multi,
   maxSelect,
 }: {
   items: ListItem[];
+  categories?: CategoryGroup[];
   selected: string[];
   onSelectionChange: (names: string[]) => void;
   multi: boolean;
@@ -173,9 +356,36 @@ function ItemSelector({
   };
 
   if (multi) {
+    if (categories && categories.length >= 2) {
+      return (
+        <div className="mt-2 w-full space-y-4">
+          {categories.map((group) => (
+            <div key={group.category}>
+              {group.category && (
+                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">
+                  {group.category}
+                </p>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {group.items.map((item) => (
+                  <MenuItemCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
+                ))}
+              </div>
+            </div>
+          ))}
+          {selected.length > 0 && (
+            <p className="text-xs text-neutral-500 mt-2">
+              <span className="font-medium text-neutral-800">{selected.length}</span>
+              {maxSelect ? `/${maxSelect}` : ''} selected — hit Send to confirm
+            </p>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div className="mt-2 w-full">
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
           {items.map((item) => (
             <MenuItemCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
           ))}
@@ -192,7 +402,7 @@ function ItemSelector({
 
   return (
     <div className="mt-2 w-full">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {items.map((item) => (
           <OptionCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
         ))}
@@ -545,25 +755,28 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
       />
       <div className="flex flex-col h-full bg-white">
         {/* Header */}
-        <div className="border-b border-neutral-200 px-6 py-4">
+        <div className="border-b border-neutral-200 px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-black rounded-xl flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-neutral-900">Catering Assistant</h2>
-              <p className="text-xs text-neutral-500">Let's plan your perfect event together</p>
+              <h2 className="text-base sm:text-lg font-bold text-neutral-900">Catering Assistant</h2>
+              <p className="text-xs text-neutral-500 hidden sm:block">Let's plan your perfect event together</p>
             </div>
           </div>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4">
           {state.messages.map((msg, idx) => {
             const userInitial = userName.charAt(0).toUpperCase();
             const time = msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             const isActive = idx === activeMenuMsgIdx;
             const listItems = isActive ? parseListItems(msg.content) : null;
+            const categorizedItems = isActive && listItems
+              ? (parseCategorizedItems(msg.content) ?? groupItemsByCategory(listItems))
+              : null;
 
             if (msg.role === 'ai' && listItems) {
               const { intro } = splitAtList(msg.content);
@@ -579,7 +792,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       </div>
                       <span className="text-[10px] text-neutral-400">AI</span>
                     </div>
-                    <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-neutral-100 text-neutral-900">
+                    <div className="max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 bg-neutral-100 text-neutral-900">
                       <MarkdownMessage content={msg.content} />
                       <span className="text-xs mt-1 block text-neutral-400">{time}</span>
                     </div>
@@ -608,6 +821,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                     )}
                     <ItemSelector
                       items={listItems}
+                      categories={categorizedItems ?? undefined}
                       selected={menuSelections}
                       onSelectionChange={handleMenuSelectionChange}
                       multi={multi}
@@ -622,7 +836,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
             if (msg.role === 'user') {
               return (
                 <div key={idx} className="flex justify-end gap-2.5">
-                  <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-black text-white">
+                  <div className="max-w-[85%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 bg-black text-white">
                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                     <span className="text-xs mt-1 block text-neutral-400">{time}</span>
                   </div>
@@ -644,7 +858,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                   </div>
                   <span className="text-[10px] text-neutral-400">AI</span>
                 </div>
-                <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-neutral-100 text-neutral-900">
+                <div className="max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 bg-neutral-100 text-neutral-900">
                   <MarkdownMessage content={msg.content} />
                   <span className="text-xs mt-1 block text-neutral-400">{time}</span>
                 </div>
@@ -682,8 +896,8 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           const lastAiMsg = [...state.messages].reverse().find((m) => m.role === 'ai');
           const isPhoneMode = !state.isLoading && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && activeMenuMsgIdx === null;
           return (
-            <div className={`border-t border-neutral-200 px-6 py-4 bg-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
-              <div className="flex items-end gap-3">
+            <div className={`border-t border-neutral-200 px-3 sm:px-6 py-3 sm:py-4 bg-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
+              <div className="flex items-end gap-2 sm:gap-3">
                 {isPhoneMode ? (
                   /* Phone input with country code */
                   <div className="flex-1 flex items-center border border-neutral-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-black focus-within:border-transparent">

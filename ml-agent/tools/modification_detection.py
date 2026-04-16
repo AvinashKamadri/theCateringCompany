@@ -176,6 +176,7 @@ The user is trying to modify one of these fields:
 - honoree_name: Birthday person name
 
 For appetizers, selected_dishes, and desserts, the new_value should be a comma-separated list of the item names the user wants to ADD or the full instruction (e.g. "add Brownies" or "remove Chicken Satay").
+For special_requests, dietary_concerns, and additional_notes, new_value must contain ONLY the new information mentioned in the user's current message — do NOT include any existing values already in the slot context.
 
 Analyze the user's message and identify:
 1. Which field they want to modify

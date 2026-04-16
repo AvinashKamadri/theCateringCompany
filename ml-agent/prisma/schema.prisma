@@ -495,12 +495,15 @@ model margin_alerts {
 
 model menu_categories {
   id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name       String       @unique
+  section    String       @default("")
+  name       String
   sort_order Int          @default(0)
   active     Boolean      @default(true)
   created_at DateTime     @default(now()) @db.Timestamptz(6)
   updated_at DateTime     @default(now()) @db.Timestamptz(6)
   menu_items menu_items[]
+
+  @@unique([section, name])
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.

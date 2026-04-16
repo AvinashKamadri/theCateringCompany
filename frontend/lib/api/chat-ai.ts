@@ -7,7 +7,7 @@
 import axios, { AxiosError } from 'axios';
 import type { ChatRequest, ChatResponse, ConversationState } from '@/types/chat-ai.types';
 
-const ML_API_BASE_URL = process.env.NEXT_PUBLIC_ML_API_URL || 'http://localhost:8000';
+const ML_API_BASE_URL = process.env.NEXT_PUBLIC_ML_API_URL || 'http://localhost:8001';
 
 /**
  * Axios instance for ML Chat API

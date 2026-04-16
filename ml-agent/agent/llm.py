@@ -1,5 +1,11 @@
 """
-Shared LLM instance for all nodes
+Shared LLM instances for all nodes.
+
+Two temperature modes:
+- llm_cold (temperature=0.0): deterministic extraction — intent classification,
+  JSON parsing, slot filling. No variation allowed here.
+- llm_warm (temperature=0.7): conversational responses — friendly messages,
+  acknowledgments, questions. Natural variation without prompt hacks.
 """
 
 import os
@@ -17,11 +23,15 @@ if not api_key:
         "Please set it in .env file or environment variables."
     )
 
-# Create shared LLM instance
-llm = ChatOpenAI(
-    model=os.getenv("MODEL_NAME", "gpt-4o-mini"),
-    temperature=0,
-    api_key=api_key
-)
+_model = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
-__all__ = ["llm"]
+# Deterministic — for extraction/classification/intent parsing
+llm_cold = ChatOpenAI(model=_model, temperature=0.0, api_key=api_key)
+
+# Conversational — for generating friendly messages to the user
+llm_warm = ChatOpenAI(model=_model, temperature=0.7, api_key=api_key)
+
+# Legacy alias kept for any direct imports (routes to cold for safety)
+llm = llm_cold
+
+__all__ = ["llm", "llm_cold", "llm_warm"]

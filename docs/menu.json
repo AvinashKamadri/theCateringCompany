@@ -1,0 +1,300 @@
+{
+  "menu_name": "Catering Menu",
+  "sections": [
+    {
+      "section": "Hors D'oeuvres",
+      "groups": [
+        {
+          "name": "Chicken",
+          "price": 3.50,
+          "price_unit": "pp/option",
+          "items": [
+            "Maple Bacon Chicken Pops",
+            "Chicken Tikka Skewers",
+            "Adobo Lime Chicken Bites",
+            "Chicken Satay",
+            "Chicken Banh Mi Slider w/ Jalapeno Slaw",
+            "BBQ Chicken Slider"
+          ]
+        },
+        {
+          "name": "Pork",
+          "price": 3.50,
+          "price_unit": "pp/option",
+          "items": [
+            "Smoked Pork Belly Dippers",
+            "Bacon Bourbon Meatballs",
+            "Pulled Pork Sliders",
+            "Chorizo Stuffed Baby Peppers",
+            "Twice Baked Potato Bites"
+          ]
+        },
+        {
+          "name": "Beef",
+          "price": 3.50,
+          "price_unit": "pp/option",
+          "note": "Filet Tip Crostini +$1 (total $4.50)",
+          "items": [
+            "Asian Roast Beef Crostini w/ Wasabi Aioli",
+            "Adobo Steak Skewers",
+            "Meatballs (BBQ, Swedish, Sweet and Sour)",
+            "Mexican Stuffed Peppers w/ Cojito Cheese",
+            "Filet Tip Crostini (+$1)"
+          ]
+        },
+        {
+          "name": "Seafood",
+          "items": [
+            { "name": "Grilled Shrimp Cocktail",    "price": 4.75 },
+            { "name": "Crab Stuffed Cucumbers",     "price": 3.50 },
+            { "name": "South West Shrimp Crostini", "price": 3.50 },
+            { "name": "Shrimp and Mango Bites",     "price": 3.50 },
+            { "name": "Firecracker Shrimp",         "price": 4.75 },
+            { "name": "Crab Cakes",                 "price": 4.75 },
+            { "name": "Crab Dip",                   "price": 3.75 },
+            { "name": "Ahi Tuna Bites",             "price": 3.50 }
+          ]
+        },
+        {
+          "name": "Canapes",
+          "items": [
+            { "name": "Smoked Salmon Phyllo Cups",  "price": 3.80 },
+            { "name": "Tropical Cucumber Cups",     "price": 2.00 },
+            { "name": "Deviled Egg",                "price": 3.00 },
+            { "name": "Caviar Egg",                 "price": 3.50 },
+            { "name": "Caviar and Cream Crisp",     "price": 4.00 },
+            { "name": "Charred Tomato and Pesto",   "price": 2.75 }
+          ]
+        },
+        {
+          "name": "Vegetarian",
+          "items": [
+            { "name": "Bruschetta",                        "price": 1.75 },
+            { "name": "Hummus and Pita",                   "price": 1.95 },
+            { "name": "Chips and Salsa",                   "price": 1.75 },
+            { "name": "Chips & Guacamole",                 "price": 1.75 },
+            { "name": "White Bean Tapenade w/ Crostini",   "price": 1.75 },
+            { "name": "Artichoke Tapenade w/ Crostini",    "price": 1.75 },
+            { "name": "Caprese Skewers",                   "price": 2.75 },
+            { "name": "Parmesan Artichoke Dip",            "price": 3.00 },
+            { "name": "Spanakopita",                       "price": 3.25 },
+            { "name": "Soft Pretzel Bites w/ Beer Cheese", "price": 3.25 },
+            { "name": "Mac & Cheese Shooters",             "price": 3.25 },
+            { "name": "Brie Bites",                        "price": 3.00 },
+            { "name": "Double Stuffed Mushrooms",          "price": 2.75 },
+            { "name": "Gazpacho Shooters",                 "price": 2.25 }
+          ]
+        }
+      ]
+    },
+    {
+      "section": "Platters",
+      "price_unit": "pp",
+      "items": [
+        { "name": "Vegetable Platter",          "price": 2.25 },
+        { "name": "Fruit Platter",              "price": 2.50 },
+        { "name": "Assorted Finger Sandwiches", "price": 4.00 },
+        { "name": "Cheese Platter",             "price": 3.50 },
+        { "name": "Antipasto Platter",          "price": 3.35 },
+        { "name": "Charcuterie Boards",         "price": 4.25 }
+      ]
+    },
+    {
+      "section": "Signature Combinations",
+      "note": "These preselected menus are starting points and can be customized later.",
+      "items": [
+        {
+          "name": "Prime Rib & Salmon",
+          "price": 39.99,
+          "price_unit": "pp",
+          "description": "Carved Prime Rib w/ Horseradish Cream & Au Jus, Roasted Salmon w/ Dill Cream Sauce, Roasted Potatoes, Wild Rice, Glazed Carrots, Grilled Asparagus, Dinner Rolls."
+        },
+        {
+          "name": "Chicken & Ham",
+          "price": 27.99,
+          "price_unit": "pp",
+          "description": "Grilled Chicken Breast, Mango Glazed Ham Carved, Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, Dinner Rolls."
+        },
+        {
+          "name": "Chicken Piccata",
+          "price": 29.49,
+          "price_unit": "pp",
+          "description": "Chicken Piccata, Red Wine Braised Beef Roast, Vegetable Farfalle, Long Grain Buttered Rice, Roasted Mixed Veggies, Green Beans, Dinner Rolls."
+        }
+      ]
+    },
+    {
+      "section": "BBQ Menus",
+      "sides": "Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad",
+      "items": [
+        {
+          "name": "Beef Brisket & Chicken",
+          "price": 25.99,
+          "price_unit": "pp",
+          "description": "BBQ Beef Brisket (sliced), Beer Can Chicken."
+        },
+        {
+          "name": "Pork & Chicken",
+          "price": 23.99,
+          "price_unit": "pp",
+          "description": "Pulled BBQ Pork, Pulled BBQ Chicken."
+        }
+      ]
+    },
+    {
+      "section": "Tasty & Casual",
+      "items": [
+        {
+          "name": "Burger Bar",
+          "price": 23.99,
+          "price_unit": "pp",
+          "description": "Burgers (handmade) w/ Brioche Buns, Beer Can Chicken Breast. Toppings Bar: Mushrooms, Grilled Onions, Pickled Red Onion, Pickles, Lettuce, Tomato, Bacon, Assorted Sauces and Cheeses. Sides: Mac & Cheese, Roasted Red Potato (Herb and Balsamic), Seasonal Spring Greens Salad (Choice of 2 Dressings), Caprese Platter (Sliced Tomato, Fresh Mozzarella, Basil, Balsamic Glaze), Watermelon Salad (Mint, Lime Juice)."
+        },
+        {
+          "name": "Southern Comfort",
+          "price": 27.95,
+          "price_unit": "pp",
+          "description": "Garden Salad, Crispy Fried Chicken, Smoked Sausage, Mac and Cheese, Mashed Potatoes, Southern Style Green Beans, Buttered Corn Kernel, Corn Bread w/ Butter."
+        }
+      ]
+    },
+    {
+      "section": "Global Inspirations",
+      "items": [
+        {
+          "name": "Mexican Char Grilled",
+          "price": 27.99,
+          "price_unit": "pp",
+          "description": "Carne Asada, Chili Lime Chicken, Spanish Rice, Bandito Black Beans, Peppers & Onions, Pico De Gallo, Sour Cream, Tortilla Shells."
+        },
+        {
+          "name": "Fiesta Taco Bar",
+          "price": 23.99,
+          "price_unit": "pp",
+          "description": "Braised Spanish Beef, Braised Chili Chicken, Pinto Beans, Cilantro Lime Rice, Full Toppings Bar."
+        },
+        {
+          "name": "Mediterranean Bar",
+          "price": 23.49,
+          "price_unit": "pp",
+          "description": "Hummus Bar (all homemade): Roasted Garlic, Sundried Tomato, Original. Toppings: Ground Lamb (hot), Grilled Mediterranean Chicken (hot), Roasted Vegetables (hot), Feta Cheese, Roasted Chickpeas, Olives, Fresh Diced Tomato, Pickled Onions, Caramelized Onions, Shredded Lettuce, Pita Bread."
+        },
+        {
+          "name": "Souvlaki Bar",
+          "price": 21.49,
+          "price_unit": "pp",
+          "description": "Proteins: Chicken Souvlaki, Pork Souvlaki. Sides/Toppings: Roasted Greek Potatoes, Roasted Mixed Vegetables, Green Beans, Pita Bread, Fresh Diced Tomatoes, Diced Onions, Shredded Lettuce, Tzatziki, Feta Cheese, Fresh Cilantro."
+        },
+        {
+          "name": "Marsala Menu",
+          "price": 25.99,
+          "price_unit": "pp",
+          "description": "Chicken Marsala, Roasted Cod in Peperonata Sauce, Vegetable Farfalle, Fettuccini, Roasted Mixed Veggies, Green Beans, Dinner Rolls."
+        },
+        {
+          "name": "Ravioli Menu",
+          "price": 31.99,
+          "price_unit": "pp",
+          "description": "Garden Salad, Grilled Chicken with Wild Mushroom Beurre Blanc, Roasted Salmon w/ Lemon Butter Sauce, Truffle Ravioli, Wild Rice, Sauteed Zucchini and Tomatoes, Roasted Asparagus, Dinner Rolls."
+        },
+        {
+          "name": "Grilled Pasta Menu",
+          "price": 21.49,
+          "price_unit": "pp",
+          "description": "Caesar Salad w/ Croutons on side, Grilled Chicken Breast, Sliced Italian Sausage, Pesto Penne Alfredo, Green Beans, Honey Glazed Carrots, Dinner Rolls."
+        }
+      ]
+    },
+    {
+      "section": "Soup / Salad / Sandwich",
+      "price": 21.95,
+      "price_unit": "pp",
+      "groups": {
+        "Soup": [
+          "Broccoli Cheddar", "Loaded Potato", "Tomato Basil Bisque", "Chicken Tortilla",
+          "Vegetable Minestrone", "Clam Chowder", "French Onion", "Chicken Noodle",
+          "Traditional Chili", "Chicken Chili"
+        ],
+        "Salad": [
+          "Caesar Salad", "Cobb Salad", "Greek Salad", "Southwest Salad",
+          "Potato Salad", "Coleslaw", "Seasonal Greens Salad", "Bacon and Blue Cheese Salad",
+          "Pasta Salad", "Sweet Kale Salad w/ Bacon and Cranberries", "Design Your Own"
+        ],
+        "Sandwich / Wrap": [
+          "Gourmet Grilled Cheese", "Corned Beef Reuben", "Pulled Pork Cuban",
+          "Avocado BLT", "Pesto Chicken", "Turkey Club",
+          "Roasted Vegetable and Hummus Wrap", "Philly Cheese Steak", "Build Your Own"
+        ]
+      }
+    },
+    {
+      "section": "Coffee and Desserts",
+      "items": [
+        {
+          "name": "Mini Desserts",
+          "price": 5.25,
+          "price_unit": "pp",
+          "note": "Select 4",
+          "items": [
+            "Flavored Mousse Cup (Chocolate, White Chocolate, Raspberry, Kahlua)",
+            "Lemon Bars",
+            "Blondies",
+            "7-Layer Bars",
+            "Brownies",
+            "Chocolate Chip Cookie Bars",
+            "Mini Assorted Cheesecakes",
+            "Fruit Tarts (Raspberry, Strawberry, Blackberry, Lemon, Lime)"
+          ]
+        },
+        {
+          "name": "Coffee Bar",
+          "price": 2.75,
+          "price_unit": "pp",
+          "description": "Brewed In House Dunkin Donuts Coffee served with Sugar, Half & Half, Flavor Shots (Caramel, Hazelnut, French Vanilla). Set out with dessert."
+        },
+        {
+          "name": "Barback Package",
+          "price": 8.50,
+          "price_unit": "pp",
+          "description": "Diet Coke, Coke, Sprite, Ginger Ale, Club Soda, Tonic Water, Bitters, OJ, Cranberry and Pineapple Juices, Lemons, Limes and Oranges, Cherries, Ice, Clear Plastic Cups, Coolers."
+        },
+        {
+          "name": "Ice & Cooler Package",
+          "price": 1.75,
+          "price_unit": "pp",
+          "description": "Ice (2 lbs per person @ $0.70/lb), Coolers included, Cups ($0.35 each)."
+        }
+      ]
+    },
+    {
+      "section": "Wedding / Tiered Cakes",
+      "items": [
+        {
+          "name": "2 Tier 6\" & 8\" (Serves 25)",
+          "price": 275.00,
+          "price_unit": "flat",
+          "note": "Starts at $275. For additional sizing, please send an inquiry.",
+          "cake_flavors": [
+            "Yellow", "White", "Almond", "Chocolate", "Carrot", "Red Velvet",
+            "Bananas Foster", "Whiskey Caramel", "Lemon", "Spice", "Funfetti",
+            "Pumpkin Spice", "Cookies and Cream", "Strawberry", "Coconut"
+          ],
+          "fillings": [
+            "Butter Cream", "Lemon Curd", "Raspberry Jam", "Strawberry Jam",
+            "Cream Cheese Icing", "Peanut Butter Cream", "Mocha Buttercream",
+            "Salted Caramel Buttercream", "Cinnamon Butter Cream"
+          ],
+          "buttercreams": [
+            "Signature Buttercream", "Chocolate Buttercream", "Cream Cheese Frosting"
+          ]
+        },
+        {
+          "name": "Cupcakes",
+          "price": 3.50,
+          "price_unit": "per unit",
+          "description": "Choice of two flavors. Custom colors available."
+        }
+      ]
+    }
+  ]
+}

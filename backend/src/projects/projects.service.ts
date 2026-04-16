@@ -30,10 +30,16 @@ export class ProjectsService {
    * A project is accessible if the user is the owner (owner_user_id)
    * OR if the user exists in project_collaborators for that project.
    */
-  async findAllForUser(userId: string) {
+  async findAllForUser(userId: string, q?: string, status?: string) {
     const projects = await this.prisma.projects.findMany({
       where: {
         deleted_at: null,
+        NOT: [
+          { title: { startsWith: 'AI Catering Intake', mode: 'insensitive' } },
+          { title: { startsWith: 'AI Intake', mode: 'insensitive' } },
+          { title: { startsWith: 'Chat Project', mode: 'insensitive' } },
+          { title: { contains: 'intake', mode: 'insensitive' } },
+        ],
         OR: [
           { owner_user_id: userId },
           {
@@ -42,6 +48,17 @@ export class ProjectsService {
             },
           },
         ],
+        ...(status && status !== 'all' ? { status: status as any } : {}),
+        ...(q && q.trim().length >= 1 ? {
+          AND: [{
+            OR: [
+              { title: { contains: q.trim(), mode: 'insensitive' } },
+              { venues: { name: { contains: q.trim(), mode: 'insensitive' } } },
+              { events: { some: { event_type: { contains: q.trim(), mode: 'insensitive' } } } },
+              ...(isNaN(Number(q.trim())) ? [] : [{ guest_count: Number(q.trim()) }]),
+            ],
+          }],
+        } : {}),
       },
       include: {
         venues: {
@@ -82,6 +99,49 @@ export class ProjectsService {
       venue_id: project.venue_id,
       created_at: project.created_at,
       updated_at: project.updated_at,
+    }));
+  }
+
+  /**
+   * Full-text search across a user's projects.
+   * Matches against title, venue name, and event type using ILIKE.
+   */
+  async search(userId: string, query: string) {
+    const q = `%${query.trim()}%`;
+    const projects = await this.prisma.projects.findMany({
+      where: {
+        deleted_at: null,
+        OR: [
+          { owner_user_id: userId },
+          { project_collaborators: { some: { user_id: userId } } },
+        ],
+        AND: [
+          {
+            OR: [
+              { title: { contains: query.trim(), mode: 'insensitive' } },
+              { venues: { name: { contains: query.trim(), mode: 'insensitive' } } },
+              { events: { some: { event_type: { contains: query.trim(), mode: 'insensitive' } } } },
+            ],
+          },
+        ],
+      },
+      include: {
+        venues: { select: { id: true, name: true } },
+        events: { select: { id: true, event_type: true }, take: 1 },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 20,
+    });
+
+    return projects.map((project: any) => ({
+      id: project.id,
+      name: project.title,
+      event_type: project.events?.[0]?.event_type || 'general',
+      event_date: project.event_date,
+      guest_count: project.guest_count,
+      status: project.status,
+      venue_name: project.venues?.name,
+      created_at: project.created_at,
     }));
   }
 

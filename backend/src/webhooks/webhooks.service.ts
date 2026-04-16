@@ -118,8 +118,15 @@ export class WebhooksService {
     this.logger.log(`DocuSeal webhook received: ${JSON.stringify(payload?.event_type ?? payload?.event)}`);
 
     const eventType: string = payload?.event_type ?? payload?.event ?? '';
-    // submission.completed fires when every signer has signed
-    if (eventType !== 'submission.completed' && eventType !== 'form.completed') {
+
+    // submission.completed fires when ALL signers have signed — the only event that should mark the contract signed.
+    // form.completed fires per-signer (partial) — log and ignore.
+    if (eventType === 'form.completed') {
+      this.logger.log(`DocuSeal webhook: ignoring per-signer "form.completed" event (waiting for submission.completed)`);
+      return;
+    }
+
+    if (eventType !== 'submission.completed') {
       this.logger.log(`DocuSeal webhook: ignoring event type "${eventType}"`);
       return;
     }
@@ -142,7 +149,7 @@ export class WebhooksService {
         deleted_at: null,
         status: { not: 'signed' },
       },
-      select: { id: true, metadata: true },
+      select: { id: true, metadata: true, project_id: true },
     });
 
     const contract = contracts.find((c) => {
@@ -169,5 +176,20 @@ export class WebhooksService {
     });
 
     this.logger.log(`✅ Contract ${contract.id} marked as signed via DocuSeal webhook`);
+
+    // Also advance the parent project to "confirmed" (unless already completed/cancelled)
+    if (contract.project_id) {
+      const project = await this.prisma.projects.findUnique({
+        where: { id: contract.project_id },
+        select: { status: true },
+      });
+      if (project && project.status !== 'completed' && project.status !== 'cancelled') {
+        await this.prisma.projects.update({
+          where: { id: contract.project_id },
+          data: { status: 'confirmed' },
+        });
+        this.logger.log(`✅ Project ${contract.project_id} advanced to "confirmed" after contract signing`);
+      }
+    }
   }
 }

@@ -17,8 +17,13 @@ export interface Project {
 
 export const projectsApi = {
   // Get all projects for current user
-  getAll: async (): Promise<Project[]> => {
-    return apiClient.get('/projects');
+  getAll: async (qs = ''): Promise<Project[]> => {
+    return apiClient.get(`/projects${qs}`);
+  },
+
+  // Search projects by title, venue, event type (server-side ILIKE)
+  search: async (q: string): Promise<Project[]> => {
+    return apiClient.get(`/projects/search?q=${encodeURIComponent(q)}`);
   },
 
   // Get single project by ID

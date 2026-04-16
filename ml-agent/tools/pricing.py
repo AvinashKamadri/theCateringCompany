@@ -127,7 +127,7 @@ async def calculate_event_pricing(
     line_items = []
     seen_items = set()  # avoid duplicates
 
-    def _add_item(item: dict, category_label: str):
+    def _add_item(item: dict, category_label: str, override_desc: str | None = None):
         """Add a single menu item to line_items if not already added."""
         if item["name"] in seen_items:
             return
@@ -139,7 +139,7 @@ async def calculate_event_pricing(
         else:
             total = price  # flat rate
         line_items.append({
-            "name": item["name"],
+            "name": override_desc or item["name"],
             "description": item.get("description") or "",
             "category": category_label,
             "unit_price": price,
@@ -237,7 +237,19 @@ async def calculate_event_pricing(
     # Resolve each selection category
     _resolve_selections(selected_dishes, "Main Dishes")
     _resolve_selections(appetizers, "Appetizers")
-    _resolve_selections(desserts, "Desserts")
+    # Handle "Mini Desserts: item1, item2, ..." — map to parent DB item
+    dessert_str = str(desserts) if desserts else ""
+    if dessert_str.startswith("Mini Desserts:"):
+        # Find the parent "Mini Desserts - Select 4" in DB
+        mini_parent = items_by_name.get("mini desserts - select 4")
+        if mini_parent:
+            sub_items = dessert_str.replace("Mini Desserts:", "").strip()
+            desc = f"Mini Desserts — {sub_items}" if sub_items else "Mini Desserts - Select 4"
+            _add_item(mini_parent, "Desserts", override_desc=desc)
+        else:
+            _resolve_selections(desserts, "Desserts")
+    else:
+        _resolve_selections(desserts, "Desserts")
 
     # Add-ons (utensils, rentals) — estimate if not in menu_items
     if utensils and str(utensils).strip().lower() not in ("no", "none", "n/a", "not requested", "not provided"):

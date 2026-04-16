@@ -1,4 +1,5 @@
 import Link from "next/link";
+import DotGrid from "@/components/ui/DotGrid";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -36,9 +37,25 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <p className="text-xs text-neutral-600">© 2026 TheCateringCompany</p>
       </div>
 
-      {/* Right panel — form */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-neutral-50">
-        <div className="w-full max-w-md">
+      {/* Right panel — DotGrid bg + form */}
+      <div className="flex-1 relative flex items-center justify-center p-8 bg-neutral-50 overflow-hidden">
+        {/* Interactive dot grid fills the entire right panel */}
+        <div className="absolute inset-0">
+          <DotGrid
+            dotSize={6}
+            gap={22}
+            baseColor="#d4d4d4"
+            activeColor="#000000"
+            proximity={100}
+            shockRadius={220}
+            shockStrength={4}
+            resistance={800}
+            returnDuration={1.5}
+          />
+        </div>
+
+        {/* Form sits above the grid */}
+        <div className="relative z-10 w-full max-w-md">
           {/* Mobile logo */}
           <div className="lg:hidden mb-8">
             <Link href="/" className="flex items-center gap-2.5">

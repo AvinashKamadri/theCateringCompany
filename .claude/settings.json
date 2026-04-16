@@ -25,7 +25,25 @@
       "Bash(powershell -Command \"Stop-Process -Id 23328 -Force; Start-Sleep -Seconds 2; Write-Host ''killed''\")",
       "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\avina\\\\AppData\\\\Local\\\\Temp\\\\backend2.log'' -Tail 5\")",
       "Bash(powershell -Command \"Get-Process node | Stop-Process -Force; Write-Host ''All node processes killed''\")",
-      "Bash(powershell -Command \"Remove-Item -Path ''C:\\\\Users\\\\avina\\\\projects\\\\flashback\\\\cateringCo\\\\backend\\\\dist'' -Recurse -Force -ErrorAction SilentlyContinue; Write-Host ''dist deleted''\")"
+      "Bash(powershell -Command \"Remove-Item -Path ''C:\\\\Users\\\\avina\\\\projects\\\\flashback\\\\cateringCo\\\\backend\\\\dist'' -Recurse -Force -ErrorAction SilentlyContinue; Write-Host ''dist deleted''\")",
+      "Bash(git -C \"c:\\\\Users\\\\avina\\\\projects\\\\flashback\\\\TheCateringCompany\" log --oneline -- backend-prod/)",
+      "Read(//c/Users/avina/Downloads/docs catering/**)",
+      "Bash(xargs grep:*)",
+      "Bash(npm list:*)",
+      "Bash(git show:*)",
+      "Bash(cp /tmp/projects_page_before.tsx \"c:/Users/avina/projects/flashback/TheCateringCompany/frontend/app/\\(dashboard\\)/projects/page.tsx\")",
+      "Bash(cp /tmp/contracts_page_before.tsx \"c:/Users/avina/projects/flashback/TheCateringCompany/frontend/app/\\(dashboard\\)/contracts/page.tsx\")",
+      "Bash(python3 -c ':*)",
+      "Bash(py -3 -c ':*)",
+      "Bash(py -3 -m pip install pymupdf -q)",
+      "Bash(grep -E '\\\\.\\(py|ts|js\\)$')",
+      "Read(//c/Users/avina/projects/flashback/**)",
+      "Read(//c/Users/avina/.claude/projects/c--Users-avina-projects-flashback-TheCateringCompany/memory/**)",
+      "Bash(timeout 10 npx ts-node -e ':*)",
+      "Bash(npx next:*)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\avina\\projects\\flashback\\TheCateringCompanyAgent\\agent\\nodes"
     ]
   }
 }

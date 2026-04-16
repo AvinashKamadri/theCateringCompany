@@ -24,11 +24,17 @@ SLOT_KEYWORDS = {
     "event_date": ["date", "when", "day", "schedule"],
     "guest_count": ["guest", "people", "count", "attendee", "guests"],
     "venue": ["venue", "location", "place", "address"],
-    "service_type": ["service", "drop-off", "on-site"],
+    "service_type": ["service", "drop-off", "on-site", "onsite"],
     "event_type": ["wedding", "corporate", "birthday", "event type"],
     "special_requests": ["dietary", "halal", "vegan", "allergy", "allergies", "restrictions"],
-    "appetizers": ["appetizer", "hors d'oeuvres", "hors doeuvres", "starter", "starters"],
+    "appetizers": ["appetizer", "hors d'oeuvres", "hors doeuvres", "starter", "starters", "apps"],
     "selected_dishes": ["dish", "dishes", "entree", "entrees", "main course", "main dish", "food selection"],
+    "desserts": ["dessert", "desserts", "cake", "cupcake", "brownie", "cookie", "mousse", "cheesecake", "lemon bar", "blondie", "fruit tart", "mini dessert"],
+    "utensils": ["utensil", "utensils", "bamboo", "plastic", "eco-friendly", "silverware", "flatware"],
+    "rentals": ["rental", "rentals", "linen", "linens", "table", "tables", "chair", "chairs"],
+    "partner_name": ["fiance", "fiancé", "fiancee", "partner", "groom", "bride"],
+    "company_name": ["company", "organization", "corp", "business", "firm"],
+    "honoree_name": ["birthday person", "honoree", "whose birthday"],
 }
 
 
@@ -41,7 +47,7 @@ SLOT_IDENTIFICATION_FUNCTION = {
         "properties": {
             "target_slot": {
                 "type": "string",
-                "enum": ["name", "phone", "event_date", "service_type", "event_type", "venue", "guest_count", "special_requests", "appetizers", "selected_dishes"],
+                "enum": ["name", "phone", "event_date", "service_type", "event_type", "venue", "guest_count", "special_requests", "appetizers", "selected_dishes", "desserts", "utensils", "rentals", "partner_name", "company_name", "honoree_name"],
                 "description": "The slot/field the user wants to modify"
             },
             "new_value": {
@@ -162,8 +168,14 @@ The user is trying to modify one of these fields:
 - special_requests: Dietary restrictions, allergies, special requests
 - appetizers: Appetizer / hors d'oeuvres selections (add or remove specific items)
 - selected_dishes: Main dish / entrée selections (add or remove specific items)
+- desserts: Dessert selections (add or remove items like brownies, mousse cup, cake, etc.)
+- utensils: Utensil type (bamboo, plastic, eco-friendly)
+- rentals: Rental items (linens, tables, chairs)
+- partner_name: Fiancé/partner name (weddings)
+- company_name: Company/organization name (corporate events)
+- honoree_name: Birthday person name
 
-For appetizers and selected_dishes, the new_value should be a comma-separated list of the item names the user wants to ADD or the full instruction (e.g. "add Spanakopita" or "remove Chicken Satay").
+For appetizers, selected_dishes, and desserts, the new_value should be a comma-separated list of the item names the user wants to ADD or the full instruction (e.g. "add Brownies" or "remove Chicken Satay").
 
 Analyze the user's message and identify:
 1. Which field they want to modify

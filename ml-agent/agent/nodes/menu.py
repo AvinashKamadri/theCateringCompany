@@ -8,10 +8,10 @@ in slots, so pricing and contract generation work correctly.
 
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
-    get_last_human_message, add_ai_message, llm_respond,
+    get_last_human_message, add_ai_message, llm_respond, llm_extract,
     is_affirmative, is_negative,
 )
-from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
+from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS, EXTRACTION_PROMPTS
 from database.db_manager import load_menu_by_category, load_dessert_items
 
 
@@ -244,15 +244,46 @@ async def get_main_dishes_context(state) -> str:
 
 
 async def get_appetizer_context(state) -> str:
-    """Fetch appetizer/hors d'oeuvres items from DB and format for prompt."""
+    """Fetch appetizer/hors d'oeuvres items from DB, grouped by sub-category (Chicken, Pork, etc.)."""
     menu = await load_menu_by_category()
-    appetizer_items = []
-    for cat_name, items in menu.items():
-        if _is_appetizer_category(cat_name):
-            appetizer_items.extend(items)
-    formatted = _format_items_list(appetizer_items) if appetizer_items else "No appetizer items in database."
+
+    # Collect only appetizer categories, preserving order
+    appetizer_cats = {cat: items for cat, items in menu.items() if _is_appetizer_category(cat)}
+
+    lines = []
+    global_num = 1
+    for cat_name, items in appetizer_cats.items():
+        # Extract sub-category label after " - " (e.g. "Hors D'oeuvres - Chicken" → "Chicken")
+        if " - " in cat_name:
+            label = cat_name.split(" - ", 1)[1].strip()
+        else:
+            label = cat_name
+
+        # Determine if all items share the same flat price (e.g. all $3.50)
+        prices = [item.get("unit_price") for item in items if item.get("unit_price")]
+        if prices and len(set(prices)) == 1:
+            price_note = f" (${prices[0]:.2f} pp/option)"
+        else:
+            price_note = ""
+
+        lines.append(f"\n**{label}**{price_note}")
+        for item in items:
+            # Per-item price only when it differs from the group price
+            if not price_note and item.get("unit_price"):
+                price_str = f" (${item['unit_price']:.2f})"
+            elif price_note:
+                price_str = ""  # already shown on header
+            else:
+                price_str = ""
+            # Show individual price regardless of group price so LLM can relay it when needed
+            item_price = item.get("unit_price")
+            p_str = f" (${item_price:.2f})" if item_price and not price_note else ""
+            lines.append(f"  {global_num}. {item['name']}{p_str}")
+            global_num += 1
+
+    formatted = "\n".join(lines) if lines else "No appetizer items in database."
     return (
-        f"REAL APPETIZER MENU FROM DATABASE (present these exact items):\n"
+        f"REAL APPETIZER MENU FROM DATABASE — grouped by type, global sequential numbers:\n"
         f"{formatted}\n\n"
         f"Event: {_slots_context(state)}"
     )
@@ -268,8 +299,17 @@ async def get_dessert_context(state) -> str:
     dessert_items = []
     for cat_name, items in menu.items():
         cat_lower = cat_name.lower()
-        if any(kw in cat_lower for kw in ["dessert", "coffee"]):
-            dessert_items.extend(items)
+        if any(kw in cat_lower for kw in ["dessert"]):
+            for item in items:
+                # Expand mini dessert bundle into individual items
+                if "mini desserts" in item["name"].lower() and item.get("description"):
+                    for sub in item["description"].split(","):
+                        sub = sub.strip()
+                        if sub:
+                            dessert_items.append({"name": sub, "unit_price": item["unit_price"],
+                                                  "price_type": item["price_type"]})
+                else:
+                    dessert_items.append(item)
         elif is_wedding and "cake" in cat_lower:
             dessert_items.extend(items)
 
@@ -321,6 +361,52 @@ async def _selections_include_appetizers(selections: str) -> bool:
 # Nodes
 # ---------------------------------------------------------------------------
 
+async def collect_meal_style_node(state: ConversationState) -> ConversationState:
+    """Wedding only — ask plated or buffet before main menu."""
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+
+    choice = await llm_extract(
+        "The customer was asked if they want plated or buffet style. "
+        "This is a REQUIRED choice — they must pick one. 'no', 'neither', 'skip' are NOT valid. "
+        "Return ONLY: plated, buffet, or unclear.",
+        user_msg
+    )
+    choice = choice.strip().lower()
+    if choice == "unclear":
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer didn't pick between plated or buffet — this is required. "
+            "Explain casually that you need one of the two, then re-ask: plated or buffet?",
+            f"Customer said: {user_msg}"
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
+    fill_slot(state["slots"], "meal_style", choice.capitalize())
+
+    if "plated" in choice:
+        note = "All plated packages come with china — we'll add that to your quote."
+    else:
+        note = ""
+
+    # Present the main menu
+    menu_context = await get_main_dishes_context(state)
+    response = await llm_respond(
+        f"{SYSTEM_PROMPT}\n\nMeal style: {choice}. {note} "
+        "Now present the main dish menu using the EXACT grouped format from the database context:\n"
+        "- Use section headers exactly as named (Signature Combinations, BBQ Menus, Tasty & Casual, Global Inspirations, Soup / Salad / Sandwich)\n"
+        "- Keep global sequential numbering — numbers continue across sections\n"
+        "- Show the price per item\n"
+        "- Do NOT collapse sections or merge categories\n"
+        "Add at the end: 'Think of this as a starting point — we can customize everything once you're booked.' "
+        "If plated, also add: 'While these menus are shown buffet-style, just pick what's closest — we'll fine-tune on a quick call.' "
+        "CRITICAL: Only list items from the database context.",
+        menu_context
+    )
+    state["current_node"] = "select_dishes"
+    state["messages"] = add_ai_message(state, response)
+    return state
+
+
 async def select_dishes_node(state: ConversationState) -> ConversationState:
     """Process the customer's dish selections (3-5 dishes).
 
@@ -329,6 +415,21 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
     import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
+
+    # Custom menu escape hatch
+    if _re.search(r'\b(custom|none of these|schedule a call|nothing here|don.?t see)\b', user_msg.lower()):
+        fill_slot(state["slots"], "menu_notes", "Custom menu requested — schedule call")
+        fill_slot(state["slots"], "selected_dishes", "Custom menu — to be finalized on call")
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer wants a custom menu. Respond: "
+            "'No problem — we can set up a quick call and design a custom menu just for you. "
+            "We'll note that for the team. Let's keep going with the rest of the details.'",
+            f"Slots: {_slots_context(state)}"
+        )
+        state["current_node"] = "ask_desserts"
+        state["messages"] = add_ai_message(state, response)
+        return state
+
     menu = await load_menu_by_category()
 
     # Build name list (no numbers — selections must be by name only)
@@ -477,27 +578,18 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
 
 
 async def ask_appetizers_node(state: ConversationState) -> ConversationState:
-    """Handle yes/no response about appetizers."""
+    """Present appetizer menu directly — always show the full menu on first entry."""
     import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    mentions_appetizers = bool(_re.search(r'\bappetizers?\b|\bhors\s+d\'?oeuvres?\b|\bstarters?\b', user_msg, _re.IGNORECASE))
-    if is_affirmative(user_msg) or (mentions_appetizers and not is_negative(user_msg)):
-        appetizer_context = await get_appetizer_context(state)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            "The customer said YES to appetizers. Present the appetizer items from the "
-            "database below as a bullet list (use •, NOT numbers). Tell them to select as many as they'd like. "
-            "Do NOT ask again whether they want appetizers — they already said yes. "
-            "Do NOT make up items — use ONLY the exact items listed below.",
-            appetizer_context
-        )
-        state["current_node"] = "select_appetizers"
-    else:
+    # Only skip if user EXPLICITLY says "no appetizers" or "skip appetizers"
+    # Note: on first entry the user_msg is their answer to guest count/service style, NOT about appetizers
+    # So we only skip if they very specifically mention skipping appetizers
+    skip_words = _re.search(r'\b(no appetizers|skip appetizers|skip apps|don.?t want appetizers)\b', user_msg, _re.IGNORECASE)
+    if skip_words:
         fill_slot(state["slots"], "appetizers", "none")
-        # Immediately fetch and present the real main menu so the LLM
-        # doesn't fabricate dishes when told "show them the menu".
+        # Skip appetizers — go straight to main menu
         menu_context = await get_main_dishes_context(state)
         event_slots = {
             k: v["value"] for k, v in state["slots"].items()
@@ -516,6 +608,22 @@ async def ask_appetizers_node(state: ConversationState) -> ConversationState:
             context
         )
         state["current_node"] = "select_dishes"
+    else:
+        # Default: show the FULL appetizer menu directly — don't ask, just present
+        appetizer_context = await get_appetizer_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_appetizers']}\n\n"
+            "Present ALL appetizer items from the database using this EXACT grouped format:\n"
+            "- Use the group headers as bold section labels (e.g. **Chicken**, **Pork**, **Seafood**, etc.)\n"
+            "- Keep the global sequential numbering from the database context (numbers continue across groups)\n"
+            "- Show the group price on the header line when all items share the same price (e.g. '$3.50 pp/option')\n"
+            "- For Seafood, Canapes, and Vegetarian show individual prices per item since they vary\n"
+            "- Show EVERY item — do not skip or summarize any group\n"
+            "- End with: 'You can mix and match from any category — just let me know which ones you'd like!'\n"
+            "CRITICAL: Use ONLY the exact item names from the database context below.",
+            appetizer_context
+        )
+        state["current_node"] = "select_appetizers"
 
     state["messages"] = add_ai_message(state, response)
     return state
@@ -616,30 +724,64 @@ async def select_appetizers_node(state: ConversationState) -> ConversationState:
         state["messages"] = add_ai_message(state, response)
         return state
 
-    # Confirm appetizer selections and immediately present the real main menu.
-    # This avoids a redundant "are you ready?" step and prevents the LLM from
-    # fabricating menu items when present_menu_node runs on an empty user message.
-    menu_context = await get_main_dishes_context(state)
-    event_slots = {
-        k: v["value"] for k, v in state["slots"].items()
-        if v.get("filled") and k in ("name", "event_type", "event_date", "guest_count", "venue")
-    }
-    context = (
-        f"Appetizers selected: {resolved_text}\n"
-        f"Event details: {event_slots}\n\n"
-        f"{menu_context}"
-    )
+    # Confirm appetizers, then ask passed or station
+    context = f"Appetizers selected: {resolved_text}\nSlots: {_slots_context(state)}"
     response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_appetizers']}\n\n"
-        f"{NODE_PROMPTS['present_menu']}\n\n"
-        "First confirm the appetizer selections enthusiastically as a bullet list (use •, NOT numbers). "
-        "Then immediately present the main menu from the database context above as a bullet list (use •, NOT numbers). "
-        "CRITICAL: Use ONLY the exact items listed in the database context for the main menu. "
-        "DO NOT invent, rename, or add any item not in that list.",
+        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_appetizers']}",
         context
     )
+    state["current_node"] = "collect_appetizer_style"
+    state["messages"] = add_ai_message(state, response)
+    return state
 
-    state["current_node"] = "select_dishes"
+
+async def collect_appetizer_style_node(state: ConversationState) -> ConversationState:
+    """Collect passed vs station for appetizers, then route to main menu."""
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+
+    style = await llm_extract(
+        "The customer was asked if they want appetizers passed around or at a station. "
+        "This is a REQUIRED choice — they must pick one. 'no', 'neither', 'skip' are NOT valid. "
+        "Return ONLY: passed, station, or unclear.",
+        user_msg
+    )
+    if style.strip().lower() == "unclear":
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer didn't pick between passed or station — this is required. "
+            "Explain casually that you need one of the two, then re-ask: passed around or set up at a station?",
+            f"Customer said: {user_msg}"
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
+    fill_slot(state["slots"], "appetizer_style", style.strip().capitalize())
+
+    # Wedding → plated vs buffet; Non-wedding → straight to main menu
+    event_type = get_slot_value(state["slots"], "event_type")
+    is_wedding = event_type and "wedding" in str(event_type).lower()
+
+    if is_wedding:
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nGot it — {style.strip()} style. "
+            "Now ask: 'For the main course — are you thinking plated or buffet style?'",
+            f"Appetizer style: {style}\nSlots: {_slots_context(state)}"
+        )
+        state["current_node"] = "collect_meal_style"
+    else:
+        menu_context = await get_main_dishes_context(state)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nGot it — {style.strip()} style. "
+            "Now present the main dish menu using the EXACT grouped format from the database context:\n"
+            "- Use section headers exactly as named (Signature Combinations, BBQ Menus, Tasty & Casual, Global Inspirations, Soup / Salad / Sandwich)\n"
+            "- Keep global sequential numbering (numbers continue across sections)\n"
+            "- Show the price per item\n"
+            "- Do NOT collapse or merge categories\n"
+            "Add: 'Think of this as a starting point — we can customize later.' "
+            "CRITICAL: Only list items from the database context.",
+            menu_context
+        )
+        state["current_node"] = "select_dishes"
+
     state["messages"] = add_ai_message(state, response)
     return state
 
@@ -685,9 +827,6 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
     MAX_REVISIONS = 3
     total_revisions = _count_slot_revisions(state["slots"], "selected_dishes", "appetizers")
 
-    # "yes these are final" / "yes looks good" / "yes we're done" = NO changes
-    finalize_keywords = ["final", "done", "good", "perfect", "that's all", "thats all",
-                         "no changes", "looks good", "all set", "we're set", "we are set"]
     user_lower = user_msg.lower()
 
     # Detect direct change action words ("add X", "remove X", "also include", etc.)
@@ -696,11 +835,7 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
         r'\balso\b', r'\binstead\b', r'\bswitch\b',
         r'\bcan you (?:also|add|remove|include)\b',
     ]
-    directly_requesting_change = (
-        any(_re.search(p, user_lower) for p in change_action_patterns)
-        and not is_negative(user_msg)
-        and not any(kw in user_lower for kw in finalize_keywords)
-    )
+    directly_requesting_change = any(_re.search(p, user_lower) for p in change_action_patterns)
 
     # If the user directly requested a change WITH details already in the message,
     # forward immediately to collect_menu_changes_node — no need to ask what they want.
@@ -717,29 +852,38 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
             return state
         return await collect_menu_changes_node(state)
 
-    wants_changes = is_affirmative(user_msg) and not any(kw in user_lower for kw in finalize_keywords)
+    # Use LLM to determine: happy with selections (finalize) vs want to redo (re-show menu)
+    from agent.nodes.helpers import llm_extract
+    intent = await llm_extract(
+        "The customer was shown their menu selections and asked 'Anything to tweak, or rolling with this?' "
+        "Does their reply mean: "
+        "A) They're HAPPY and want to move on (e.g. 'looks good', 'perfect', 'rolling', 'ok', 'yes', 'let's go') "
+        "B) They want to REDO/CHANGE selections (e.g. 'no', 'nah', 'nope', 'not really', 'show me again', 'redo') "
+        "Return ONLY: happy or redo",
+        user_msg
+    )
 
-    # Enforce revision cap
-    if wants_changes and total_revisions >= MAX_REVISIONS:
-        wants_changes = False
-        extra_instruction = (
-            "The customer wants more changes but the menu has already been revised several times. "
-            "Politely let them know we'll go with the current selections and move on. "
-        )
+    if intent.strip().lower() == "redo":
+        if total_revisions >= MAX_REVISIONS:
+            response = await llm_respond(
+                f"{SYSTEM_PROMPT}\n\n"
+                "Menu revised several times already. Let them know we'll finalize and move on.",
+                f"Current menu: {_slots_context(state)}"
+            )
+            state["current_node"] = "ask_desserts"
+        else:
+            # Re-show the full menu
+            menu_context = await get_main_dishes_context(state)
+            response = await llm_respond(
+                f"{SYSTEM_PROMPT}\n\nCustomer wants to re-select dishes. Re-present the full menu as a numbered list. "
+                "Ask them to pick 3–5 dishes. "
+                "CRITICAL: Only list items from the database context. Do NOT invent any item.",
+                menu_context
+            )
+            state["current_node"] = "select_dishes"
     else:
-        extra_instruction = ""
-
-    if wants_changes:
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThe customer wants to make changes to the menu. "
-            "Ask them what they'd like to change — they can add items, remove items, or replace selections. "
-            f"They have made {total_revisions} revision(s) so far (limit is {MAX_REVISIONS}).",
-            f"Current menu: {_slots_context(state)}"
-        )
-        state["current_node"] = "collect_menu_changes"
-    else:
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{extra_instruction}"
+            f"{SYSTEM_PROMPT}\n\n"
             "The menu is finalized. Confirm it looks great. "
             "Ask: Would you like to add desserts to your event?",
             f"Final menu: {_slots_context(state)}"

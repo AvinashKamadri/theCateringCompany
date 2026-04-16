@@ -1,22 +1,13 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import {
-  Plus,
-  Search,
-  Calendar,
-  Users,
-  MapPin,
-  FileText,
-  KeyRound,
-  DollarSign,
-} from 'lucide-react';
+import { Plus, Search, FileText, KeyRound } from 'lucide-react';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { projectsApi, type Project } from '@/lib/api/projects';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import Folder from '@/components/ui/Folder';
 
 const STATUS_LABELS: Record<string, string> = {
   inquiry: 'Inquiry',
@@ -26,23 +17,43 @@ const STATUS_LABELS: Record<string, string> = {
   draft: 'Draft',
 };
 
+const STATUS_STYLES: Record<string, string> = {
+  confirmed:     'bg-neutral-900 text-white',
+  completed:     'bg-neutral-800 text-white',
+  proposal_sent: 'bg-neutral-200 text-neutral-800',
+  inquiry:       'bg-neutral-100 text-neutral-600',
+  draft:         'bg-neutral-100 text-neutral-500',
+};
+
+const FOLDER_COLOR = '#1a1a1a';
+
 export default function ProjectsPage() {
-  const router = useRouter();
-  const { user, isAuthenticated } = useAuthStore();
+  const { user } = useAuthStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce search query
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchQuery]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.push('/signin');
-      return;
-    }
+    const controller = new AbortController();
     const load = async () => {
       try {
         setIsLoading(true);
-        setProjects(await projectsApi.getAll());
+        const params = new URLSearchParams();
+        if (debouncedQuery.trim()) params.set('q', debouncedQuery.trim());
+        if (filterStatus !== 'all') params.set('status', filterStatus);
+        const qs = params.toString();
+        const data = await projectsApi.getAll(qs ? `?${qs}` : '');
+        setProjects(data);
       } catch {
         toast.error('Failed to load projects');
         setProjects([]);
@@ -51,15 +62,10 @@ export default function ProjectsPage() {
       }
     };
     load();
-  }, [isAuthenticated, router]);
+    return () => controller.abort();
+  }, [debouncedQuery, filterStatus]);
 
-  const filtered = projects.filter((p) => {
-    // Hide nameless AI intake drafts — they haven't collected an event name yet
-    if (p.name === 'AI Intake (draft)') return false;
-    const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchStatus = filterStatus === 'all' || p.status === filterStatus;
-    return matchSearch && matchStatus;
-  });
+  const filtered = projects;
 
   if (isLoading) {
     return (
@@ -80,9 +86,7 @@ export default function ProjectsPage() {
           <div className="flex items-center justify-between mb-5">
             <div>
               <h1 className="text-xl font-bold text-black">Projects</h1>
-              <p className="text-sm text-neutral-400 mt-0.5">
-                {user?.email}
-              </p>
+              <p className="text-sm text-neutral-400 mt-0.5">{user?.email}</p>
             </div>
             <div className="flex items-center gap-2">
               <Link
@@ -93,7 +97,7 @@ export default function ProjectsPage() {
                 Join
               </Link>
               <Link
-                href="/projects/new"
+                href="/chat"
                 className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-black rounded-lg hover:bg-neutral-800 transition-colors"
               >
                 <Plus className="h-4 w-4" />
@@ -102,36 +106,48 @@ export default function ProjectsPage() {
             </div>
           </div>
 
-          {/* Search + filter */}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
-              <input
-                type="text"
-                placeholder="Search projects…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 text-sm border border-neutral-200 rounded-lg bg-white text-black placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
-              />
-            </div>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="px-3 py-2 text-sm border border-neutral-200 rounded-lg bg-white text-black focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
-            >
-              <option value="all">All Status</option>
-              <option value="draft">Draft</option>
-              <option value="inquiry">Inquiry</option>
-              <option value="proposal_sent">Proposal Sent</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="completed">Completed</option>
-            </select>
+          {/* Search */}
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+            <input
+              type="text"
+              placeholder="Search by name, venue, event type, guest count…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 text-sm border border-neutral-200 rounded-lg bg-white text-black placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+            />
+          </div>
+
+          {/* Status filter pills */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(['all', 'draft', 'inquiry', 'proposal_sent', 'confirmed', 'completed'] as const).map((s) => {
+              const label = s === 'all' ? 'All' : STATUS_LABELS[s] ?? s;
+              const count = s === 'all' ? projects.length : projects.filter((p) => p.status === s).length;
+              if (s !== 'all' && count === 0) return null;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setFilterStatus(s)}
+                  className={cn(
+                    'px-3 py-1 rounded-full text-xs font-medium transition-colors border',
+                    filterStatus === s
+                      ? 'bg-black text-white border-black'
+                      : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400 hover:text-black'
+                  )}
+                >
+                  {label}
+                  <span className={cn('ml-1.5', filterStatus === s ? 'text-neutral-300' : 'text-neutral-400')}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-6 py-6">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         {filtered.length === 0 ? (
           <div className="bg-white rounded-xl border border-neutral-200 p-16 text-center">
             <div className="flex justify-center mb-4">
@@ -145,7 +161,7 @@ export default function ProjectsPage() {
             </p>
             {!searchQuery && (
               <Link
-                href="/projects/new"
+                href="/chat"
                 className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-black rounded-lg hover:bg-neutral-800 transition-colors"
               >
                 <Plus className="h-4 w-4" />
@@ -154,82 +170,77 @@ export default function ProjectsPage() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((project) => (
-              <Link
-                key={project.id}
-                href={`/projects/${project.id}`}
-                className="bg-white rounded-xl border border-neutral-200 hover:border-black hover:shadow-sm transition-all group"
-              >
-                <div className="p-5">
-                  {/* Card header */}
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-semibold text-black truncate group-hover:text-black">
-                        {project.name}
-                      </h3>
-                      <p className="text-xs text-neutral-400 capitalize mt-0.5">{project.event_type ?? '—'}</p>
-                    </div>
-                    <span
-                      className={cn(
-                        'ml-3 shrink-0 px-2 py-0.5 rounded-md text-xs font-medium border',
-                        project.status === 'confirmed'
-                          ? 'bg-black text-white border-black'
-                          : project.status === 'completed'
-                          ? 'bg-neutral-800 text-white border-neutral-800'
-                          : 'bg-neutral-100 text-neutral-600 border-neutral-200'
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+            {filtered.map((project) => {
+              const statusStyle = STATUS_STYLES[project.status] ?? STATUS_STYLES.draft;
+
+              const folderItems = [
+                // Paper 1 — date & guests
+                <div key="p1" style={{ padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 11, color: '#333', fontWeight: 700, lineHeight: 1.3 }}>
+                    {project.event_date
+                      ? new Date(project.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      : 'Date TBD'}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#666', lineHeight: 1.3 }}>
+                    {project.guest_count != null ? `${project.guest_count} guests` : 'Guests TBD'}
+                  </span>
+                </div>,
+                // Paper 2 — venue & event type
+                <div key="p2" style={{ padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 11, color: '#333', fontWeight: 700, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                    {project.venue_name || 'Venue TBD'}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#666', lineHeight: 1.3, textTransform: 'capitalize' as const }}>
+                    {project.event_type || '—'}
+                  </span>
+                </div>,
+                // Paper 3 — status
+                <div key="p3" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '4px' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#222', textTransform: 'uppercase' as const, letterSpacing: '0.06em', textAlign: 'center' as const }}>
+                    {STATUS_LABELS[project.status] ?? project.status}
+                  </span>
+                </div>,
+              ];
+
+              return (
+                <Link
+                  key={project.id}
+                  href={`/projects/${project.id}`}
+                  className="flex flex-col items-center gap-3 group"
+                >
+                  {/* Folder visual — transform-origin bottom so scale grows upward */}
+                  <div className="w-[180px] h-[162px] flex items-end justify-center">
+                    <Folder color={FOLDER_COLOR} size={1.8} items={folderItems} />
+                  </div>
+
+                  {/* Label below folder */}
+                  <div className="text-center w-[180px] px-1">
+                    <p className="text-sm font-semibold text-neutral-900 truncate group-hover:text-black leading-snug">
+                      {project.name}
+                    </p>
+                    <div className="flex items-center justify-center gap-1.5 mt-1 flex-wrap">
+                      {project.event_date && (
+                        <span className="text-[11px] text-neutral-500">
+                          {new Date(project.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
                       )}
-                    >
-                      {STATUS_LABELS[project.status] ?? project.status}
-                    </span>
-                  </div>
-
-                  {/* Meta */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-xs text-neutral-500">
-                      <Calendar className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-                      {project.event_date
-                        ? new Date(project.event_date).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric',
-                          })
-                        : 'Date TBD'}
+                      {project.guest_count != null && (
+                        <span className="text-[11px] text-neutral-400">· {project.guest_count} guests</span>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-neutral-500">
-                      <Users className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-                      {project.guest_count != null ? `${project.guest_count} guests` : 'Guests TBD'}
+                    <div className="flex items-center justify-center gap-2 mt-1 flex-wrap">
+                      <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-medium', statusStyle)}>
+                        {STATUS_LABELS[project.status] ?? project.status}
+                      </span>
+                      {project.event_type && (
+                        <span className="text-[10px] text-neutral-400 capitalize">{project.event_type}</span>
+                      )}
                     </div>
-                    {project.venue_name && (
-                      <div className="flex items-center gap-2 text-xs text-neutral-500">
-                        <MapPin className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-                        <span className="truncate">{project.venue_name}</span>
-                      </div>
-                    )}
-                    {project.total_price != null && (
-                      <div className="flex items-center gap-2 text-xs font-semibold text-black">
-                        <DollarSign className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-                        ${project.total_price.toLocaleString()}
-                      </div>
-                    )}
                   </div>
-
-                  {/* Footer */}
-                  <div className="mt-4 pt-4 border-t border-neutral-100">
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        router.push(`/projects/${project.id}`);
-                      }}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-black hover:bg-neutral-100 rounded-md transition-colors"
-                    >
-                      <FileText className="h-3.5 w-3.5" />
-                      Details
-                    </button>
-                  </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>

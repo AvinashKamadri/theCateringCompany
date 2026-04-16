@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
@@ -10,7 +10,14 @@ import { useAuthStore } from "@/lib/store/auth-store";
 function SignInForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const setUser = useAuthStore((state) => state.setUser);
+  const { setUser, isAuthenticated } = useAuthStore();
+
+  // If already authenticated (e.g. back-button after login), push forward
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.replace(searchParams.get('redirect') || '/projects');
+    }
+  }, [isAuthenticated, router, searchParams]);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -27,7 +34,7 @@ function SignInForm() {
       }
       setUser(data.user);
       const redirect = searchParams.get("redirect");
-      router.push(redirect || "/projects");
+      router.replace(redirect || "/projects");
     } catch (err: any) {
       setError(err.message || "Invalid email or password.");
     } finally {

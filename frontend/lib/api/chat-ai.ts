@@ -7,7 +7,7 @@
 import axios, { AxiosError } from 'axios';
 import type { ChatRequest, ChatResponse, ConversationState } from '@/types/chat-ai.types';
 
-const ML_API_BASE_URL = process.env.NEXT_PUBLIC_ML_API_URL || 'http://localhost:8001';
+const ML_API_BASE_URL = process.env.NEXT_PUBLIC_ML_API_URL || 'http://localhost:8000';
 
 /**
  * Axios instance for ML Chat API
@@ -24,7 +24,10 @@ export const chatAiClient = axios.create({
 chatAiClient.interceptors.response.use(
   (response) => response.data,
   (error: AxiosError) => {
-    console.error('Chat AI API error:', error.response?.data || error.message);
+    // Only log non-network errors (network errors just mean the ML agent is offline)
+    if (error.response) {
+      console.error('Chat AI API error:', error.response.data);
+    }
     return Promise.reject(error.response?.data || error);
   }
 );

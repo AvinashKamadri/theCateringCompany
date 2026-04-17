@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect, useRef } from 'react';
+import { Suspense, useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AiChat } from '@/components/chat/ai-chat';
 import type { ContractData } from '@/types/chat-ai.types';
@@ -233,10 +233,14 @@ function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
   );
 }
 
+const emptySubscribe = () => () => {};
+
 function AiIntakeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isAuthenticated } = useAuthStore();
+  // Wait for Zustand to rehydrate from localStorage before checking auth.
+  const hydrated = useSyncExternalStore(emptySubscribe, () => true, () => false);
   const [isSaving, setIsSaving] = useState(false);
   const [draftProjectId, setDraftProjectId] = useState<string | undefined>(undefined);
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
@@ -254,12 +258,13 @@ function AiIntakeContent() {
   const isStaff = user?.role === 'staff' || user?.email?.toLowerCase().endsWith('@catering-company.com');
 
   useEffect(() => {
+    if (!hydrated) return;
     if (!isAuthenticated) { router.push('/signin'); return; }
     if (isStaff) { router.replace('/contracts'); return; }
-  }, [isAuthenticated, isStaff, router]);
+  }, [hydrated, isAuthenticated, isStaff, router]);
 
   useEffect(() => {
-    if (!isAuthenticated || isStaff) return;
+    if (!hydrated || !isAuthenticated || isStaff) return;
     const stored = loadStoredSessions();
     if (stored.length === 0) {
       setLoadingSessions(false);
@@ -301,7 +306,7 @@ function AiIntakeContent() {
         await new Promise((r) => setTimeout(r, 300));
       }
     })();
-  }, [isAuthenticated, isStaff]);
+  }, [hydrated, isAuthenticated, isStaff]);
 
   const titleUpdatedRef = useRef(false);
 
@@ -374,7 +379,7 @@ function AiIntakeContent() {
     }
   };
 
-  if (!isAuthenticated || isStaff) return null;
+  if (!hydrated || !isAuthenticated || isStaff) return null;
 
   return (
     <div className="h-screen flex flex-col bg-neutral-50">

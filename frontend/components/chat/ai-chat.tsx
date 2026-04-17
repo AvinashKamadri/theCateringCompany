@@ -277,6 +277,15 @@ interface InlineChoice { items: ListItem[]; multi?: boolean }
 
 function detectInlineChoices(content: string): InlineChoice | null {
   const lower = content.toLowerCase();
+
+  // Guard: skip all choice detection if message is confirming something is done
+  // (moved up so rental check below can also use it)
+  const isConfirmDoneEarly = /all set|is set|is in!|confirmed|is ready|been added|been noted|been recorded|got it.*!|locked in|good to go/i.test(lower);
+
+  // Rentals: must check BEFORE numbered list skip (AI may send "1. Linens 2. Tables 3. Chairs")
+  if (!isConfirmDoneEarly && /rental/i.test(content))
+    return { items: [{ name: 'Linens' }, { name: 'Tables' }, { name: 'Chairs' }], multi: true };
+
   // Skip if already has a numbered/bulleted list
   if (/^\s*\d+\./m.test(content) || /^\s*[-•*]\s/m.test(content)) return null;
 
@@ -284,8 +293,7 @@ function detectInlineChoices(content: string): InlineChoice | null {
   if (/cocktail hour.*reception.*both|service style/i.test(content))
     return { items: [{ name: 'Cocktail Hour' }, { name: 'Full Reception' }, { name: 'Both' }] };
 
-  // Guard: skip all choice detection if message is confirming something is done
-  const isConfirmDone = /all set|is set|is in!|confirmed|is ready|been added|been noted|been recorded|got it.*!|locked in|good to go/i.test(lower);
+  const isConfirmDone = isConfirmDoneEarly;
 
   // Appetizer style: passed / station (only when asking, not confirming)
   if (!isConfirmDone && /passed around.*station|station.*passed around|passed or.*(station|set up)|set up at a station/i.test(content))
@@ -310,10 +318,6 @@ function detectInlineChoices(content: string): InlineChoice | null {
   // Disposable / china / tableware
   if (!isConfirmDone && /disposable.*china|china.*disposable|place setting|tableware/i.test(content))
     return { items: [{ name: 'Standard Disposable (included)' }, { name: 'Premium Disposable (gold/silver) — $1/pp' }, { name: 'Full China' }] };
-
-  // Rentals: linens / tables / chairs (multi-select)
-  if (!isConfirmDone && /rental.*(linen|table|chair)|linen.*table.*chair/i.test(content))
-    return { items: [{ name: 'Linens' }, { name: 'Tables' }, { name: 'Chairs' }], multi: true };
 
   // Confirmation: "everything good?" / "is that the final" / "any changes" / "all set"
   if (/everything good|is that the final|are we (set|good|rolling)|any (changes|tweaks)|feel good about|roll with this|are these.*final|are you all set/i.test(content))
@@ -404,10 +408,60 @@ function isConfirmationMessage(intro: string): boolean {
   return CONFIRM_PATTERNS.some((p) => p.test(intro));
 }
 
+// The ML agent sometimes acknowledges an answer then tacks on the previous
+// question's options ("Got it, no dietary concerns. Is there anything else
+// you need for your event?\n1. Yes…\n2. No…"). The intro is a new open-ended
+// question but the list items below belong to the prior turn — detect this
+// so we can render the ack as plain text and suppress the stale options.
+const ACK_ECHO_PATTERNS = [
+  /^(got it|great|perfect|awesome|thanks|thank you|noted|sounds good|ok|okay)[,!.\s]/i,
+];
+const TRAILING_OPEN_QUESTION = /(is there anything else|anything else (you|we)|what else|any (other|more))/i;
+function isAckEchoMessage(intro: string): boolean {
+  return ACK_ECHO_PATTERNS.some((p) => p.test(intro)) && TRAILING_OPEN_QUESTION.test(intro);
+}
+
 function splitAtList(content: string): { intro: string } {
   const firstListLine = content.search(/^(?:\d+\.|[-•*])\s+/m);
   if (firstListLine === -1) return { intro: content };
   return { intro: content.slice(0, firstListLine).trimEnd() };
+}
+
+// ─── Menu item image helper ──────────────────────────────────────────────────
+
+// Map slugified menu names → actual image filename (no extension) for items
+// whose filename doesn't match the generated slug (shortened names, spelling
+// variants, etc.). Keys are the output of the slug pipeline below.
+const IMAGE_ALIAS: Record<string, string> = {
+  'chicken-bahn-mi-slider-w-jalapeno-slaw': 'chicken-banh-mi-slider',
+  'chicken-banh-mi-slider-w-jalapeno-slaw': 'chicken-banh-mi-slider',
+  'asian-roast-beef-crostini-w-wasabi-aioli': 'asian-roast-beef-crostini',
+  'mexican-stuffed-peppers-w-cojito-cheese': 'mexican-stuffed-peppers',
+  'meatballs-bbq-swedish-sweet-and-sour': 'meatballs-bbq-swedish-sweet-sour',
+  'meatballs-bbq-swedish-and-sweet-and-sour': 'meatballs-bbq-swedish-sweet-sour',
+  'chocolate-chip-cookie-bars': 'chocolate-chip-cookie-bar',
+  'tiered-cake': 'wedding-tiered-cakes',
+  'tiered-cakes': 'wedding-tiered-cakes',
+  'wedding-cake': 'wedding-tiered-cakes',
+};
+
+function getMenuImageUrl(name: string): string | null {
+  // Convert "Chicken Tikka Skewers ($3.50/pp)" → "chicken-tikka-skewers"
+  const clean = name
+    .replace(/\s*\(.*?\)\s*/g, '')        // remove price in parens
+    .replace(/\s*\$[\d.,]+\/?\w*/g, '')   // remove $price
+    .trim()
+    .toLowerCase()
+    .replace(/[&]/g, 'and')
+    .replace(/[\/]/g, '-')
+    .replace(/w\//g, 'w-')               // "w/" → "w-"
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (!clean) return null;
+  const file = IMAGE_ALIAS[clean] ?? clean;
+  return `/menu-images/${file}.jpg`;
 }
 
 // ─── Option card (single-select square) ───────────────────────────────────────
@@ -421,33 +475,44 @@ function OptionCard({
   selected: boolean;
   onToggle: () => void;
 }) {
+  const imgUrl = item.price ? getMenuImageUrl(item.name) : null; // Only show images for food items (with prices)
+  const [imgError, setImgError] = React.useState(false);
+  const hasImg = imgUrl && !imgError;
+
   return (
     <button
       onClick={onToggle}
-      className={`relative flex flex-col items-start justify-end rounded-xl border-2 p-3 text-left transition-all focus:outline-none w-full ${
-        item.description ? 'min-h-[80px]' : 'h-20'
+      className={`relative flex flex-col items-start rounded-xl border-2 overflow-hidden text-left transition-all focus:outline-none w-full ${
+        hasImg ? '' : (item.description ? 'min-h-[80px]' : 'h-20')
       } ${
         selected
           ? 'border-black bg-black text-white'
           : 'border-neutral-200 bg-white hover:border-neutral-400 text-neutral-900'
       }`}
     >
+      {hasImg && (
+        <div className="w-full h-20 bg-neutral-100 overflow-hidden">
+          <img src={imgUrl} alt={item.name} onError={() => setImgError(true)} className="w-full h-full object-cover" loading="lazy" />
+        </div>
+      )}
       {selected && (
         <div className="absolute top-2.5 right-2.5 w-5 h-5 bg-white rounded-full flex items-center justify-center shadow">
           <Check className="w-3 h-3 text-black" strokeWidth={3} />
         </div>
       )}
-      <span className="text-sm font-semibold leading-tight">{item.name}</span>
-      {item.price && (
-        <span className={`text-xs mt-0.5 ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
-          {item.price}
-        </span>
-      )}
-      {item.description && (
-        <span className={`text-[10px] mt-1 leading-snug line-clamp-2 ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
-          {item.description}
-        </span>
-      )}
+      <div className={`p-3 ${hasImg ? 'pt-2' : 'flex-1 flex flex-col justify-end'}`}>
+        <span className="text-sm font-semibold leading-tight">{item.name}</span>
+        {item.price && (
+          <span className={`text-xs mt-0.5 block ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
+            {item.price}
+          </span>
+        )}
+        {item.description && (
+          <span className={`text-[10px] mt-1 leading-snug line-clamp-2 block ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
+            {item.description}
+          </span>
+        )}
+      </div>
     </button>
   );
 }
@@ -463,6 +528,9 @@ function MenuItemCard({
   selected: boolean;
   onToggle: () => void;
 }) {
+  const imgUrl = getMenuImageUrl(item.name);
+  const [imgError, setImgError] = React.useState(false);
+
   return (
     <button
       onClick={onToggle}
@@ -470,7 +538,19 @@ function MenuItemCard({
         selected ? 'border-black bg-black/5 shadow-sm' : 'border-neutral-200 bg-white hover:border-neutral-400'
       }`}
     >
-      {!item.description && <div className="w-full h-14 bg-neutral-100" />}
+      {imgUrl && !imgError ? (
+        <div className="w-full h-24 bg-neutral-100 overflow-hidden">
+          <img
+            src={imgUrl}
+            alt={item.name}
+            onError={() => setImgError(true)}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        </div>
+      ) : (
+        <div className="w-full h-14 bg-neutral-100" />
+      )}
       {selected && (
         <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black rounded-full flex items-center justify-center shadow">
           <Check className="w-3 h-3 text-white" strokeWidth={3} />
@@ -655,6 +735,37 @@ function inlineFormat(text: string): React.ReactNode {
       return <code key={i} className="bg-neutral-200 rounded px-1 text-xs font-mono">{part.slice(1, -1)}</code>;
     return <Fragment key={i}>{part}</Fragment>;
   });
+}
+
+// ─── Confetti ─────────────────────────────────────────────────────────────────
+
+function fireConfetti(count = 120) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  const colors = ['#111111', '#f43f5e', '#10b981', '#f59e0b', '#3b82f6', '#a855f7', '#ec4899'];
+  const layer = document.createElement('div');
+  layer.className = 'tc-confetti-layer';
+  document.body.appendChild(layer);
+  for (let i = 0; i < count; i++) {
+    const piece = document.createElement('span');
+    piece.className = 'tc-confetti-piece';
+    const left = Math.random() * 100;
+    const dx = (Math.random() - 0.5) * 240;
+    const rot = (Math.random() * 1080 + 360) * (Math.random() < 0.5 ? -1 : 1);
+    const dur = 1800 + Math.random() * 1400;
+    const delay = Math.random() * 220;
+    const size = 6 + Math.random() * 6;
+    piece.style.left = `${left}%`;
+    piece.style.width = `${size}px`;
+    piece.style.height = `${size * 1.6}px`;
+    piece.style.background = colors[i % colors.length];
+    piece.style.setProperty('--tc-dx', `${dx}px`);
+    piece.style.setProperty('--tc-rot', `${rot}deg`);
+    piece.style.setProperty('--tc-dur', `${dur}ms`);
+    piece.style.animationDelay = `${delay}ms`;
+    layer.appendChild(piece);
+  }
+  setTimeout(() => layer.remove(), 3800);
 }
 
 // ─── Session storage ──────────────────────────────────────────────────────────
@@ -902,6 +1013,39 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state.messages]);
 
+  // Subtle pop sound when a new AI response arrives.
+  const lastAiCountRef = useRef(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  useEffect(() => {
+    const aiCount = state.messages.filter((m) => m.role === 'ai').length;
+    if (aiCount > lastAiCountRef.current && lastAiCountRef.current > 0) {
+      try {
+        const reduce = typeof window !== 'undefined'
+          && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        if (!reduce) {
+          const AC = (window.AudioContext || (window as any).webkitAudioContext);
+          if (AC) {
+            if (!audioCtxRef.current) audioCtxRef.current = new AC();
+            const ctx = audioCtxRef.current!;
+            const t0 = ctx.currentTime;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(520, t0);
+            osc.frequency.exponentialRampToValueAtTime(780, t0 + 0.09);
+            gain.gain.setValueAtTime(0.0001, t0);
+            gain.gain.exponentialRampToValueAtTime(0.08, t0 + 0.015);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(t0);
+            osc.stop(t0 + 0.2);
+          }
+        }
+      } catch { /* no-op */ }
+    }
+    lastAiCountRef.current = aiCount;
+  }, [state.messages]);
+
   // Keep input focused after every message
   useEffect(() => {
     if (!state.isLoading) inputRef.current?.focus();
@@ -911,7 +1055,13 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
   useEffect(() => {
     let lastListIdx: number | null = null;
     state.messages.forEach((msg, idx) => {
-      if (msg.role === 'ai' && parseListItems(msg.content)) lastListIdx = idx;
+      if (msg.role !== 'ai') return;
+      if (!parseListItems(msg.content)) return;
+      // Skip messages where the intro is an ack + open-ended follow-up —
+      // the list items belong to the previous turn, not this one.
+      const { intro } = splitAtList(msg.content);
+      if (isAckEchoMessage(intro)) return;
+      lastListIdx = idx;
     });
     const lastMsgIdx = state.messages.length - 1;
     if (lastListIdx !== null && lastListIdx === lastMsgIdx) {
@@ -1004,6 +1154,23 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
   const handleSendMessage = async (messageText?: string) => {
     const content = messageText || input.trim();
     if (!content || state.isLoading) return;
+
+    // ─── Inline contact edits: "change phone/email to X" ─────────────
+    // Optimistically update the local slot so the panel reflects the new
+    // value immediately; the message still flows through the agent so its
+    // state can catch up too.
+    if (!frontendStep) {
+      const emailEdit = /\b(?:change|update|correct|set|fix|use)\s+(?:my\s+|the\s+)?e-?mail\s*(?:to|:)?\s*([^\s,]+@[^\s,]+\.[a-zA-Z]{2,})/i.exec(content);
+      const phoneEdit = /\b(?:change|update|correct|set|fix|use)\s+(?:my\s+|the\s+)?(?:phone|mobile|contact)?\s*(?:number|#)?\s*(?:to|:)?\s*(\+?\d[\d\s\-()]{6,}\d)/i.exec(content);
+      const updates: any = {};
+      if (emailEdit) updates.email = emailEdit[1];
+      if (phoneEdit) updates.phone = phoneEdit[1].replace(/[\s\-()]/g, '');
+      if (updates.email || updates.phone) {
+        onSlotsUpdate?.(updates);
+        if (updates.email) toast.success(`Email updated to ${updates.email}`);
+        if (updates.phone) toast.success(`Phone updated to ${updates.phone}`);
+      }
+    }
 
     // ─── Re-trigger wedding cake via "@ai change cake" ───────────────
     if (!frontendStep && weddingCakeAskedRef.current && /(@ai\s+)?(change|update|redo|edit)\s*(wedding\s*)?cake/i.test(content)) {
@@ -1253,6 +1420,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
             ],
           }));
         }
+        fireConfetti();
         toast.success('Event details collected! You can now create your project.');
         try {
           const conversation = await chatAiApi.getConversation(response.thread_id);
@@ -1315,12 +1483,34 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
 
             if (msg.role === 'ai' && listItems) {
               const { intro } = splitAtList(msg.content);
+              const isAckEcho = isAckEchoMessage(intro);
+
+              // Agent acknowledged the prior answer and tacked on an
+              // open-ended question — the list below is stale options from
+              // the previous turn. Render intro only.
+              if (isAckEcho) {
+                return (
+                  <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
+                    <div className="flex flex-col items-center gap-1 shrink-0">
+                      <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
+                        <Sparkles className="w-3.5 h-3.5 text-white" />
+                      </div>
+                      <span className="text-[10px] text-neutral-400">AI</span>
+                    </div>
+                    <div className="max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 bg-neutral-100 text-neutral-900">
+                      <MarkdownMessage content={intro} />
+                      <span className="text-xs mt-1 block text-neutral-400">{time}</span>
+                    </div>
+                  </div>
+                );
+              }
+
               const isConfirm = isConfirmationMessage(intro);
 
               // Confirmation messages: render as plain read-only list, not interactive cards
               if (isConfirm) {
                 return (
-                  <div key={idx} className="flex justify-start gap-2.5">
+                  <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
                     <div className="flex flex-col items-center gap-1 shrink-0">
                       <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
                         <Sparkles className="w-3.5 h-3.5 text-white" />
@@ -1341,7 +1531,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
               const maxSelect = isDesserts ? 4 : undefined;
 
               return (
-                <div key={idx} className="flex justify-start gap-2.5">
+                <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
                   <div className="flex flex-col items-center gap-1 shrink-0">
                     <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
                       <Sparkles className="w-3.5 h-3.5 text-white" />
@@ -1370,7 +1560,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
 
             if (msg.role === 'user') {
               return (
-                <div key={idx} className="flex justify-end gap-2.5">
+                <div key={idx} className="flex justify-end gap-2.5 tc-msg-user">
                   <div className="max-w-[85%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 bg-black text-white">
                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                     <span className="text-xs mt-1 block text-neutral-400">{time}</span>
@@ -1386,7 +1576,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
             }
 
             return (
-              <div key={idx} className="flex justify-start gap-2.5">
+              <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
                 <div className="flex flex-col items-center gap-1 shrink-0">
                   <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
                     <Sparkles className="w-3.5 h-3.5 text-white" />
@@ -1402,7 +1592,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           })}
 
           {state.isLoading && (
-            <div className="flex justify-start">
+            <div className="flex justify-start tc-fade-in">
               <div className="bg-neutral-100 rounded-2xl px-4 py-3">
                 <Loader2 className="w-5 h-5 text-neutral-400 animate-spin" />
               </div>

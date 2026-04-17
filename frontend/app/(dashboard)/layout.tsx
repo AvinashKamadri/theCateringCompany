@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { AppNav } from '@/components/layout/app-nav';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { isAuthenticated } = useAuthStore();
   const [hydrated, setHydrated] = useState(false);
 
@@ -27,7 +28,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen bg-neutral-50">
       <AppNav />
-      <main className="pt-14">{children}</main>
+      <main className="pt-14">
+        <div key={pathname} className="tc-page-enter">{children}</div>
+      </main>
     </div>
   );
 }

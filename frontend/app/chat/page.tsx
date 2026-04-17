@@ -14,6 +14,14 @@ import {
 } from 'lucide-react';
 import { AppNav } from '@/components/layout/app-nav';
 
+function getMenuImageUrl(name: string): string | null {
+  const clean = name
+    .replace(/\s*\(.*?\)\s*/g, '').replace(/\s*\$[\d.,]+\/?\w*/g, '').trim()
+    .toLowerCase().replace(/[&]/g, 'and').replace(/[\/]/g, '-').replace(/w\//g, 'w-')
+    .replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return clean ? `/menu-images/${clean}.jpg` : null;
+}
+
 const STAFF_DOMAINS = ['@catering-company.com'];
 const STORAGE_KEY = 'tc_chat_sessions';
 
@@ -162,14 +170,21 @@ function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
               </div>
               <div className="relative">
                 <div className={`space-y-2 overflow-hidden transition-all duration-300 ${itemsOpen ? 'max-h-[2000px]' : 'max-h-[198px]'}`}>
-                  {foodItems.map((item, i) => (
-                    <div key={i} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100">
-                      <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
-                        <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
+                  {foodItems.map((item, i) => {
+                    const imgUrl = getMenuImageUrl(item);
+                    return (
+                      <div key={i} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100">
+                        {imgUrl ? (
+                          <img src={imgUrl} alt={item} className="w-8 h-8 rounded-md object-cover shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                        ) : (
+                          <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
+                            <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
+                          </div>
+                        )}
+                        <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
                       </div>
-                      <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 {!itemsOpen && foodItems.length > 4 && (
                   <div className="absolute bottom-0 left-0 right-0 h-16 bg-linear-to-t from-white to-transparent pointer-events-none" />

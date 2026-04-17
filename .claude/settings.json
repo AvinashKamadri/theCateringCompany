@@ -41,7 +41,9 @@
       "Read(//c/Users/avina/.claude/projects/c--Users-avina-projects-flashback-TheCateringCompany/memory/**)",
       "Bash(timeout 10 npx ts-node -e ':*)",
       "Bash(npx next:*)",
-      "Read(//c/Users/avina/Downloads/Telegram Desktop/**)"
+      "Read(//c/Users/avina/Downloads/Telegram Desktop/**)",
+      "Read(//c/Users/avina/Downloads/menu-pictures//**)",
+      "Bash(awk '{print $5}')"
     ],
     "additionalDirectories": [
       "c:\\Users\\avina\\projects\\flashback\\TheCateringCompanyAgent\\agent\\nodes",

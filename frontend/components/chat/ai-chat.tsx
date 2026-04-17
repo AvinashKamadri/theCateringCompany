@@ -269,38 +269,91 @@ function parseCategorizedItems(content: string): CategoryGroup[] | null {
   return valid.length >= 2 ? valid : null;
 }
 
-// Detect yes/no questions → return synthetic Yes/No cards
-const YES_NO_PATTERNS = [
-  /would you like to add/i,
-  /would you like us to/i,
-  /would you like to schedule/i,
-  /do you (need|want) any/i,
-  /do you (need|want) (rental|utensil|linen|floral)/i,
-  /do you want to add anything/i,
-  /is that the final/i,
-  /are you all set/i,
-  /anything else you (need|want|like)/i,
-  /is there anything else/i,
-  /any (special request|dietary|health|allerg)/i,
-  /yes or no\??/i,
-  /\b(need|want|like)\b.*(utensil|plate|napkin|silverware|cutlery)/i,
-  /\b(need|want|like)\b.*(rental|tent|chair|table|linen)/i,
-  /\b(need|want|like)\b.*(floral|flower|decoration|centerpiece)/i,
-  /\b(need|want|like)\b.*(coffee|bar setup|bar service)/i,
-];
+// ─── Inline choice detection from AI messages ──────────────────────────────
+// Detects known question patterns and returns synthetic card options
+// Ordered: most specific first, yes/no last
 
-function isYesNoQuestion(content: string): boolean {
+interface InlineChoice { items: ListItem[]; multi?: boolean }
+
+function detectInlineChoices(content: string): InlineChoice | null {
   const lower = content.toLowerCase();
   // Skip if already has a numbered/bulleted list
-  if (/^\s*\d+\./m.test(content) || /^\s*[-•*]\s/m.test(content)) return false;
-  return YES_NO_PATTERNS.some((p) => p.test(content));
+  if (/^\s*\d+\./m.test(content) || /^\s*[-•*]\s/m.test(content)) return null;
+
+  // Service style (wedding): cocktail hour / full reception / both
+  if (/cocktail hour.*reception.*both|service style/i.test(content))
+    return { items: [{ name: 'Cocktail Hour' }, { name: 'Full Reception' }, { name: 'Both' }] };
+
+  // Guard: skip all choice detection if message is confirming something is done
+  const isConfirmDone = /all set|is set|is in!|confirmed|is ready|been added|been noted|been recorded|got it.*!|locked in|good to go/i.test(lower);
+
+  // Appetizer style: passed / station (only when asking, not confirming)
+  if (!isConfirmDone && /passed around.*station|station.*passed around|passed or.*(station|set up)|set up at a station/i.test(content))
+    return { items: [{ name: 'Passed Around' }, { name: 'Station' }] };
+
+  // Meal style: plated / buffet
+  if (!isConfirmDone && /plated.*buffet|buffet.*plated|plated.*(or|vs)/i.test(content))
+    return { items: [{ name: 'Plated' }, { name: 'Buffet' }] };
+
+  // Service type: drop-off / onsite
+  if (!isConfirmDone && /drop.?off.*on.?site|on.?site.*drop.?off|delivery.*staff/i.test(content))
+    return { items: [{ name: 'Drop-off (no staff)' }, { name: 'Onsite (staff present)' }] };
+
+  // Drinks: coffee / bar / both (only when asking to choose, not confirming)
+  if (!isConfirmDone && /add coffee or bar|would you like.*(coffee|bar) (service|setup)|coffee service or.*bar/i.test(content))
+    return { items: [{ name: 'Coffee Service' }, { name: 'Bar Service' }, { name: 'Both' }] };
+
+  // Bar packages
+  if (!isConfirmDone && /beer\s*&?\s*wine.*signature.*open bar|bar package/i.test(content))
+    return { items: [{ name: 'Beer & Wine' }, { name: 'Beer & Wine + Two Signature Drinks' }, { name: 'Full Open Bar' }] };
+
+  // Disposable / china / tableware
+  if (!isConfirmDone && /disposable.*china|china.*disposable|place setting|tableware/i.test(content))
+    return { items: [{ name: 'Standard Disposable (included)' }, { name: 'Premium Disposable (gold/silver) — $1/pp' }, { name: 'Full China' }] };
+
+  // Rentals: linens / tables / chairs (multi-select)
+  if (!isConfirmDone && /rental.*(linen|table|chair)|linen.*table.*chair/i.test(content))
+    return { items: [{ name: 'Linens' }, { name: 'Tables' }, { name: 'Chairs' }], multi: true };
+
+  // Confirmation: "everything good?" / "is that the final" / "any changes" / "all set"
+  if (/everything good|is that the final|are we (set|good|rolling)|any (changes|tweaks)|feel good about|roll with this|are these.*final|are you all set/i.test(content))
+    return { items: [{ name: 'Yes, looks good' }, { name: 'No, make changes' }] };
+
+  // Dietary — only match the yes/no check question ("any dietary/health concerns?"), NOT the detail follow-up ("what concerns?")
+  if (/any (health|dietary|allerg).*(concern|issue|need)|checking in.*dietary|dietary.*for your (wedding|event|birthday|party)/i.test(content))
+    return { items: [{ name: 'Yes, I have dietary concerns' }, { name: 'No dietary concerns' }] };
+
+  // Final confirmation after dietary — generate summary or make changes
+  if (/happy with everything|generate.*event summary|team will be in touch|make any changes first/i.test(content))
+    return { items: [{ name: 'Yes, generate my summary' }] };
+
+  // "add anything / proceed to generate contract" — Yes/No
+  if (/add anything.*(now|else)|proceed to generate|want to add anything/i.test(content))
+    return { items: [{ name: 'Yes, add something' }, { name: 'No, proceed' }] };
+
+  // Generic yes/no (utensils, desserts, special requests, dietary, anything else)
+  const YES_NO_PATTERNS = [
+    /would you like to add/i,
+    /would you like us to/i,
+    /do you (need|want) any/i,
+    /do you want to add anything/i,
+    /anything else you (need|want|like)/i,
+    /is there anything else/i,
+    /any (special request|dietary|health|allerg)/i,
+    /yes or no\??/i,
+    /do you (need|want).*(utensil|rental|linen)/i,
+    /would you like to add.*(dessert|coffee|bar)/i,
+  ];
+  if (YES_NO_PATTERNS.some((p) => p.test(content)))
+    return { items: [{ name: 'Yes' }, { name: 'No' }] };
+
+  return null;
 }
 
 function parseListItems(content: string): ListItem[] | null {
-  // Check if it's a yes/no question → return synthetic Yes/No items
-  if (isYesNoQuestion(content)) {
-    return [{ name: 'Yes' }, { name: 'No' }];
-  }
+  // Check for inline choices (service style, meal style, drinks, yes/no, etc.)
+  const inlineChoices = detectInlineChoices(content);
+  if (inlineChoices) return inlineChoices.items;
 
   const items: ListItem[] = [];
 
@@ -325,19 +378,27 @@ function parseListItems(content: string): ListItem[] | null {
 
 // Multi-select: items with prices AND more than 5 options (e.g. appetizers, mains).
 // Single-select: no prices (event types, cake flavors, fillings, buttercreams).
-function isMultiSelect(items: ListItem[]): boolean {
+function isMultiSelect(items: ListItem[], content?: string): boolean {
+  // Check inline choice multi flag first
+  if (content) {
+    const inline = detectInlineChoices(content);
+    if (inline?.multi) return true;
+  }
   const withPrices = items.filter((i) => i.price).length;
   return withPrices > 0 && items.length > 5;
 }
 
 // Confirmation messages list selected items — should be read-only, not interactive.
 const CONFIRM_PATTERNS = [
-  /just to confirm/i,
+  /just to confirm.{0,20}(your|the) (menu|selection|order|choices?)/i,
   /your (menu|selection|order|choices?) (includes?|contains?|is)/i,
   /to confirm.{0,30}(your|the) (menu|selection)/i,
   /here'?s? (a )?summary/i,
-  /you('ve| have) selected/i,
+  /you('ve| have) (selected|picked|chosen|removed)/i,
   /confirming your/i,
+  /here'?s? what you('ve| have) got/i,
+  /your (current|updated) (menu|selection|appetizer|dish)/i,
+  /noted.*here'?s/i,
 ];
 function isConfirmationMessage(intro: string): boolean {
   return CONFIRM_PATTERNS.some((p) => p.test(intro));
@@ -640,6 +701,13 @@ const COUNTRY_CODES = [
   { code: '+86', flag: '🇨🇳', name: 'CN' },
 ];
 
+function isAskingForName(content: string): boolean {
+  const lower = content.toLowerCase();
+  return (lower.includes('first and last name') || lower.includes('your name') ||
+    lower.includes('grab your') || lower.includes('may i have your')) &&
+    !lower.includes('fianc') && !lower.includes('partner') && !lower.includes('company');
+}
+
 function isAskingForPhone(content: string): boolean {
   const lower = content.toLowerCase();
   return (lower.includes('phone') || lower.includes('mobile') || lower.includes('number to reach')) &&
@@ -651,12 +719,149 @@ function isAskingForEmail(content: string): boolean {
   return lower.includes('email') && !lower.includes('we\'ll') && !lower.includes('confirmation');
 }
 
+function isAskingForGuestCount(content: string): boolean {
+  const lower = content.toLowerCase();
+  return (lower.includes('how many guest') || lower.includes('guest count') ||
+    lower.includes('headcount') || lower.includes('head count') ||
+    lower.includes('how many people') || lower.includes('how big') ||
+    lower.includes('guest-wise') || lower.includes('expecting')) &&
+    !lower.includes('confirm') && !lower.includes('got it');
+}
+
+function isAskingForVenue(content: string): boolean {
+  const lower = content.toLowerCase();
+  return lower.includes('where will') || lower.includes('where is') || lower.includes('venue') ||
+    lower.includes('location') || lower.includes('take place') || lower.includes('going to be held') ||
+    /where'?s?.*(wedding|event|celebration|party)/i.test(lower);
+}
+
 function isAskingForDate(content: string): boolean {
   const lower = content.toLowerCase();
+  // Exclude venue questions
+  if (/where.*(big day|happening|held|venue|location|take place|going to)/i.test(lower)) return false;
+  if (isAskingForVenue(lower)) return false;
   return (lower.includes('event date') || lower.includes('when is') || lower.includes('what date') ||
     lower.includes('when\'s the') || lower.includes('the big day') || lower.includes('when is the big day') ||
     lower.includes('celebration happening') || lower.includes('when\'s your') ||
+    lower.includes('wedding date') || lower.includes('your date') ||
     (lower.includes('date') && (lower.includes('have in mind') || lower.includes('planning'))));
+}
+
+// ─── Date picker calendar ─────────────────────────────────────────────────────
+function DatePickerCalendar({ value, onChange, onConfirm, disabled }: {
+  value: string;
+  onChange: (v: string) => void;
+  onConfirm: () => void;
+  disabled?: boolean;
+}) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const maxDate = new Date(today);
+  maxDate.setMonth(maxDate.getMonth() + 7);
+
+  const [calOpen, setCalOpen] = React.useState(false);
+  const [calYear, setCalYear] = React.useState(today.getFullYear());
+  const [calMonth, setCalMonth] = React.useState(today.getMonth());
+
+  const selectedDate = value ? new Date(value + 'T00:00:00') : null;
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const dayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+  const firstDayOfMonth = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+
+  const prevMonth = () => {
+    if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); }
+    else setCalMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); }
+    else setCalMonth(m => m + 1);
+  };
+  const selectDay = (day: number) => {
+    const d = new Date(calYear, calMonth, day);
+    if (d < today || d > maxDate) return;
+    const iso = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    onChange(iso);
+    setCalOpen(false);
+  };
+
+  const displayVal = selectedDate
+    ? selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+    : 'Select a date…';
+
+  return (
+    <div className="flex-1 relative">
+      <button
+        type="button"
+        onClick={() => setCalOpen(o => !o)}
+        disabled={disabled}
+        className="w-full flex items-center justify-between border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black bg-white"
+      >
+        <span className={selectedDate ? 'text-neutral-900' : 'text-neutral-400'}>{displayVal}</span>
+        <ChevronDown className="w-4 h-4 text-neutral-400" />
+      </button>
+
+      {calOpen && (
+        <div className="absolute bottom-full mb-2 left-0 bg-white border border-neutral-200 rounded-2xl shadow-xl p-5 z-50 w-80">
+          {/* Month nav */}
+          <div className="flex items-center justify-between mb-4">
+            <button type="button" onClick={prevMonth} className="p-2 rounded-lg hover:bg-neutral-100 text-neutral-600 text-xl leading-none">‹</button>
+            <span className="font-semibold text-neutral-900 text-base">{monthNames[calMonth]} {calYear}</span>
+            <button type="button" onClick={nextMonth} className="p-2 rounded-lg hover:bg-neutral-100 text-neutral-600 text-xl leading-none">›</button>
+          </div>
+          {/* Day headers */}
+          <div className="grid grid-cols-7 mb-1">
+            {dayNames.map(d => (
+              <div key={d} className="text-center text-xs font-medium text-neutral-400 py-1">{d}</div>
+            ))}
+          </div>
+          {/* Day grid */}
+          <div className="grid grid-cols-7 gap-y-1">
+            {Array.from({ length: firstDayOfMonth }).map((_, i) => <div key={`e${i}`} />)}
+            {Array.from({ length: daysInMonth }).map((_, i) => {
+              const day = i + 1;
+              const d = new Date(calYear, calMonth, day);
+              const isDisabled = d < today || d > maxDate;
+              const isSelected = selectedDate &&
+                selectedDate.getFullYear() === calYear &&
+                selectedDate.getMonth() === calMonth &&
+                selectedDate.getDate() === day;
+              const isToday = d.getTime() === today.getTime();
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => selectDay(day)}
+                  disabled={isDisabled}
+                  className={[
+                    'mx-auto flex items-center justify-center w-9 h-9 rounded-full text-sm transition-colors',
+                    isSelected ? 'bg-black text-white font-semibold' :
+                    isToday ? 'border-2 border-black text-black font-semibold' :
+                    isDisabled ? 'text-neutral-300 cursor-not-allowed' :
+                    'hover:bg-neutral-100 text-neutral-800',
+                  ].join(' ')}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+          {/* Confirm button */}
+          {selectedDate && (
+            <div className="mt-4 pt-3 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => { setCalOpen(false); onConfirm(); }}
+                className="w-full bg-black text-white rounded-xl py-2.5 text-sm font-medium hover:bg-neutral-800 transition-colors"
+              >
+                Confirm — {displayVal}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -669,6 +874,8 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     isComplete: false,
   });
   const [input, setInput] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [countryCode, setCountryCode] = useState(COUNTRY_CODES[0]);
   const [menuSelections, setMenuSelections] = useState<string[]>([]);
   const [activeMenuMsgIdx, setActiveMenuMsgIdx] = useState<number | null>(null);
@@ -737,6 +944,25 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     window.addEventListener('chat:help', handleHelp);
     return () => window.removeEventListener('chat:help', handleHelp);
   }, []);
+
+  // Short-poll slots every 5s to keep EventPlanPanel in sync
+  const onSlotsUpdateRef = useRef(onSlotsUpdate);
+  onSlotsUpdateRef.current = onSlotsUpdate;
+  const threadIdRef = useRef(state.threadId);
+  threadIdRef.current = state.threadId;
+
+  useEffect(() => {
+    if (!state.threadId || state.isComplete) return;
+    const interval = setInterval(async () => {
+      const tid = threadIdRef.current;
+      if (!tid) return;
+      try {
+        const conv = await chatAiApi.getConversation(tid);
+        if (conv.slots) onSlotsUpdateRef.current?.(conv.slots);
+      } catch { /* silent */ }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [state.threadId, state.isComplete]);
 
   async function loadConversationHistory(threadId: string) {
     setState((prev) => ({ ...prev, isLoading: true }));
@@ -1006,19 +1232,32 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
       const phoneMatch = content.match(/\+?\d[\d\s()-]{8,}\d/);
       if (phoneMatch) onSlotsUpdate?.({ phone: phoneMatch[0].replace(/[\s()-]/g, '') } as any);
 
-      if (onSlotsUpdate && response.slots_filled > lastSlotsFilled.current) {
+      // Always fetch latest slots after every AI response to catch additions AND removals
+      if (onSlotsUpdate) {
         lastSlotsFilled.current = response.slots_filled;
         chatAiApi.getConversation(response.thread_id)
           .then((conv) => { if (conv.slots) onSlotsUpdate(conv.slots); })
           .catch(() => {});
       }
 
-      if (response.is_complete) {
+      // Detect completion from ML flag or summary message pattern
+      const isScheduleCallMsg = /schedule.*(call|phone)|set up.*(call|phone)|10.?15 minute call/i.test(response.message);
+      const isSummaryMsg = /summary.*(being prepared|ready)|we('ve| have) got everything|event summary/i.test(response.message);
+      if (response.is_complete || isSummaryMsg || isScheduleCallMsg) {
+        if (isScheduleCallMsg) {
+          setState((prev) => ({
+            ...prev,
+            messages: [
+              ...prev.messages.slice(0, -1),
+              { ...prev.messages[prev.messages.length - 1], content: "You'll hear from our office within 24-48 hours to confirm the details. We're excited to make your event a success!" },
+            ],
+          }));
+        }
         toast.success('Event details collected! You can now create your project.');
         try {
           const conversation = await chatAiApi.getConversation(response.thread_id);
           const slots = { ...conversation.slots, thread_id: response.thread_id };
-          setState((prev) => ({ ...prev, contractData: slots }));
+          setState((prev) => ({ ...prev, isComplete: true, contractData: slots }));
         } catch (err) {
           console.error('Failed to fetch conversation slots:', err);
         }
@@ -1096,7 +1335,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                 );
               }
 
-              const multi = isMultiSelect(listItems);
+              const multi = isMultiSelect(listItems, msg.content);
               // Only cap desserts (items with no prices but exactly the dessert count ≤8)
               const isDesserts = !listItems.some((i) => i.price) && listItems.length <= 8 && listItems.length > 6;
               const maxSelect = isDesserts ? 4 : undefined;
@@ -1191,13 +1430,19 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
         {(() => {
           const lastAiMsg = [...state.messages].reverse().find((m) => m.role === 'ai');
           const noMenu = activeMenuMsgIdx === null;
-          const isPhoneMode = !state.isLoading && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && noMenu;
-          const isEmailMode = !state.isLoading && !!lastAiMsg && isAskingForEmail(lastAiMsg.content) && noMenu && !isPhoneMode;
-          const isDateMode = !state.isLoading && !!lastAiMsg && isAskingForDate(lastAiMsg.content) && noMenu && !isPhoneMode && !isEmailMode;
-          const specialMode = isPhoneMode || isEmailMode || isDateMode;
+          const isNameMode = !state.isLoading && !!lastAiMsg && isAskingForName(lastAiMsg.content) && noMenu;
+          const isPhoneMode = !state.isLoading && !isNameMode && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && noMenu;
+          const isEmailMode = !state.isLoading && !isNameMode && !isPhoneMode && !!lastAiMsg && isAskingForEmail(lastAiMsg.content) && noMenu;
+          const isDateMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !!lastAiMsg && isAskingForDate(lastAiMsg.content) && noMenu;
+          const isGuestMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !isDateMode && !!lastAiMsg && isAskingForGuestCount(lastAiMsg.content) && noMenu;
+          const isVenueMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !isDateMode && !isGuestMode && !!lastAiMsg && isAskingForVenue(lastAiMsg.content) && noMenu;
+          const specialMode = isNameMode || isPhoneMode || isEmailMode || isDateMode || isGuestMode;
 
           const handleSpecialSend = () => {
-            if (isPhoneMode) {
+            if (isNameMode) {
+              handleSendMessage(`${firstName.trim()} ${lastName.trim()}`);
+              setFirstName(''); setLastName('');
+            } else if (isPhoneMode) {
               handleSendMessage(`${countryCode.code} ${input}`);
             } else {
               handleSendMessage();
@@ -1208,7 +1453,30 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           return (
             <div className={`border-t border-neutral-200 px-3 sm:px-6 py-3 sm:py-4 bg-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
               <div className="flex items-end gap-2 sm:gap-3">
-                {isPhoneMode ? (
+                {isNameMode ? (
+                  /* First name + Last name split input */
+                  <div className="flex-1 flex gap-2">
+                    <input
+                      type="text"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && firstName.trim() && lastName.trim()) { e.preventDefault(); handleSpecialSend(); } }}
+                      placeholder="First name"
+                      className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                      autoFocus
+                      disabled={state.isLoading}
+                    />
+                    <input
+                      type="text"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && firstName.trim() && lastName.trim()) { e.preventDefault(); handleSpecialSend(); } }}
+                      placeholder="Last name"
+                      className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                      disabled={state.isLoading}
+                    />
+                  </div>
+                ) : isPhoneMode ? (
                   /* Phone input with country code */
                   <div className="flex-1 flex items-center border border-neutral-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-black focus-within:border-transparent">
                     <div className="relative shrink-0">
@@ -1248,17 +1516,36 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                     disabled={state.isLoading}
                   />
                 ) : isDateMode ? (
-                  /* Date picker input */
-                  <input
-                    type="date"
+                  /* Date picker — calendar dialog */
+                  <DatePickerCalendar
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
-                    min={new Date().toISOString().split('T')[0]}
-                    max={(() => { const d = new Date(); d.setMonth(d.getMonth() + 7); return d.toISOString().split('T')[0]; })()}
-                    className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                    onChange={setInput}
+                    onConfirm={handleSpecialSend}
                     disabled={state.isLoading}
                   />
+                ) : isGuestMode ? (
+                  /* Guest count number input + skip */
+                  <div className="flex-1 flex gap-2">
+                    <input
+                      type="number"
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
+                      min={10}
+                      max={10000}
+                      placeholder="Number of guests"
+                      className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                      disabled={state.isLoading}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { setInput('Not confirmed yet'); handleSendMessage('Not confirmed yet'); }}
+                      disabled={state.isLoading}
+                      className="shrink-0 px-4 py-2 text-sm text-neutral-500 border border-neutral-200 rounded-xl hover:bg-neutral-50 transition-colors"
+                    >
+                      Skip
+                    </button>
+                  </div>
                 ) : (
                   <textarea
                     ref={inputRef}
@@ -1268,7 +1555,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       if (activeMenuMsgIdx !== null) setMenuSelections([]);
                     }}
                     onKeyDown={handleKeyDown}
-                    placeholder={activeMenuMsgIdx !== null ? 'Select items above or type here…' : 'Type your message…'}
+                    placeholder={activeMenuMsgIdx !== null ? 'Select above or type to make changes…' : 'Type your message…'}
                     className="flex-1 resize-none border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent min-h-[52px] max-h-[120px]"
                     rows={1}
                     disabled={state.isLoading}
@@ -1276,24 +1563,40 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                 )}
                 <button
                   onClick={specialMode ? handleSpecialSend : () => handleSendMessage()}
-                  disabled={!input.trim() || state.isLoading || (isEmailMode && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input))}
+                  disabled={state.isLoading || (isNameMode ? (!firstName.trim() || !lastName.trim()) : (isEmailMode ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) : (isGuestMode ? (!input.trim() || Number(input) < 10) : !input.trim())))}
                   className="bg-black text-white p-3 rounded-xl hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
                 >
                   {state.isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                 </button>
               </div>
-              <p className="text-xs text-neutral-400 mt-2 text-center">
-                {isPhoneMode
-                  ? 'Select your country code and enter your phone number'
-                  : isEmailMode
-                    ? 'Enter a valid email address'
-                    : isDateMode
-                      ? 'Pick your event date'
-                      : activeMenuMsgIdx !== null
-                        ? 'Click cards to select · Send to confirm'
-                        : <>Shift+Enter for new line · Use <span className="font-mono text-neutral-600">@ai</span> to update previous items</>
-                }
-              </p>
+              <div className="flex items-center justify-center gap-3 mt-2">
+                <p className="text-xs text-neutral-400 text-center">
+                  {isNameMode
+                    ? 'Enter your first and last name'
+                    : isPhoneMode
+                      ? 'Select your country code and enter your phone number'
+                      : isEmailMode
+                        ? 'Enter a valid email address'
+                        : isDateMode
+                          ? 'Pick your event date (up to 7 months ahead)'
+                          : isGuestMode
+                            ? 'Enter estimated guest count (minimum 10)'
+                            : isVenueMode
+                              ? 'Type venue name & address, or skip for now'
+                              : <>Shift+Enter for new line · At any point, request changes by just typing</>
+                  }
+                </p>
+                {isVenueMode && (
+                  <button
+                    type="button"
+                    onClick={() => handleSendMessage('Venue TBD — will confirm later')}
+                    disabled={state.isLoading}
+                    className="text-xs text-neutral-500 border border-neutral-200 rounded-lg px-3 py-1 hover:bg-neutral-50 transition-colors shrink-0"
+                  >
+                    Skip for now
+                  </button>
+                )}
+              </div>
             </div>
           );
         })()}

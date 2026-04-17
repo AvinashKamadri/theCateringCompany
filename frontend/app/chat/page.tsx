@@ -307,7 +307,10 @@ function AiIntakeContent() {
   const titleUpdatedRef = useRef(false);
 
   const handleSlotsUpdate = async (slots: Partial<ContractData>) => {
-    setCurrentSlots((prev) => ({ ...prev, ...slots }));
+    // Full replace when slots look like a complete object from the API (has name or event_type),
+    // otherwise merge partial updates (email, phone from frontend)
+    const isFullUpdate = 'name' in slots || 'event_type' in slots || 'selected_dishes' in slots;
+    setCurrentSlots((prev) => isFullUpdate ? { ...slots } : { ...prev, ...slots });
 
     // Update project title (once only)
     if (draftProjectId && !titleUpdatedRef.current) {

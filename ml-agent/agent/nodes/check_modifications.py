@@ -96,6 +96,53 @@ _NO_QUESTION_NODES = {
     "generate_contract", "start", "menu_design", "wedding_message",
 }
 
+
+_REPLACE_BY_VALUE_RE = re.compile(
+    r'\b(replace|swap|switch)\s+(.+?)\s+(?:with|for|to)\s+(.+)$|'
+    r'\bchange\s+(.+?)\s+to\s+(.+)$',
+    re.IGNORECASE,
+)
+
+
+def _resolve_replace_by_value(message: str, slots: dict) -> tuple[str | None, str | None]:
+    """If message is 'replace X with Y' / 'change X to Y' and X matches a filled slot value,
+    return (slot_name, new_value). Otherwise (None, None).
+    """
+    m = _REPLACE_BY_VALUE_RE.search(message)
+    if not m:
+        return None, None
+    old_val = (m.group(2) or m.group(4) or "").strip()
+    new_val = (m.group(3) or m.group(5) or "").strip()
+    if not old_val or not new_val:
+        return None, None
+    old_lower = old_val.lower()
+    for slot_name, data in slots.items():
+        if not data.get("filled"):
+            continue
+        cur = str(data.get("value") or "").lower()
+        if not cur or cur in ("no", "none", ""):
+            continue
+        if old_lower in cur or cur in old_lower:
+            return slot_name, new_val
+    return None, None
+
+
+_REMOVE_FROM_TEXT_RE = re.compile(
+    r'\b(remove|delete|drop|clear|wipe|take out)\s+(.+)$',
+    re.IGNORECASE,
+)
+
+
+def _looks_like_remove(message: str) -> tuple[bool, str]:
+    """Return (is_remove, item_text). Only fires on messages that START with a remove verb
+    or clearly express removal, so we don't mistake a sentence mentioning 'remove' elsewhere.
+    """
+    stripped = message.strip()
+    m = _REMOVE_FROM_TEXT_RE.match(stripped)
+    if not m:
+        return False, ""
+    return True, m.group(2).strip()
+
 # Maps collection nodes to the slot they collect.
 # Used to detect mid-collection @AI interrupts (slot not filled yet).
 _NODE_SLOT_MAP = {
@@ -296,11 +343,27 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
             last_message = msg.content
             break
 
+    # ── Pre-pass: 'replace X with Y' resolved by matching X against filled slot values ──
+    # This catches cases where the user names the OLD value instead of the slot name,
+    # e.g. 'replace algunoor karimnagar with peddapeli' (venue) or
+    # 'replace Brownies with Lemon Bars' (desserts/appetizers/selected_dishes).
+    rbv_slot, rbv_new = _resolve_replace_by_value(last_message, state["slots"])
+
     # Detect which slot to modify
     detection_result = await detect_slot_modification.ainvoke({
         "message": last_message,
         "current_slots": state["slots"]
     })
+
+    # If regex replace-by-value resolved to a slot and LLM didn't detect one (or picked wrong),
+    # prefer the regex match — it's deterministic and matches actual slot contents.
+    if rbv_slot:
+        detection_result = {
+            "detected": True,
+            "target_slot": rbv_slot,
+            "new_value": rbv_new,
+            "clarification_needed": False,
+        }
 
     # confirm holds just the acknowledgment text — fresh follow-up question appended at end
     confirm = ""
@@ -346,29 +409,58 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
             target_slot = "desserts"
 
         # ── Text note slots: special_requests, dietary_concerns, additional_notes ──
-        # Support @AI add/append to these free-text fields
+        # Support add/append/remove/replace on these free-text fields
         if target_slot in ("special_requests", "dietary_concerns", "additional_notes"):
             slot_label = _get_slot_label(target_slot)
             existing = state["slots"].get(target_slot, {}).get("value") or ""
             now = datetime.now().isoformat()
 
-            append_intent = await llm_extract(
-                f"The customer is updating their '{slot_label}'. "
-                "Are they ADDING something new (append to existing), or REPLACING everything?\n\n"
-                "Return ONLY: add or replace",
-                last_message
-            )
-            if append_intent.strip().lower() == "add" and existing and existing.lower() not in ("none", "no", ""):
-                merged = f"{existing}; {new_value}"
+            # Remove path: user said "remove X" / "delete X"
+            is_remove, remove_text = _looks_like_remove(last_message)
+            if is_remove and existing and existing.lower() not in ("none", "no", ""):
+                # Strip matching fragments from the stored value. Items are stored
+                # separated by '; ' so split, filter, rejoin.
+                parts = [p.strip() for p in re.split(r';|,', existing) if p.strip()]
+                remove_lower = remove_text.lower()
+                kept = [p for p in parts if remove_lower not in p.lower() and p.lower() not in remove_lower]
+                removed = len(parts) - len(kept)
+                if removed > 0:
+                    merged = "; ".join(kept) if kept else ""
+                    history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
+                    history.append({"old_value": existing, "new_value": merged, "timestamp": now})
+                    state["slots"][target_slot] = {
+                        "value": merged if merged else "no",
+                        "filled": True,
+                        "modified_at": now,
+                        "modification_history": history,
+                    }
+                    if merged:
+                        confirm = f"Removed. Your {slot_label}: '{merged}'."
+                    else:
+                        confirm = f"Removed — your {slot_label} is now cleared."
+                else:
+                    confirm = (
+                        f"Hmm, don't see '{remove_text}' in your current {slot_label}: "
+                        f"'{existing}'. Nothing changed."
+                    )
             else:
-                merged = str(new_value)
+                append_intent = await llm_extract(
+                    f"The customer is updating their '{slot_label}'. "
+                    "Are they ADDING something new (append to existing), or REPLACING everything?\n\n"
+                    "Return ONLY: add or replace",
+                    last_message
+                )
+                if append_intent.strip().lower() == "add" and existing and existing.lower() not in ("none", "no", ""):
+                    merged = f"{existing}; {new_value}"
+                else:
+                    merged = str(new_value)
 
-            history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
-            history.append({"old_value": existing, "new_value": merged, "timestamp": now})
-            state["slots"][target_slot] = {
-                "value": merged, "filled": True, "modified_at": now, "modification_history": history,
-            }
-            confirm = f"Done! I've noted that for your {slot_label}: '{merged}'."
+                history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
+                history.append({"old_value": existing, "new_value": merged, "timestamp": now})
+                state["slots"][target_slot] = {
+                    "value": merged, "filled": True, "modified_at": now, "modification_history": history,
+                }
+                confirm = f"Done! I've noted that for your {slot_label}: '{merged}'."
 
         # ── Rentals / utensils — simple string slots, not menu items ──
         elif target_slot in ("rentals", "utensils"):

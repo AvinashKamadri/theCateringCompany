@@ -76,6 +76,7 @@ class ChatResponse(BaseModel):
     total_slots: int
     is_complete: bool
     contract_id: str | None = None
+    input_hint: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +164,7 @@ async def chat(req: ChatRequest):
         total_slots=result["total_slots"],
         is_complete=result["is_complete"],
         contract_id=contract_id,
+        input_hint=result.get("input_hint"),
     )
 
 

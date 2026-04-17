@@ -47,6 +47,7 @@ _NODE_COLLECTS: dict[str, str | None] = {
     "ask_special_requests": "special_requests",
     "collect_special_requests": "special_requests",
     "collect_dietary": "dietary_concerns",
+    "collect_dietary_details": "dietary_concerns",
     "ask_anything_else": "additional_notes",
     "collect_anything_else": "additional_notes",
     "collect_pending_details": None,  # dynamic — node chooses the TBD slot itself
@@ -140,6 +141,42 @@ def _detect_off_topic_correction(msg: str, current_slot: str | None, filled_slot
     return False
 
 
+# "replace X with Y" / "change X to Y" / "swap X for Y" — anchored by value, not slot name.
+# Even without a slot keyword, if X matches a currently-filled slot value we should route
+# to check_modifications.
+_REPLACE_BY_VALUE_PATTERN = re.compile(
+    r'\b(replace|swap|switch)\s+(.+?)\s+(with|for|to)\s+(.+)$|'
+    r'\bchange\s+(.+?)\s+to\s+(.+)$',
+    re.IGNORECASE,
+)
+
+
+def _detect_replace_by_value(msg: str, slots: dict) -> bool:
+    """Return True if the message says 'replace X with Y' and X appears inside any filled slot's value.
+
+    This catches cases where the user names the OLD value (e.g. 'replace algunoor karimnagar
+    with peddapeli') instead of naming the slot ('replace the venue ...').
+    """
+    m = _REPLACE_BY_VALUE_PATTERN.search(msg)
+    if not m:
+        return False
+    # Group layout: 'replace/swap/switch X with/for/to Y' → groups 2 & 4 ; 'change X to Y' → groups 5 & 6
+    old_val = (m.group(2) or m.group(5) or "").strip().lower()
+    if not old_val or len(old_val) < 2:
+        return False
+    for _, data in slots.items():
+        if not data.get("filled"):
+            continue
+        cur = str(data.get("value") or "").lower()
+        if not cur or cur in ("no", "none", ""):
+            continue
+        # Substring match (either direction) — robust against partial phrasings like
+        # 'replace algunoor with X' when value is 'algunoor karimnagar'
+        if old_val in cur or cur in old_val:
+            return True
+    return False
+
+
 def _detect_modify_intent(msg: str, current_slot: str | None) -> bool:
     """Return True when the user uses a modify verb (change/update/edit/fix/modify/revise/switch)
     alongside a slot keyword for a DIFFERENT slot than the current one.
@@ -185,6 +222,10 @@ def route_message(state: ConversationState) -> str:
 
     # 2. Natural "modify/change/update" intent combined with a slot keyword — route to check_modifications.
     if _detect_modify_intent(last_user_msg, current_slot):
+        return "check_modifications"
+
+    # 3. "replace X with Y" / "change X to Y" — if X matches any filled slot value, route to modify.
+    if _detect_replace_by_value(last_user_msg, state.get("slots", {})):
         return "check_modifications"
 
     from agent.nodes import NODE_MAP

@@ -142,15 +142,59 @@ async def collect_special_requests_node(state: ConversationState) -> Conversatio
     return state
 
 
+async def collect_dietary_details_node(state: ConversationState) -> ConversationState:
+    """Second-turn dietary collection — user has already said 'yes' and is now providing details.
+
+    Delegates to the main dietary extraction path (the 'detail' branch in collect_dietary_node).
+    """
+    return await collect_dietary_node(state)
+
+
 async def collect_dietary_node(state: ConversationState) -> ConversationState:
-    """Record dietary/health concerns — flags conflicts for user to decide."""
+    """Ask Yes/No for dietary concerns. If yes → route to details collection."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
     slots = _slots_context(state)
     dishes = slots.get("selected_dishes", "")
 
-    # Check if this is a follow-up clarification (user already has dietary stored)
     existing_dietary = get_slot_value(state["slots"], "dietary_concerns")
+
+    # Skip the Yes/No gate if we're in the details-collection phase (user already said yes).
+    in_details_phase = state.get("current_node") == "collect_dietary_details"
+
+    # First-turn Yes/No gate — before anything is stored.
+    if not existing_dietary and not in_details_phase:
+        intent = await llm_extract(
+            "The customer was asked if they have any health or dietary concerns. "
+            "Did they: (a) decline / say no, (b) say yes but not specify, "
+            "or (c) already describe a specific concern in their reply?\n\n"
+            "Return ONLY: no, yes, or detail",
+            user_msg,
+        )
+        intent_val = norm_llm(intent)
+        if intent_val == "no":
+            fill_slot(state["slots"], "dietary_concerns", "none")
+            response = await llm_respond(
+                f"{SYSTEM_PROMPT}\n\nNo dietary concerns. Acknowledge briefly in ONE short line, "
+                "then ask: Is there anything else you need for your event?",
+                f"Context: {_slots_context(state)}",
+            )
+            state["current_node"] = "ask_anything_else"
+            state["messages"] = add_ai_message(state, response)
+            return state
+        if intent_val == "yes":
+            response = await llm_respond(
+                f"{SYSTEM_PROMPT}\n\nCustomer has dietary concerns but didn't say what. "
+                "Ask in ONE short casual line what dietary concerns they have "
+                "(e.g. allergies, vegan, halal, kosher).",
+                f"Context: {_slots_context(state)}",
+            )
+            state["current_node"] = "collect_dietary_details"
+            state["messages"] = add_ai_message(state, response)
+            return state
+        # intent_val == "detail" → fall through to existing extraction logic below
+
+    # Check if this is a follow-up clarification (user already has dietary stored)
     if existing_dietary and existing_dietary != "none":
         # User is clarifying/updating their dietary note
         updated = await llm_extract(
@@ -166,7 +210,8 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
         fill_slot(state["slots"], "dietary_concerns", updated)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nDietary note updated to: \"{updated}\". "
-            "Confirm the update. Ask: Is there anything else you need for your event?",
+            "Confirm the update. End with EXACTLY this line (verbatim): "
+            "'Thanks! If you want to add anything you can add now, or we'll proceed to generate your contract summary.'",
             f"Context: {_slots_context(state)}",
         )
         state["current_node"] = "ask_anything_else"
@@ -214,7 +259,8 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
             response = await llm_respond(
                 f"{SYSTEM_PROMPT}\n\nDietary concern noted: {dietary_detail}. "
                 "Confirm you've recorded it. "
-                "Ask: Is there anything else you need for your event?",
+                "End with EXACTLY this line (verbatim): "
+                "'Thanks! If you want to add anything you can add now, or we'll proceed to generate your contract summary.'",
                 f"Context: {_slots_context(state)}",
             )
             state["current_node"] = "ask_anything_else"

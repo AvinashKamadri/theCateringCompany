@@ -174,7 +174,7 @@ async def collect_fiance_name_node(state: ConversationState) -> ConversationStat
         state["slots"].pop("_retry_partner", None)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_fiance_name']}\n\n"
-            f"Name captured: {extracted}. Confirm it casually, then ask: 'When's the big day?'",
+            f"Name captured: {extracted}. Confirm it casually, then ask: 'When's your wedding?'",
             f"Partner name captured: {extracted}",
         )
         state["current_node"] = "collect_event_date"
@@ -210,7 +210,7 @@ async def collect_birthday_person_node(state: ConversationState) -> Conversation
         fill_slot(state["slots"], "honoree_name", extracted)
         state["slots"].pop("_retry_honoree", None)
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nBirthday person is {extracted}. Confirm warmly, then ask: 'When's the big day?'",
+            f"{SYSTEM_PROMPT}\n\nBirthday person is {extracted}. Confirm warmly, then ask: 'When's the birthday?'",
             f"Birthday person: {extracted}",
         )
         state["current_node"] = "collect_event_date"
@@ -243,7 +243,7 @@ async def collect_company_name_node(state: ConversationState) -> ConversationSta
         fill_slot(state["slots"], "company_name", extracted)
         state["slots"].pop("_retry_company", None)
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nCompany is {extracted}. Confirm it, then ask: 'What date are you planning for?'",
+            f"{SYSTEM_PROMPT}\n\nCompany is {extracted}. Confirm it, then ask: 'When is the corporate event?'",
             f"Company name: {extracted}",
         )
         state["current_node"] = "collect_event_date"

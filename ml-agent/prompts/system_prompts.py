@@ -193,12 +193,13 @@ NODE_PROMPTS = {
     ),
 
     "ask_anything_else": (
-        "Ask what they'd like to add. Keep it brief and open."
+        "Ask them briefly what they'd like to add. Keep it ONE short open line."
     ),
 
     "collect_anything_else": (
         "Echo back exactly what they mentioned so they know it was captured. "
-        "Then ask if there's anything else or if they're all set."
+        "Then ask EXACTLY (verbatim): \"Thanks! If you want to add anything you can add now, "
+        "or we'll proceed to generate your contract summary.\""
     ),
 
     "generate_contract": (

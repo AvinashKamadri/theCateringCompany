@@ -337,6 +337,11 @@ function AiIntakeContent() {
         return String(val).split(',').map((v: string) => v.trim()).filter(Boolean);
       };
 
+      // Extract email and phone from slots
+      const contactPhone = (s as any).phone || (s as any).contact_phone || undefined;
+      const contactEmail = (s as any).email || (s as any).contact_email || undefined;
+      const weddingCake = (s as any).wedding_cake || undefined;
+
       const response = await apiClient.post('/projects/ai-intake', {
         client_name:          s.name,
         event_type:           s.event_type,
@@ -345,6 +350,8 @@ function AiIntakeContent() {
         service_type:         s.service_type,
         venue_name:           s.venue,
         venue_address:        s.venue,
+        contact_email:        contactEmail,
+        contact_phone:        contactPhone,
         main_dishes:          parseList(s.selected_dishes),
         appetizers:           parseList(s.appetizers),
         desserts:             parseList(s.desserts),
@@ -354,6 +361,7 @@ function AiIntakeContent() {
           s.utensils && s.utensils !== 'no' ? `Utensils: ${s.utensils}` : null,
           s.rentals  && s.rentals  !== 'no' ? `Rentals: ${s.rentals}`   : null,
           s.florals  && s.florals  !== 'no' ? `Florals: ${s.florals}`   : null,
+          weddingCake ? `Wedding Cake: ${weddingCake}` : null,
         ].filter(Boolean) as string[],
         modifications: s.special_requests && s.special_requests !== 'none'
           ? [s.special_requests] : [],

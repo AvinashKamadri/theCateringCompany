@@ -654,9 +654,9 @@ function isAskingForEmail(content: string): boolean {
 function isAskingForDate(content: string): boolean {
   const lower = content.toLowerCase();
   return (lower.includes('event date') || lower.includes('when is') || lower.includes('what date') ||
-    lower.includes('when\'s the') || lower.includes('the big day') || lower.includes('celebration happening') ||
-    (lower.includes('date') && (lower.includes('have in mind') || lower.includes('planning') || lower.includes('when')))) &&
-    !lower.includes('update') && !lower.includes('confirm');
+    lower.includes('when\'s the') || lower.includes('the big day') || lower.includes('when is the big day') ||
+    lower.includes('celebration happening') || lower.includes('when\'s your') ||
+    (lower.includes('date') && (lower.includes('have in mind') || lower.includes('planning'))));
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -1255,6 +1255,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
                     min={new Date().toISOString().split('T')[0]}
+                    max={(() => { const d = new Date(); d.setMonth(d.getMonth() + 7); return d.toISOString().split('T')[0]; })()}
                     className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
                     disabled={state.isLoading}
                   />

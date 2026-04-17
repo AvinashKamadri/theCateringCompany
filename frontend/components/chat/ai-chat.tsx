@@ -124,21 +124,44 @@ const MAIN_ITEM_CATEGORY_MAP: Record<string, string> = {
   'soup / salad / sandwich menu': 'Soup / Salad / Sandwich',
   'soup/salad/sandwich menu': 'Soup / Salad / Sandwich',
   'soup salad sandwich menu': 'Soup / Salad / Sandwich',
+  // Desserts
+  'flavored mousse cup': 'Desserts',
+  'lemon bars': 'Desserts',
+  'blondies': 'Desserts',
+  '7-layer bars': 'Desserts',
+  'brownies': 'Desserts',
+  'chocolate chip cookie bars': 'Desserts',
+  'mini assorted cheesecakes': 'Desserts',
+  'fruit tarts': 'Desserts',
+  // Coffee & Bar
+  'coffee bar': 'Coffee & Bar',
+  'barback package': 'Coffee & Bar',
+  'ice & cooler package': 'Coffee & Bar',
+  'ice and cooler package': 'Coffee & Bar',
+  // Wedding Cakes
+  '2 tier 6" & 8" (serves 25)': 'Wedding Cakes',
+  '2 tier': 'Wedding Cakes',
+  'cupcakes': 'Wedding Cakes',
+  'wedding cake': 'Wedding Cakes',
+  'tiered cake': 'Wedding Cakes',
+  'tiered cakes': 'Wedding Cakes',
 };
 
 const CATEGORY_ORDER = ['Chicken', 'Pork', 'Beef', 'Seafood', 'Canapes', 'Vegetarian'];
-const MAIN_CATEGORY_ORDER = ['Platters', 'Signature Combos', 'BBQ Menus', 'Tasty & Casual', 'Global Inspirations', 'Soup / Salad / Sandwich'];
+const MAIN_CATEGORY_ORDER = ['Platters', 'Signature Combos', 'BBQ Menus', 'Tasty & Casual', 'Global Inspirations', 'Soup / Salad / Sandwich', 'Desserts', 'Coffee & Bar', 'Wedding Cakes'];
 
 function groupItemsByCategory(items: ListItem[]): CategoryGroup[] | null {
   const map = new Map<string, ListItem[]>();
   const uncategorizedItems: ListItem[] = [];
-  // Try appetizer map first, then main menu map
+  // Try appetizer map first, then main menu map; enrich with descriptions
   for (const item of items) {
     const key = item.name.toLowerCase();
     const cat = ITEM_CATEGORY_MAP[key] ?? MAIN_ITEM_CATEGORY_MAP[key];
-    if (!cat) { uncategorizedItems.push(item); continue; }
+    const desc = ITEM_DESCRIPTIONS[key];
+    const enriched = desc ? { ...item, description: desc } : item;
+    if (!cat) { uncategorizedItems.push(enriched); continue; }
     if (!map.has(cat)) map.set(cat, []);
-    map.get(cat)!.push(item);
+    map.get(cat)!.push(enriched);
   }
   if (map.size < 2 || uncategorizedItems.length > items.length * 0.4) return null;
   // Use appetizer order if appetizer categories present, else main menu order
@@ -159,7 +182,43 @@ function groupItemsByCategory(items: ListItem[]): CategoryGroup[] | null {
 interface ListItem {
   name: string;
   price?: string;
+  description?: string;
 }
+
+// Descriptions for items that need detail display (Coffee & Bar, Signature Combos, etc.)
+const ITEM_DESCRIPTIONS: Record<string, string> = {
+  'coffee bar': 'Brewed In House Dunkin Donuts Coffee with Sugar, Half & Half, Flavor Shots (Caramel, Hazelnut, French Vanilla). Set out with dessert.',
+  'barback package': 'Diet Coke, Coke, Sprite, Ginger Ale, Club Soda, Tonic Water, Bitters, OJ, Cranberry & Pineapple Juices, Lemons, Limes, Oranges, Cherries, Ice, Cups, Coolers.',
+  'ice & cooler package': 'Ice (2 lbs/person @ $0.70/lb), Coolers included, Cups ($0.35 each).',
+  'ice and cooler package': 'Ice (2 lbs/person @ $0.70/lb), Coolers included, Cups ($0.35 each).',
+  // Signature Combos
+  'prime rib & salmon': 'Carved Prime Rib w/ Horseradish Cream & Au Jus, Roasted Salmon w/ Dill Cream Sauce, Roasted Potatoes, Wild Rice, Glazed Carrots, Grilled Asparagus, Dinner Rolls.',
+  'prime rib and salmon': 'Carved Prime Rib w/ Horseradish Cream & Au Jus, Roasted Salmon w/ Dill Cream Sauce, Roasted Potatoes, Wild Rice, Glazed Carrots, Grilled Asparagus, Dinner Rolls.',
+  'chicken & ham': 'Grilled Chicken Breast, Mango Glazed Ham Carved, Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, Dinner Rolls.',
+  'chicken and ham': 'Grilled Chicken Breast, Mango Glazed Ham Carved, Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, Dinner Rolls.',
+  'grilled chicken and ham': 'Grilled Chicken Breast, Mango Glazed Ham Carved, Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, Dinner Rolls.',
+  'chicken piccata': 'Chicken Piccata, Red Wine Braised Beef Roast, Vegetable Farfalle, Long Grain Buttered Rice, Roasted Mixed Veggies, Green Beans, Dinner Rolls.',
+  'chicken piccata and red wine braised beef': 'Chicken Piccata, Red Wine Braised Beef Roast, Vegetable Farfalle, Long Grain Buttered Rice, Roasted Mixed Veggies, Green Beans, Dinner Rolls.',
+  // BBQ
+  'beef brisket & chicken': 'BBQ Beef Brisket (sliced), Beer Can Chicken. Includes Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad.',
+  'beef brisket and chicken': 'BBQ Beef Brisket (sliced), Beer Can Chicken. Includes Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad.',
+  'pork & chicken': 'Pulled BBQ Pork, Pulled BBQ Chicken. Includes Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad.',
+  'pork and chicken': 'Pulled BBQ Pork, Pulled BBQ Chicken. Includes Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad.',
+  // Tasty & Casual
+  'burger bar': 'Handmade Burgers w/ Brioche Buns, Beer Can Chicken. Toppings Bar, Mac & Cheese, Roasted Potatoes, Spring Greens, Caprese Platter, Watermelon Salad.',
+  'southern comfort': 'Crispy Fried Chicken, Smoked Sausage, Mac & Cheese, Mashed Potatoes, Southern Green Beans, Buttered Corn, Corn Bread.',
+  // Global
+  'mexican char grilled': 'Carne Asada, Chili Lime Chicken, Spanish Rice, Black Beans, Peppers & Onions, Pico De Gallo, Sour Cream, Tortilla Shells.',
+  'fiesta taco bar': 'Braised Spanish Beef, Braised Chili Chicken, Pinto Beans, Cilantro Lime Rice, Full Toppings Bar.',
+  'mediterranean bar': 'Hummus Bar (Roasted Garlic, Sundried Tomato, Original), Grilled Chicken, Ground Lamb, Roasted Veggies, Feta, Pita Bread & more.',
+  'souvlaki bar': 'Chicken & Pork Souvlaki, Greek Potatoes, Roasted Veggies, Green Beans, Pita, Tzatziki, Feta.',
+  'marsala menu': 'Chicken Marsala, Roasted Cod in Peperonata Sauce, Vegetable Farfalle, Fettuccini, Roasted Veggies, Green Beans, Dinner Rolls.',
+  'ravioli menu': 'Grilled Chicken w/ Wild Mushroom Beurre Blanc, Roasted Salmon, Truffle Ravioli, Wild Rice, Sauteed Zucchini, Roasted Asparagus, Dinner Rolls.',
+  'grilled pasta menu': 'Grilled Chicken Breast, Sliced Italian Sausage, Pesto Penne Alfredo, Green Beans, Honey Glazed Carrots, Dinner Rolls.',
+  // Soup/Salad/Sandwich
+  'soup / salad / sandwich menu': 'Pick 2 Soups, 2 Salads, 2 Sandwiches/Wraps from our selection.',
+  'soup/salad/sandwich menu': 'Pick 2 Soups, 2 Salads, 2 Sandwiches/Wraps from our selection.',
+};
 
 interface CategoryGroup {
   category: string;
@@ -210,7 +269,39 @@ function parseCategorizedItems(content: string): CategoryGroup[] | null {
   return valid.length >= 2 ? valid : null;
 }
 
+// Detect yes/no questions → return synthetic Yes/No cards
+const YES_NO_PATTERNS = [
+  /would you like to add/i,
+  /would you like us to/i,
+  /would you like to schedule/i,
+  /do you (need|want) any/i,
+  /do you (need|want) (rental|utensil|linen|floral)/i,
+  /do you want to add anything/i,
+  /is that the final/i,
+  /are you all set/i,
+  /anything else you (need|want|like)/i,
+  /is there anything else/i,
+  /any (special request|dietary|health|allerg)/i,
+  /yes or no\??/i,
+  /\b(need|want|like)\b.*(utensil|plate|napkin|silverware|cutlery)/i,
+  /\b(need|want|like)\b.*(rental|tent|chair|table|linen)/i,
+  /\b(need|want|like)\b.*(floral|flower|decoration|centerpiece)/i,
+  /\b(need|want|like)\b.*(coffee|bar setup|bar service)/i,
+];
+
+function isYesNoQuestion(content: string): boolean {
+  const lower = content.toLowerCase();
+  // Skip if already has a numbered/bulleted list
+  if (/^\s*\d+\./m.test(content) || /^\s*[-•*]\s/m.test(content)) return false;
+  return YES_NO_PATTERNS.some((p) => p.test(content));
+}
+
 function parseListItems(content: string): ListItem[] | null {
+  // Check if it's a yes/no question → return synthetic Yes/No items
+  if (isYesNoQuestion(content)) {
+    return [{ name: 'Yes' }, { name: 'No' }];
+  }
+
   const items: ListItem[] = [];
 
   // First try line-by-line (normal multiline lists)
@@ -232,11 +323,11 @@ function parseListItems(content: string): ListItem[] | null {
   return null;
 }
 
-// Multi-select: items with prices OR more than 6 options (e.g. desserts).
-// Single-select: few options like event types (≤6 items, no prices).
+// Multi-select: items with prices AND more than 5 options (e.g. appetizers, mains).
+// Single-select: no prices (event types, cake flavors, fillings, buttercreams).
 function isMultiSelect(items: ListItem[]): boolean {
   const withPrices = items.filter((i) => i.price).length;
-  return (withPrices > 0 && items.length > 5) || items.length > 6;
+  return withPrices > 0 && items.length > 5;
 }
 
 // Confirmation messages list selected items — should be read-only, not interactive.
@@ -272,7 +363,9 @@ function OptionCard({
   return (
     <button
       onClick={onToggle}
-      className={`relative flex flex-col items-start justify-end h-20 rounded-xl border-2 p-3 text-left transition-all focus:outline-none w-full ${
+      className={`relative flex flex-col items-start justify-end rounded-xl border-2 p-3 text-left transition-all focus:outline-none w-full ${
+        item.description ? 'min-h-[80px]' : 'h-20'
+      } ${
         selected
           ? 'border-black bg-black text-white'
           : 'border-neutral-200 bg-white hover:border-neutral-400 text-neutral-900'
@@ -287,6 +380,11 @@ function OptionCard({
       {item.price && (
         <span className={`text-xs mt-0.5 ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
           {item.price}
+        </span>
+      )}
+      {item.description && (
+        <span className={`text-[10px] mt-1 leading-snug line-clamp-2 ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
+          {item.description}
         </span>
       )}
     </button>
@@ -311,7 +409,7 @@ function MenuItemCard({
         selected ? 'border-black bg-black/5 shadow-sm' : 'border-neutral-200 bg-white hover:border-neutral-400'
       }`}
     >
-      <div className="w-full h-14 bg-neutral-100" />
+      {!item.description && <div className="w-full h-14 bg-neutral-100" />}
       {selected && (
         <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-black rounded-full flex items-center justify-center shadow">
           <Check className="w-3 h-3 text-white" strokeWidth={3} />
@@ -320,6 +418,9 @@ function MenuItemCard({
       <div className="p-2 flex-1">
         <p className="text-xs font-semibold text-neutral-900 leading-tight line-clamp-2">{item.name}</p>
         {item.price && <p className="text-xs text-neutral-500 mt-0.5">{item.price}</p>}
+        {item.description && (
+          <p className="text-[10px] text-neutral-400 mt-1 leading-snug line-clamp-3">{item.description}</p>
+        )}
       </div>
     </button>
   );
@@ -545,6 +646,19 @@ function isAskingForPhone(content: string): boolean {
     !lower.includes('guest') && !lower.includes('how many');
 }
 
+function isAskingForEmail(content: string): boolean {
+  const lower = content.toLowerCase();
+  return lower.includes('email') && !lower.includes('we\'ll') && !lower.includes('confirmation');
+}
+
+function isAskingForDate(content: string): boolean {
+  const lower = content.toLowerCase();
+  return (lower.includes('event date') || lower.includes('when is') || lower.includes('what date') ||
+    lower.includes('when\'s the') || lower.includes('the big day') || lower.includes('celebration happening') ||
+    (lower.includes('date') && (lower.includes('have in mind') || lower.includes('planning') || lower.includes('when')))) &&
+    !lower.includes('update') && !lower.includes('confirm');
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function AiChat({ projectId, authorId, userId, userName = 'You', initialThreadId, onComplete, onThreadStart, onSlotsUpdate, onProgressUpdate }: AiChatProps) {
@@ -562,6 +676,16 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     isOpen: false,
     command: null,
   });
+  // Frontend-only intercept flows (contact info, wedding cake)
+  type FrontendStep =
+    | null
+    | 'contact_email' | 'contact_phone'
+    | 'cake_ask' | 'cake_flavor' | 'cake_filling' | 'cake_buttercream';
+  const [frontendStep, setFrontendStep] = useState<FrontendStep>(null);
+  const contactAskedRef = useRef(false);
+  const weddingCakeAskedRef = useRef(false);
+  const deferredAiMessageRef = useRef<ChatMessage | null>(null);
+  const weddingCakeDataRef = useRef<{ flavor?: string; filling?: string; buttercream?: string }>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const startedRef = useRef(false);
@@ -633,7 +757,14 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
       }));
       saveSessionToStorage(threadId);
       onThreadStart?.(threadId);
-      if (conv.slots) onSlotsUpdate?.(conv.slots);
+      if (conv.slots) {
+        onSlotsUpdate?.(conv.slots);
+        // Don't re-ask frontend questions on conversation reload
+        if (conv.slots.name) contactAskedRef.current = true;
+        if (conv.slots.event_type && /wedding/i.test(String(conv.slots.event_type))) {
+          weddingCakeAskedRef.current = true;
+        }
+      }
       onProgressUpdate?.({ filled: conv.slots_filled ?? 0, total: 20 });
       if (conv.is_completed && conv.slots) {
         setState((prev) => ({ ...prev, contractData: { ...conv.slots, thread_id: threadId } as any }));
@@ -647,6 +778,117 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
   const handleSendMessage = async (messageText?: string) => {
     const content = messageText || input.trim();
     if (!content || state.isLoading) return;
+
+    // ─── Re-trigger wedding cake via "@ai change cake" ───────────────
+    if (!frontendStep && weddingCakeAskedRef.current && /(@ai\s+)?(change|update|redo|edit)\s*(wedding\s*)?cake/i.test(content)) {
+      const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date() };
+      setInput(''); setMenuSelections([]); setActiveMenuMsgIdx(null);
+      weddingCakeDataRef.current = {};
+      deferredAiMessageRef.current = null;
+      const ask: ChatMessage = { role: 'ai', content: '🎂 Would you like a wedding cake?\n1. Yes\n2. No thanks', timestamp: new Date() };
+      setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, ask] }));
+      setFrontendStep('cake_ask');
+      return;
+    }
+
+    // ─── Frontend-only step interception ──────────────────────────────
+    if (frontendStep) {
+      const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date() };
+      setInput(''); setMenuSelections([]); setActiveMenuMsgIdx(null);
+      const isYes = /yes|yeah|yep|sure|show|want/i.test(content);
+      const releaseDeferred = () => {
+        const d = deferredAiMessageRef.current;
+        deferredAiMessageRef.current = null;
+        return d ? [d] : [];
+      };
+
+      // ── Contact: email ──
+      if (frontendStep === 'contact_email') {
+        onSlotsUpdate?.({ email: content } as any);
+        const phoneMsg: ChatMessage = {
+          role: 'ai',
+          content: 'And your phone number?',
+          timestamp: new Date(),
+        };
+        setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, phoneMsg] }));
+        setFrontendStep('contact_phone');
+        return;
+      }
+
+      // ── Contact: phone ──
+      if (frontendStep === 'contact_phone') {
+        const phone = content.replace(/[^\d+]/g, '');
+        onSlotsUpdate?.({ phone } as any);
+        setState((prev) => ({
+          ...prev,
+          messages: [...prev.messages, userMsg, ...releaseDeferred()],
+        }));
+        setFrontendStep(null);
+        return;
+      }
+
+      // ── Wedding cake: ask ──
+      if (frontendStep === 'cake_ask') {
+        if (isYes) {
+          const flavorMsg: ChatMessage = {
+            role: 'ai',
+            content: 'Wonderful! Pick a cake flavor:\n1. Yellow\n2. White\n3. Almond\n4. Chocolate\n5. Carrot\n6. Red Velvet\n7. Bananas Foster\n8. Whiskey Caramel\n9. Lemon\n10. Spice\n11. Funfetti\n12. Pumpkin Spice\n13. Cookies and Cream\n14. Strawberry\n15. Coconut',
+            timestamp: new Date(),
+          };
+          setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, flavorMsg] }));
+          setFrontendStep('cake_flavor');
+        } else {
+          setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, ...releaseDeferred()] }));
+          setFrontendStep(null);
+        }
+        return;
+      }
+
+      // ── Wedding cake: flavor ──
+      if (frontendStep === 'cake_flavor') {
+        weddingCakeDataRef.current.flavor = content;
+        const fillingMsg: ChatMessage = {
+          role: 'ai',
+          content: 'Great pick! Now choose a filling:\n1. Butter Cream\n2. Lemon Curd\n3. Raspberry Jam\n4. Strawberry Jam\n5. Cream Cheese Icing\n6. Peanut Butter Cream\n7. Mocha Buttercream\n8. Salted Caramel Buttercream\n9. Cinnamon Butter Cream',
+          timestamp: new Date(),
+        };
+        setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, fillingMsg] }));
+        setFrontendStep('cake_filling');
+        return;
+      }
+
+      // ── Wedding cake: filling ──
+      if (frontendStep === 'cake_filling') {
+        weddingCakeDataRef.current.filling = content;
+        const bcMsg: ChatMessage = {
+          role: 'ai',
+          content: 'Almost done! Choose your buttercream frosting:\n1. Signature\n2. Chocolate\n3. Cream Cheese Frosting',
+          timestamp: new Date(),
+        };
+        setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, bcMsg] }));
+        setFrontendStep('cake_buttercream');
+        return;
+      }
+
+      // ── Wedding cake: buttercream (final) ──
+      if (frontendStep === 'cake_buttercream') {
+        const { flavor, filling } = weddingCakeDataRef.current;
+        const summaryMsg: ChatMessage = {
+          role: 'ai',
+          content: `Wedding cake set! 2 Tier 6" & 8" ($275) — ${flavor} cake, ${filling} filling, ${content} frosting.`,
+          timestamp: new Date(),
+        };
+        setState((prev) => ({
+          ...prev,
+          messages: [...prev.messages, userMsg, summaryMsg, ...releaseDeferred()],
+        }));
+        onSlotsUpdate?.({ wedding_cake: `2 Tier 6" & 8" — ${flavor}, ${filling}, ${content}` } as any);
+        weddingCakeDataRef.current = {};
+        setFrontendStep(null);
+        return;
+      }
+    }
+    // ─── End frontend-only interception ───────────────────────────────
 
     if (content.startsWith('/')) {
       const command = content.toLowerCase();
@@ -697,18 +939,72 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
         timestamp: new Date(),
       };
 
-      setState((prev) => ({
-        ...prev,
-        messages: [...prev.messages, aiMessage],
-        threadId: response.thread_id,
-        progress: { filled: response.slots_filled, total: response.total_slots },
-        isComplete: response.is_complete,
-        isLoading: false,
-      }));
+      // Count real user messages (exclude auto-greeting)
+      const userMsgCount = state.messages.filter((m) => m.role === 'user').length + 1; // +1 for current
+
+      // After user gives name (2nd user msg) → inject email+phone questions
+      const isNameResponse = !contactAskedRef.current && userMsgCount === 2
+        && !content.startsWith('/') && !/\d{5,}/.test(content); // not a phone/number
+
+      // After user selects "Wedding" → inject cake question
+      const isWeddingSelection = !weddingCakeAskedRef.current
+        && /wedding/i.test(content)
+        && !/(venue|guest|date|appetizer|menu|dessert|cake|email|phone)/i.test(content);
+
+      if (isNameResponse) {
+        contactAskedRef.current = true;
+        deferredAiMessageRef.current = aiMessage;
+        const emailAsk: ChatMessage = {
+          role: 'ai',
+          content: 'What\'s the best email to reach you at?',
+          timestamp: new Date(),
+        };
+        setState((prev) => ({
+          ...prev,
+          messages: [...prev.messages, emailAsk],
+          threadId: response.thread_id,
+          progress: { filled: response.slots_filled, total: response.total_slots },
+          isComplete: response.is_complete,
+          isLoading: false,
+        }));
+        setFrontendStep('contact_email');
+      } else if (isWeddingSelection) {
+        weddingCakeAskedRef.current = true;
+        deferredAiMessageRef.current = aiMessage;
+        const cakeAsk: ChatMessage = {
+          role: 'ai',
+          content: '🎂 Would you like a wedding cake?\n1. Yes\n2. No thanks',
+          timestamp: new Date(),
+        };
+        setState((prev) => ({
+          ...prev,
+          messages: [...prev.messages, cakeAsk],
+          threadId: response.thread_id,
+          progress: { filled: response.slots_filled, total: response.total_slots },
+          isComplete: response.is_complete,
+          isLoading: false,
+        }));
+        setFrontendStep('cake_ask');
+      } else {
+        setState((prev) => ({
+          ...prev,
+          messages: [...prev.messages, aiMessage],
+          threadId: response.thread_id,
+          progress: { filled: response.slots_filled, total: response.total_slots },
+          isComplete: response.is_complete,
+          isLoading: false,
+        }));
+      }
 
       onProgressUpdate?.({ filled: response.slots_filled, total: response.total_slots });
       saveSessionToStorage(response.thread_id);
       if (!state.threadId) onThreadStart?.(response.thread_id);
+
+      // Auto-detect email and phone in user messages → save to slots
+      const emailMatch = content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (emailMatch) onSlotsUpdate?.({ email: emailMatch[0] } as any);
+      const phoneMatch = content.match(/\+?\d[\d\s()-]{8,}\d/);
+      if (phoneMatch) onSlotsUpdate?.({ phone: phoneMatch[0].replace(/[\s()-]/g, '') } as any);
 
       if (onSlotsUpdate && response.slots_filled > lastSlotsFilled.current) {
         lastSlotsFilled.current = response.slots_filled;
@@ -894,7 +1190,21 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
         {/* Input */}
         {(() => {
           const lastAiMsg = [...state.messages].reverse().find((m) => m.role === 'ai');
-          const isPhoneMode = !state.isLoading && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && activeMenuMsgIdx === null;
+          const noMenu = activeMenuMsgIdx === null;
+          const isPhoneMode = !state.isLoading && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && noMenu;
+          const isEmailMode = !state.isLoading && !!lastAiMsg && isAskingForEmail(lastAiMsg.content) && noMenu && !isPhoneMode;
+          const isDateMode = !state.isLoading && !!lastAiMsg && isAskingForDate(lastAiMsg.content) && noMenu && !isPhoneMode && !isEmailMode;
+          const specialMode = isPhoneMode || isEmailMode || isDateMode;
+
+          const handleSpecialSend = () => {
+            if (isPhoneMode) {
+              handleSendMessage(`${countryCode.code} ${input}`);
+            } else {
+              handleSendMessage();
+            }
+            setInput('');
+          };
+
           return (
             <div className={`border-t border-neutral-200 px-3 sm:px-6 py-3 sm:py-4 bg-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
               <div className="flex items-end gap-2 sm:gap-3">
@@ -919,13 +1229,35 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       type="tel"
                       value={input}
                       onChange={(e) => setInput(e.target.value.replace(/[^\d]/g, '').slice(0, 10))}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendMessage(`${countryCode.code} ${input}`); setInput(''); } }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
                       placeholder="0000000000"
                       maxLength={10}
                       className="flex-1 px-3 py-3 text-sm focus:outline-none bg-white"
                       disabled={state.isLoading}
                     />
                   </div>
+                ) : isEmailMode ? (
+                  /* Email input with validation */
+                  <input
+                    type="email"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
+                    placeholder="you@example.com"
+                    className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                    disabled={state.isLoading}
+                  />
+                ) : isDateMode ? (
+                  /* Date picker input */
+                  <input
+                    type="date"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                    disabled={state.isLoading}
+                  />
                 ) : (
                   <textarea
                     ref={inputRef}
@@ -942,15 +1274,8 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                   />
                 )}
                 <button
-                  onClick={() => {
-                    if (isPhoneMode) {
-                      handleSendMessage(`${countryCode.code} ${input}`);
-                      setInput('');
-                    } else {
-                      handleSendMessage();
-                    }
-                  }}
-                  disabled={!input.trim() || state.isLoading}
+                  onClick={specialMode ? handleSpecialSend : () => handleSendMessage()}
+                  disabled={!input.trim() || state.isLoading || (isEmailMode && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input))}
                   className="bg-black text-white p-3 rounded-xl hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
                 >
                   {state.isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
@@ -959,9 +1284,13 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
               <p className="text-xs text-neutral-400 mt-2 text-center">
                 {isPhoneMode
                   ? 'Select your country code and enter your phone number'
-                  : activeMenuMsgIdx !== null
-                    ? 'Click cards to select · Send to confirm'
-                    : <>Shift+Enter for new line · Use <span className="font-mono text-neutral-600">@ai</span> to update previous items</>
+                  : isEmailMode
+                    ? 'Enter a valid email address'
+                    : isDateMode
+                      ? 'Pick your event date'
+                      : activeMenuMsgIdx !== null
+                        ? 'Click cards to select · Send to confirm'
+                        : <>Shift+Enter for new line · Use <span className="font-mono text-neutral-600">@ai</span> to update previous items</>
                 }
               </p>
             </div>

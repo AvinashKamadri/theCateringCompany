@@ -127,15 +127,15 @@ export class OpenSignService {
       const docUuid = refreshed.data.schema?.[0]?.attachment_uuid ?? firstDocUuid;
       this.logger.log(`After clear: submitterUuid=${submitterUuid}, docUuid=${docUuid}`);
 
-      // Find the last page index (0-based) for signature placement
+      // Signature page = second-to-last page (last page is T&C)
       const pageCount: number = refreshed.data.schema?.[0]?.page_count ?? 1;
-      const lastPage = Math.max(0, pageCount - 1);
+      const sigPage = Math.max(0, pageCount - 2);
 
       // Step 2c: Add only our Signature + Date fields — include explicit UUIDs so
       // DocuSeal renders name="values[{uuid}]" instead of name="values[undefined]"
       const signatureFieldUuid = uuidv4();
       const dateFieldUuid = uuidv4();
-      this.logger.log(`Adding Signature (${signatureFieldUuid}) + Date (${dateFieldUuid}) fields on page ${lastPage}...`);
+      this.logger.log(`Adding Signature (${signatureFieldUuid}) + Date (${dateFieldUuid}) fields on page ${sigPage} (pageCount=${pageCount})...`);
       await this.client.put(`/templates/${templateId}`, {
         fields: [
           {
@@ -146,12 +146,12 @@ export class OpenSignService {
             submitter_uuid: submitterUuid,
             areas: [
               {
-                x: 0.08,
-                y: 0.88,
-                w: 0.35,
-                h: 0.07,
+                x: 0.05,
+                y: 0.74,
+                w: 0.38,
+                h: 0.06,
                 attachment_uuid: docUuid,
-                page: lastPage,
+                page: sigPage,
               },
             ],
           },
@@ -163,12 +163,12 @@ export class OpenSignService {
             submitter_uuid: submitterUuid,
             areas: [
               {
-                x: 0.55,
-                y: 0.88,
-                w: 0.25,
+                x: 0.05,
+                y: 0.84,
+                w: 0.22,
                 h: 0.05,
                 attachment_uuid: docUuid,
-                page: lastPage,
+                page: sigPage,
               },
             ],
           },

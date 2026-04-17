@@ -8,7 +8,7 @@ from datetime import datetime
 
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
-    get_last_human_message, add_ai_message, llm_extract, llm_respond,
+    get_last_human_message, add_ai_message, llm_extract, llm_respond, norm_llm,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 from tools.pricing import calculate_event_pricing
@@ -20,11 +20,29 @@ def _slots_context(state):
 
 
 async def ask_special_requests_node(state: ConversationState) -> ConversationState:
-    """Handle special requests — check if user already gave one or just said yes/no."""
+    """Handle special requests — surfaces anything already noted mid-flow, then asks for more."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # Classify: did the user give an actual request, say yes (will tell us next), or decline?
+    # Check what's already been noted (e.g. via @AI mid-flow)
+    existing_requests = get_slot_value(state["slots"], "special_requests") or ""
+    has_existing = bool(existing_requests and existing_requests.lower() not in ("none", "no", ""))
+
+    if has_existing:
+        # Something was already noted — surface it and ask if they want to add/change
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            "Something was already noted mid-conversation for this customer's special requests. "
+            "Reference it naturally — don't just repeat it verbatim. "
+            "Ask if they'd like to add anything on top of that, or if they're good. "
+            "One or two casual lines.",
+            f"Already noted: {existing_requests}\nContext: {_slots_context(state)}"
+        )
+        state["current_node"] = "collect_special_requests"
+        state["messages"] = add_ai_message(state, response)
+        return state
+
+    # Nothing noted yet — classify the user's current response
     intent = await llm_extract(
         "The customer was asked if they have any special requests for their event. "
         "Did they: (a) provide a specific request in their message, "
@@ -32,22 +50,19 @@ async def ask_special_requests_node(state: ConversationState) -> ConversationSta
         "Return ONLY: request, yes, or no",
         user_msg
     )
-    intent_val = intent.strip().lower()
+    intent_val = norm_llm(intent)
 
     if intent_val == "request":
-        # User gave the actual request inline — store it directly
         fill_slot(state["slots"], "special_requests", user_msg.strip())
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThe customer shared their special request: "
-            f"\"{user_msg}\". Acknowledge it warmly and confirm you've noted it. "
-            "Then ask: Do you have any health or dietary concerns we should know about?",
+            f"{SYSTEM_PROMPT}\n\nCustomer shared their special request: \"{user_msg}\". "
+            "Acknowledge it warmly. Then ask: Any health or dietary concerns we should know about?",
             f"Context: {_slots_context(state)}"
         )
         state["current_node"] = "collect_dietary"
     elif intent_val == "yes":
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThe customer has special requests. "
-            "Ask them to tell you about their special requests.",
+            f"{SYSTEM_PROMPT}\n\nCustomer has special requests. Ask what they are — one brief open question.",
             f"Context: {_slots_context(state)}"
         )
         state["current_node"] = "collect_special_requests"
@@ -55,7 +70,7 @@ async def ask_special_requests_node(state: ConversationState) -> ConversationSta
         fill_slot(state["slots"], "special_requests", "none")
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nNo special requests. "
-            "Ask: Do you have any health or dietary concerns we should know about?",
+            "Ask: Any health or dietary concerns we should know about?",
             f"Context: {_slots_context(state)}"
         )
         state["current_node"] = "collect_dietary"
@@ -65,32 +80,50 @@ async def ask_special_requests_node(state: ConversationState) -> ConversationSta
 
 
 async def collect_special_requests_node(state: ConversationState) -> ConversationState:
-    """Record special requests. Appends if there's already a value."""
+    """Record special requests. Appends if there's already a value.
+    Surfaces any misrouted entries (e.g. drinks/bar noted here mid-flow) so the customer
+    knows we're aware and can clarify, rather than silently duplicating info.
+    """
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
+    existing = get_slot_value(state["slots"], "special_requests") or ""
 
-    # Only loop back if user is explicitly adding another request.
-    # Default to done — don't store vague/done responses as requests.
+    # Check if this looks like a drinks/bar/service request that ended up here by mistake
+    _DRINKS_KEYWORDS = ["coffee", "bar", "beer", "wine", "open bar", "signature drink", "beverage"]
+    existing_lower = existing.lower()
+    drinks_already_noted = any(kw in existing_lower for kw in _DRINKS_KEYWORDS)
+
+    # Classify the current message
     is_adding = await llm_extract(
         "The customer was asked if they have more special requests. "
-        "Are they adding another specific request, or are they done? "
+        "Are they adding another specific request in this message, or are they done/confirming? "
         "Return ONLY: add or done",
         user_msg
     )
 
-    if is_adding.strip().lower() != "add":
-        existing = get_slot_value(state["slots"], "special_requests")
+    if norm_llm(is_adding) != "add":
         if not existing or existing == "none":
             fill_slot(state["slots"], "special_requests", "none")
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nSpecial requests noted. "
-            "Ask: Do you have any health or dietary concerns we should know about?",
-            f"Context: {_slots_context(state)}"
-        )
+
+        if drinks_already_noted:
+            # Gently flag that a drink-related item is sitting in special requests
+            response = await llm_respond(
+                f"{SYSTEM_PROMPT}\n\n"
+                "I noticed something drink/bar-related was noted in special requests earlier. "
+                "Casually flag that to the customer — mention we already have it noted and our team "
+                "will make sure it's handled properly. Keep it one line, warm and reassuring. "
+                "Then ask: Any health or dietary concerns we should know about?",
+                f"Noted so far: {existing}\nContext: {_slots_context(state)}"
+            )
+        else:
+            response = await llm_respond(
+                f"{SYSTEM_PROMPT}\n\nSpecial requests noted. "
+                "Ask: Any health or dietary concerns we should know about?",
+                f"Context: {_slots_context(state)}"
+            )
         state["current_node"] = "collect_dietary"
     else:
-        # Append to existing requests if any
-        existing = get_slot_value(state["slots"], "special_requests")
+        # Append new request
         if existing and existing != "none":
             combined = f"{existing}; {user_msg.strip()}"
         else:
@@ -99,9 +132,8 @@ async def collect_special_requests_node(state: ConversationState) -> Conversatio
 
         context = f"Special requests so far: {combined}\nSlots: {_slots_context(state)}"
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nRecorded the customer's special request. "
-            "Confirm what you've noted. Then ask: Anything else, or should we move on "
-            "to dietary concerns?",
+            f"{SYSTEM_PROMPT}\n\nGot that special request. Confirm what was noted briefly. "
+            "Then ask: Anything else to add, or ready to move on?",
             context
         )
         state["current_node"] = "collect_special_requests"
@@ -204,17 +236,27 @@ async def ask_anything_else_node(state: ConversationState) -> ConversationState:
         "Return ONLY: add or done",
         user_msg
     )
-    if intent.strip().lower() == "add":
+    if norm_llm(intent) == "add":
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_anything_else']}",
             f"Customer wants to add something. Ask what else they need.\nSlots: {_slots_context(state)}"
         )
         state["current_node"] = "collect_anything_else"
     else:
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThat's everything! Keep it short — one line: "
-            "'We've got everything we need. Would you like to schedule a quick 10–15 minute call to go over the details?'",
-            f"Slots: {_slots_context(state)}"
+        # If the user deferred date/venue/guest_count earlier, circle back now
+        # before offering the follow-up call. Otherwise go straight to follow-up.
+        has_pending = any(
+            get_slot_value(state["slots"], name) == "TBD"
+            for name in ("event_date", "venue", "guest_count")
+        )
+        if has_pending:
+            # Delegate the first prompt to the pending node (it chooses which slot to ask).
+            from agent.nodes.basic_info import collect_pending_details_node
+            return await collect_pending_details_node(state)
+        # Hardcoded to prevent LLM drift (e.g. re-asking for already-filled slots like event date).
+        response = (
+            "We've got everything we need. "
+            "Would you like to schedule a quick 10-15 minute call to go over the details?"
         )
         state["current_node"] = "offer_followup"
 
@@ -252,19 +294,17 @@ async def offer_followup_node(state: ConversationState) -> ConversationState:
         user_msg
     )
 
-    if intent.strip().lower() == "yes":
+    if norm_llm(intent) == "yes":
         fill_slot(state["slots"], "followup_call", "Requested — team will schedule")
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nCustomer wants a follow-up call. Confirm: "
-            "'We'll have someone reach out to set up a call. Your summary is being prepared — thanks!'",
-            f"Slots: {_slots_context(state)}"
+        response = (
+            "We'll have someone reach out to set up a call. "
+            "Your summary is being prepared — thanks!"
         )
     else:
         fill_slot(state["slots"], "followup_call", "no")
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nNo follow-up call needed. Confirm: "
-            "'Sounds good — your summary is being prepared and our team will review it. Thanks!'",
-            f"Slots: {_slots_context(state)}"
+        response = (
+            "Sounds good — your summary is being prepared "
+            "and our team will review it. Thanks!"
         )
 
     state["current_node"] = "generate_contract"

@@ -21,7 +21,6 @@ _NODE_COLLECTS: dict[str, str | None] = {
     "collect_fiance_name": "partner_name",
     "collect_birthday_person": "honoree_name",
     "collect_company_name": "company_name",
-    "collect_contact": "email",
     "collect_venue": "venue",
     "collect_guest_count": "guest_count",
     "select_service_style": "service_style",
@@ -50,6 +49,7 @@ _NODE_COLLECTS: dict[str, str | None] = {
     "collect_dietary": "dietary_concerns",
     "ask_anything_else": "additional_notes",
     "collect_anything_else": "additional_notes",
+    "collect_pending_details": None,  # dynamic — node chooses the TBD slot itself
     "generate_contract": None,
 }
 

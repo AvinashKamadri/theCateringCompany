@@ -204,23 +204,29 @@ async def llm_respond(system_prompt: str, context: str) -> str:
     """
     import random
     _STYLES = [
-        "Start with a short acknowledgment, then ask the question.",
-        "Lead with the question directly, keep it punchy.",
-        "Use a casual transition word first (like 'Alright', 'So', 'Cool'), then the question.",
-        "Acknowledge what they said warmly, then move to the next thing.",
-        "Keep it super brief — one short sentence max before the question.",
-        "Be a little playful in tone, but still professional.",
-        "Use a dash or em-dash mid-sentence for a natural texting feel.",
+        "Warm and encouraging — like a friend who's genuinely excited to help.",
+        "Upbeat and punchy — short, confident, zero fluff.",
+        "Chill and laid-back — the kind of person who makes everything feel easy.",
+        "Enthusiastic but grounded — real energy, not over-the-top.",
+        "Natural and flowing — sounds like someone mid-conversation, not scripted.",
+        "Dry wit, friendly — a little understated humor in the phrasing.",
+        "Breezy and light — effortless, like they've done this a hundred times.",
     ]
     style = random.choice(_STYLES)
     variation = (
-        f"\n\nRESPONSE STYLE FOR THIS MESSAGE: {style} "
-        "Do NOT copy this instruction literally — just let it influence your phrasing."
+        f"\n\nTONE FOR THIS MESSAGE: {style} "
+        "Let this energy come through naturally in your word choice — don't state it or reference it."
     )
     slot_authority = (
         "\n\nCRITICAL: Always use the CURRENT slot/event values provided in the context below, "
         "NOT what was discussed earlier in the conversation. If a value was modified mid-conversation "
         "(e.g., event type changed from Wedding to Birthday), respond based on the CURRENT value only."
+        "\n\nSTEP DISCIPLINE (non-negotiable): "
+        "Your ONLY job is to phrase the exact question/confirmation described in the instruction above. "
+        "NEVER invent a new question. NEVER ask about a topic that wasn't explicitly requested in the "
+        "instruction (do not ask about date, venue, guests, desserts, etc. unless the instruction says to). "
+        "NEVER advance the conversation to a new step on your own — the Python controller decides flow. "
+        "If the instruction says re-ask for X, you ONLY re-ask for X and nothing else."
     )
     start = time.monotonic()
     response = await llm_warm.ainvoke([
@@ -231,6 +237,16 @@ async def llm_respond(system_prompt: str, context: str) -> str:
     text = response.content
     await _log_generation(system_prompt, context, text, latency_ms, "intake_parse")
     return text
+
+
+def norm_llm(text: str) -> str:
+    """Normalize a short LLM classification output: strip whitespace, lowercase,
+    strip surrounding punctuation/markdown. Use for `Return ONLY: X or Y` prompts."""
+    if not text:
+        return ""
+    t = text.strip().lower()
+    t = re.sub(r'^["\'\*`]+|["\'\*`.!?]+$', '', t).strip()
+    return t
 
 
 def add_ai_message(state: dict, content: str) -> list:

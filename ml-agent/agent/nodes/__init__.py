@@ -5,7 +5,6 @@ LangGraph node implementations for the catering intake flow.
 from agent.nodes.start import start_node
 from agent.nodes.basic_info import (
     collect_name_node,
-    collect_contact_node,
     collect_event_date_node,
     select_service_type_node,
     select_event_type_node,
@@ -17,6 +16,7 @@ from agent.nodes.basic_info import (
     collect_guest_count_node,
     present_menu_node,
     select_service_style_node,
+    collect_pending_details_node,
 )
 from agent.nodes.menu import (
     collect_meal_style_node,
@@ -55,7 +55,6 @@ from agent.nodes.check_modifications import check_modifications_node
 NODE_MAP = {
     "start": start_node,
     "collect_name": collect_name_node,
-    "collect_contact": collect_contact_node,
     "collect_event_date": collect_event_date_node,
     "select_service_type": select_service_type_node,
     "select_event_type": select_event_type_node,
@@ -92,6 +91,7 @@ NODE_MAP = {
     "offer_followup": offer_followup_node,
     "generate_contract": generate_contract_node,
     "check_modifications": check_modifications_node,
+    "collect_pending_details": collect_pending_details_node,
 }
 
 __all__ = list(NODE_MAP.keys()) + ["NODE_MAP"]

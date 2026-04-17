@@ -240,7 +240,7 @@ async def _generate_fresh_question(node: str, state: dict) -> str:
                     f"{SYSTEM_PROMPT}\n\nRe-present the dessert menu briefly in one casual line. Do NOT list any items.",
                     f"Current event info: {_slots_context(state)}"
                 )
-                return f"{intro}\n\n{item_list}\n\nPick up to 4 mini desserts!"
+                return f"{intro}\n\n{item_list}\n\nPick up to 4 items total!"
 
             # Slot not collected yet — re-ask with a plain prompt to avoid hallucination
             pending_prompt = _PENDING_PROMPTS.get(node)
@@ -321,7 +321,7 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                 final_response = f"I want to make sure I update the right information. Did you want to change {options_str}?"
         else:
             final_response = ("I'm not sure which information you'd like to change. Could you be more specific? "
-                              "For example: '@AI change guest count to 200' or '@AI update the date to May 1st'.")
+                              "For example: 'change guest count to 200' or 'update the date to May 1st'.")
 
     elif detection_result.get("detected"):
         target_slot = detection_result.get("target_slot")
@@ -675,7 +675,7 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                         "Write a brief casual intro. Do NOT list any items.",
                         f"Event: {_slots_context(state)}"
                     )
-                    response = f"{intro}\n\n{current_note}{item_list}\n\nPick up to 4 mini desserts!"
+                    response = f"{intro}\n\n{current_note}{item_list}\n\nPick up to 4 items total!"
                 else:
                     from prompts.system_prompts import NODE_PROMPTS
                     response = await llm_respond(
@@ -778,7 +778,7 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                 final_response = f"I couldn't update that: {error_message}"
     else:
         final_response = ("I'm not sure which information you'd like to change. Could you be more specific? "
-                          "For example: '@AI change guest count to 200' or '@AI update the date to May 1st'.")
+                          "For example: 'change guest count to 200' or 'update the date to May 1st'.")
 
     # CRITICAL: Stay on the same node — never jump ahead
     # EXCEPT: reroute conditional nodes when their condition no longer holds

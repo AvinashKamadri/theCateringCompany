@@ -174,8 +174,7 @@ async def collect_fiance_name_node(state: ConversationState) -> ConversationStat
         state["slots"].pop("_retry_partner", None)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_fiance_name']}\n\n"
-            f"Name captured: {extracted}. Confirm it casually, then ask: 'When's the big day?' "
-            "End with: 'Tip: type @AI anytime to update a previous answer.'",
+            f"Name captured: {extracted}. Confirm it casually, then ask: 'When's the big day?'",
             f"Partner name captured: {extracted}",
         )
         state["current_node"] = "collect_event_date"
@@ -894,12 +893,12 @@ async def collect_pending_details_node(state: ConversationState) -> Conversation
         state["messages"] = add_ai_message(state, _PENDING_SLOT_PROMPTS[next_slot])
         return state
 
-    # Nothing left pending — hand off to follow-up offer.
+    # Nothing left pending — go straight to contract generation.
     state.pop("_pending_asking", None)
     response = (
-        "We've got everything we need. "
-        "Would you like to schedule a quick 10-15 minute call to go over the details?"
+        "Perfect — we've got everything we need. "
+        "Your summary is being prepared and our team will review it shortly. Thanks!"
     )
-    state["current_node"] = "offer_followup"
+    state["current_node"] = "generate_contract"
     state["messages"] = add_ai_message(state, response)
     return state

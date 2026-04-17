@@ -244,7 +244,7 @@ async def ask_anything_else_node(state: ConversationState) -> ConversationState:
         state["current_node"] = "collect_anything_else"
     else:
         # If the user deferred date/venue/guest_count earlier, circle back now
-        # before offering the follow-up call. Otherwise go straight to follow-up.
+        # before generating the contract. Otherwise finalize immediately.
         has_pending = any(
             get_slot_value(state["slots"], name) == "TBD"
             for name in ("event_date", "venue", "guest_count")
@@ -253,12 +253,14 @@ async def ask_anything_else_node(state: ConversationState) -> ConversationState:
             # Delegate the first prompt to the pending node (it chooses which slot to ask).
             from agent.nodes.basic_info import collect_pending_details_node
             return await collect_pending_details_node(state)
-        # Hardcoded to prevent LLM drift (e.g. re-asking for already-filled slots like event date).
-        response = (
-            "We've got everything we need. "
-            "Would you like to schedule a quick 10-15 minute call to go over the details?"
+        # Hardcoded closing — go straight to contract generation.
+        state["current_node"] = "generate_contract"
+        state["messages"] = add_ai_message(
+            state,
+            "Perfect — we've got everything we need. "
+            "Your summary is being prepared and our team will review it shortly. Thanks!"
         )
-        state["current_node"] = "offer_followup"
+        return state
 
     state["messages"] = add_ai_message(state, response)
     return state

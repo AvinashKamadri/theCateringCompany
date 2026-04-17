@@ -144,7 +144,7 @@ async def ask_desserts_node(state: ConversationState) -> ConversationState:
             "Do NOT list any items — the list will be appended automatically.",
             f"Event: {_slots_context(state)}"
         )
-        response = f"{intro}\n\n{dessert_list}\n\nPick up to 4 mini desserts!"
+        response = f"{intro}\n\n{dessert_list}\n\nPick up to 4 items total!"
         state["current_node"] = "select_desserts"
     else:
         fill_slot(state["slots"], "desserts", "no")
@@ -340,7 +340,7 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
             "Do NOT list any items — the list is appended automatically.",
             f"Customer tried: {', '.join(combined)}"
         )
-        response = f"{intro}\n\n{dessert_list}\n\nPick up to 4 desserts!"
+        response = f"{intro}\n\n{dessert_list}\n\nPick up to 4 items total!"
         state["current_node"] = "select_desserts"
         state["messages"] = add_ai_message(state, response)
         return state
@@ -368,12 +368,19 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
         state["messages"] = add_ai_message(state, response)
         return state
 
+    # No affirmation — go straight to the drinks step. If the user wants to
+    # change desserts later they'll do it via a natural correction which routes
+    # to check_modifications.
     context = f"Desserts selected: {new_val}\nSlots: {_slots_context(state)}"
     response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_desserts']}", context
+        f"{SYSTEM_PROMPT}\n\nCustomer just finalized desserts: {new_val}. "
+        "Briefly confirm the selection in ONE short line (no follow-up question about adding more), "
+        "then immediately ask the drinks question.\n\n"
+        f"{NODE_PROMPTS['collect_drinks']}",
+        context
     )
 
-    state["current_node"] = "ask_more_desserts"
+    state["current_node"] = "collect_drinks"
     state["messages"] = add_ai_message(state, response)
     return state
 

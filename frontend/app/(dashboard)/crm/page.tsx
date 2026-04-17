@@ -23,10 +23,13 @@ import {
   Calculator,
   Plus,
   Trash2,
+  X,
+  UserPlus,
 } from 'lucide-react';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { apiClient } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import {
   AreaChart,
   Area,
@@ -69,13 +72,13 @@ interface Analytics {
   guest_buckets: { bucket: string; count: number }[];
 }
 
-const STATUS_CONFIG: Record<string, { label: string; order: number }> = {
-  draft:     { label: 'Draft',     order: 0 },
-  active:    { label: 'Active',    order: 1 },
-  confirmed: { label: 'Confirmed', order: 2 },
-  completed: { label: 'Completed', order: 3 },
-  cancelled: { label: 'Cancelled', order: 4 },
-  rejected:  { label: 'Rejected',  order: 5 },
+const STATUS_CONFIG: Record<string, { label: string; order: number; color: string }> = {
+  draft:     { label: 'Draft',     order: 0, color: '#aaa' },
+  active:    { label: 'Active',    order: 1, color: '#111' },
+  confirmed: { label: 'Confirmed', order: 2, color: '#555' },
+  completed: { label: 'Completed', order: 3, color: '#888' },
+  cancelled: { label: 'Cancelled', order: 4, color: '#ddd' },
+  rejected:  { label: 'Rejected',  order: 5, color: '#e5e5e5' },
 };
 
 const PIE_COLORS = ['#111', '#555', '#888', '#aaa', '#ddd'];
@@ -196,7 +199,7 @@ function fmt(n: number) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Tab = 'pipeline' | 'contracts' | 'analytics';
+type Tab = 'pipeline' | 'contracts' | 'analytics' | 'overview' | 'list';
 type PipelineView = 'kanban' | 'list';
 
 export default function CRMPage() {
@@ -207,7 +210,7 @@ export default function CRMPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [pendingContracts, setPendingContracts] = useState<any[]>([]);
+  const [pendingContracts, setanys] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'overview' | 'pipeline' | 'list'>('overview');
   const [lineItems, setLineItems] = useState<Array<{ description: string; quantity: number; unitPrice: number }>>([]);
@@ -221,6 +224,10 @@ export default function CRMPage() {
   const [pipelineView, setPipelineView] = useState<PipelineView>('kanban');
   const [calculating, setCalculating] = useState(false);
   const [savingPricing, setSavingPricing] = useState(false);
+  const [contracts, setContracts] = useState<any[]>([]);
+  const [contractsLoading, setContractsLoading] = useState(false);
+  const [contractsFetched, setContractsFetched] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) { router.push('/signin'); return; }
@@ -237,7 +244,7 @@ export default function CRMPage() {
         setLeads(leadsData);
         setStats(statsData);
         if (analyticsData) setAnalytics(analyticsData);
-        setPendingContracts(pendingData?.contracts ?? []);
+        setanys(pendingData?.contracts ?? []);
       } catch (err) {
         console.error('Failed to load CRM data', err);
       } finally {
@@ -280,7 +287,7 @@ export default function CRMPage() {
     if (t === 'contracts') loadContracts();
   };
 
-  const toggleExpand = (contract: PendingContract) => {
+  const toggleExpand = (contract: any) => {
     if (expandedId === contract.id) {
       setExpandedId(null);
       setActiveContract(null);
@@ -295,7 +302,7 @@ export default function CRMPage() {
     setGratuityRate(pricing?.gratuityRate != null ? Number(pricing.gratuityRate) : 20);
   };
 
-  const getClientInfo = (c: PendingContract) => {
+  const getClientInfo = (c: any) => {
     const project = c.projects_contracts_project_idToprojects;
     let aiData: any = {};
     try { aiData = project?.ai_event_summary ? JSON.parse(project.ai_event_summary) : {}; } catch { /* */ }
@@ -510,11 +517,11 @@ export default function CRMPage() {
           <div className="flex gap-1.5">
             {(['overview', 'pipeline', 'list'] as const).map((mode) => (
               <button
-                key={key}
-                onClick={() => handleTabChange(key)}
+                key={mode}
+                onClick={() => handleTabChange(mode)}
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                  tab === key
+                  tab === mode
                     ? 'bg-black text-white'
                     : 'text-neutral-600 hover:text-black hover:bg-neutral-100',
                 )}
@@ -830,7 +837,7 @@ export default function CRMPage() {
         {/* ── PIPELINE ── */}
         {viewMode === 'pipeline' && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            {stages.map(([status, { label }]) => {
+            {stages.map(([status, { label, color }]) => {
               const stageLeads = byStage(status);
               return (
                 <div key={status} className="flex flex-col min-h-0">
@@ -852,7 +859,7 @@ export default function CRMPage() {
 
                   {/* Cards */}
                   <div className="space-y-2.5">
-                    {isEmpty && (
+                    {stageLeads.length === 0 && (
                       <div className="border-2 border-dashed border-neutral-200 rounded-xl py-8 flex flex-col items-center gap-1.5">
                         <div className="h-6 w-6 rounded-full bg-neutral-100 flex items-center justify-center">
                           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color === '#e5e5e5' ? '#d4d4d4' : color }} />

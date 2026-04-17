@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Calendar, Users, MapPin, FileText,
   Clock, CheckCircle2, AlertCircle, Loader2, Building2,
-  ThumbsUp, ThumbsDown, X,
+  ThumbsUp, ThumbsDown, X, DollarSign, Calculator, Plus, Trash2,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
@@ -163,6 +163,7 @@ export default function ContractDetailPage() {
     }
   };
 
+  const hasPricingSaved = !!(contract?.body as any)?.pricing?.lineItems?.length;
   const pricingTotal        = lineItems.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
   const pricingTax          = Math.round(pricingTotal * (taxRate / 100) * 100) / 100;
   const pricingOnsiteSvc    = Math.round(pricingTotal * (onsiteServiceRate / 100) * 100) / 100;

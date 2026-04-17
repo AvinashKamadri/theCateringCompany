@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   Calendar, Users, MapPin, FileText, MessageSquare, Loader2,
-  ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield, Link2,
+  ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield, Link2, Info,
 } from 'lucide-react';
 import BentoInfoCard from '@/components/ui/BentoInfoCard';
 
@@ -469,9 +469,7 @@ export default function ProjectDetailPage() {
                 <p className="text-sm text-neutral-500 mt-0.5">{collaborators.length} member{collaborators.length !== 1 ? 's' : ''}</p>
               </div>
               {canManage && (
-                <div className="flex flex-col items-end gap-2">
-                  <p className="text-xs text-neutral-400">Collaborate using link or email</p>
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2">
                     {/* Generate invite link button */}
                     <button
                       onClick={async () => { await loadJoinCode(); }}
@@ -488,8 +486,17 @@ export default function ProjectDetailPage() {
                       <UserPlus className="h-3.5 w-3.5" />
                       Add Collaborator
                     </button>
+                    {/* Info tooltip */}
+                    <div className="relative group">
+                      <div className="flex items-center justify-center w-7 h-7 rounded-full border border-neutral-200 text-neutral-400 hover:text-neutral-700 hover:border-neutral-400 transition-colors cursor-help">
+                        <Info className="h-3.5 w-3.5" />
+                      </div>
+                      <div className="absolute right-0 top-full mt-2 w-56 px-3 py-2 bg-neutral-900 text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50 pointer-events-none">
+                        Click <span className="font-semibold">Generate Link</span> to invite collaborators or <span className="font-semibold">Add</span> through email
+                        <div className="absolute -top-1 right-3 w-2 h-2 bg-neutral-900 rotate-45" />
+                      </div>
+                    </div>
                   </div>
-                </div>
               )}
             </div>
 

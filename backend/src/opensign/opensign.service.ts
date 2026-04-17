@@ -127,15 +127,21 @@ export class OpenSignService {
       const docUuid = refreshed.data.schema?.[0]?.attachment_uuid ?? firstDocUuid;
       this.logger.log(`After clear: submitterUuid=${submitterUuid}, docUuid=${docUuid}`);
 
-      // Signature page = second-to-last page (last page is T&C)
-      const pageCount: number = refreshed.data.schema?.[0]?.page_count ?? 1;
-      const sigPage = Math.max(0, pageCount - 2);
+      // Count pages directly from the PDF bytes (DocuSeal's page_count is unreliable)
+      let pageCount = 1;
+      if (options.file_base64) {
+        const pdfBytes = Buffer.from(options.file_base64, 'base64').toString('latin1');
+        const match = pdfBytes.match(/\/Count\s+(\d+)/);
+        if (match) pageCount = parseInt(match[1], 10);
+      }
+      const sigPage = pageCount - 1;
+      this.logger.log(`[DocuSeal] PDF pages=${pageCount}, signature on page ${sigPage + 1}`);
 
       // Step 2c: Add only our Signature + Date fields — include explicit UUIDs so
       // DocuSeal renders name="values[{uuid}]" instead of name="values[undefined]"
       const signatureFieldUuid = uuidv4();
       const dateFieldUuid = uuidv4();
-      this.logger.log(`Adding Signature (${signatureFieldUuid}) + Date (${dateFieldUuid}) fields on page ${sigPage} (pageCount=${pageCount})...`);
+      this.logger.log(`Adding Signature (${signatureFieldUuid}) + Date (${dateFieldUuid}) fields on page ${sigPage}...`);
       await this.client.put(`/templates/${templateId}`, {
         fields: [
           {
@@ -147,9 +153,9 @@ export class OpenSignService {
             areas: [
               {
                 x: 0.05,
-                y: 0.74,
-                w: 0.38,
-                h: 0.06,
+                y: 0.25,
+                w: 0.30,
+                h: 0.05,
                 attachment_uuid: docUuid,
                 page: sigPage,
               },
@@ -163,9 +169,9 @@ export class OpenSignService {
             submitter_uuid: submitterUuid,
             areas: [
               {
-                x: 0.05,
-                y: 0.84,
-                w: 0.22,
+                x: 0.40,
+                y: 0.25,
+                w: 0.12,
                 h: 0.05,
                 attachment_uuid: docUuid,
                 page: sigPage,

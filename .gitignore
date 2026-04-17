@@ -264,3 +264,6 @@ puppeteer/.local-chromium/
 !.gitkeep
 !.env.example
 !.vscode/settings.json
+
+# dev scrips
+alpha_script/

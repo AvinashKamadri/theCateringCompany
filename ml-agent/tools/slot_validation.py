@@ -3,7 +3,7 @@ Slot validation tool for business rules
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil import parser
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -63,32 +63,85 @@ def validate_phone(value: str) -> dict:
 
 
 def _contains_relative_date(value: str) -> bool:
-    """Check if the value contains relative date terms that dateutil can't parse."""
+    """Check if the value contains relative date terms that need resolution."""
     relative_keywords = [
         "next month", "this month", "next week", "this week",
-        "next year", "tomorrow", "next friday", "next saturday",
-        "next sunday", "next monday", "next tuesday", "next wednesday",
-        "next thursday", "coming", "upcoming",
+        "next year", "tomorrow",
+        "next friday", "next saturday", "next sunday",
+        "next monday", "next tuesday", "next wednesday", "next thursday",
+        "this friday", "this saturday", "this sunday",
+        "this monday", "this tuesday", "this wednesday", "this thursday",
+        "coming ", "upcoming ",
     ]
     val_lower = value.lower()
     return any(kw in val_lower for kw in relative_keywords)
 
 
-async def _resolve_relative_date(value: str) -> str:
-    """Use LLM to resolve relative date phrases to absolute dates."""
-    from agent.llm import llm
-    from langchain_core.messages import SystemMessage, HumanMessage
+def _resolve_relative_date(value: str) -> str:
+    """Resolve relative date phrases to absolute YYYY-MM-DD strings using pure Python.
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    response = await llm.ainvoke([
-        SystemMessage(content=(
-            f"Today is {today}. Convert the following date expression to YYYY-MM-DD format. "
-            f"Return ONLY the date in YYYY-MM-DD format, nothing else. "
-            f"Example: if today is 2026-03-10 and input is '23rd next month', return 2026-04-23"
-        )),
-        HumanMessage(content=value),
-    ])
-    return response.content.strip()
+    Handles: tomorrow, next week, next month, next year,
+             next <weekday>, this <weekday>, coming <weekday>, upcoming <weekday>.
+    Falls back to dateutil.parser for anything else.
+    Returns the original value unchanged if nothing can be resolved.
+    """
+    today = datetime.now().date()
+    val = value.strip().lower()
+
+    # tomorrow
+    if "tomorrow" in val:
+        return (today + timedelta(days=1)).isoformat()
+
+    # next week
+    if "next week" in val:
+        return (today + timedelta(weeks=1)).isoformat()
+
+    # next year
+    if "next year" in val:
+        return today.replace(year=today.year + 1).isoformat()
+
+    # next month / this month — try to extract a day number if present
+    _MONTH_RE = re.compile(r'\b(\d{1,2})(st|nd|rd|th)?\b')
+    if "next month" in val:
+        day_m = _MONTH_RE.search(val)
+        day = int(day_m.group(1)) if day_m else today.day
+        # Advance to next month
+        if today.month == 12:
+            target = today.replace(year=today.year + 1, month=1, day=1)
+        else:
+            target = today.replace(month=today.month + 1, day=1)
+        # Clamp day to valid range
+        import calendar
+        max_day = calendar.monthrange(target.year, target.month)[1]
+        target = target.replace(day=min(day, max_day))
+        return target.isoformat()
+
+    if "this month" in val:
+        day_m = _MONTH_RE.search(val)
+        if day_m:
+            day = int(day_m.group(1))
+            import calendar
+            max_day = calendar.monthrange(today.year, today.month)[1]
+            target = today.replace(day=min(day, max_day))
+            return target.isoformat()
+
+    # next/coming/upcoming <weekday>
+    _WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    _PREFIX_RE = re.compile(r'\b(next|coming|upcoming|this)\s+(' + '|'.join(_WEEKDAY_NAMES) + r')\b')
+    m = _PREFIX_RE.search(val)
+    if m:
+        target_weekday = _WEEKDAY_NAMES.index(m.group(2))
+        days_ahead = (target_weekday - today.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7  # "next Monday" when today IS Monday → next week
+        return (today + timedelta(days=days_ahead)).isoformat()
+
+    # Fallback: dateutil with today as default so partial dates get current context
+    try:
+        parsed = parser.parse(value, fuzzy=True, default=datetime.now())
+        return parsed.date().isoformat()
+    except Exception:
+        return value
 
 
 def validate_event_date(value: str) -> dict:
@@ -116,7 +169,19 @@ def validate_event_date(value: str) -> dict:
             return {
                 "valid": False,
                 "normalized_value": None,
-                "error_message": "Event date must be in the future"
+                "error_message": "Sorry, that date is in the past. Please pick a date within the next 6-7 months."
+            }
+
+        # Must be within booking window (~7 months)
+        max_date = now + timedelta(days=213)
+        if parsed_date.date() > max_date.date():
+            return {
+                "valid": False,
+                "normalized_value": None,
+                "error_message": (
+                    f"We only book events within the next 6-7 months. "
+                    f"Please pick a date between {now.strftime('%b %d, %Y')} and {max_date.strftime('%b %d, %Y')}."
+                ),
             }
 
         normalized = parsed_date.date().isoformat()
@@ -263,14 +328,27 @@ async def validate_slot(slot_name: str, value: str) -> dict:
             field_name="Event type"
         )
     
-    # For other slots (name, venue, special_requests), basic validation
-    elif slot_name in ["name", "venue", "special_requests"]:
+    elif slot_name == "email":
+        import re as _re
+        cleaned = value.strip().lower()
+        if _re.match(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$', cleaned):
+            return {"valid": True, "normalized_value": cleaned, "error_message": None}
+        return {
+            "valid": False,
+            "normalized_value": None,
+            "error_message": "Please provide a valid email address (e.g. name@example.com)"
+        }
+
+    # For other slots (name, venue, special_requests, etc.), basic validation
+    elif slot_name in ["name", "venue", "special_requests", "partner_name", "honoree_name",
+                       "company_name", "service_style", "meal_style", "appetizer_style",
+                       "tableware", "utensils", "rentals", "labor", "drinks", "bar_service"]:
         return {
             "valid": True,
             "normalized_value": value.strip(),
             "error_message": None
         }
-    
+
     else:
         return {
             "valid": False,

@@ -2,7 +2,7 @@
 Routing logic for the catering intake conversation graph.
 
 Two-layer routing:
-1. Check for modification request (explicit @AI tag OR natural correction phrase) → check_modifications
+1. Check for natural modification intent (correction/additive phrases + slot keywords) → check_modifications
 2. Otherwise route to current_node (set by previous node)
 """
 
@@ -21,7 +21,6 @@ _NODE_COLLECTS: dict[str, str | None] = {
     "collect_fiance_name": "partner_name",
     "collect_birthday_person": "honoree_name",
     "collect_company_name": "company_name",
-    "collect_contact": "email",
     "collect_venue": "venue",
     "collect_guest_count": "guest_count",
     "select_service_style": "service_style",
@@ -48,18 +47,31 @@ _NODE_COLLECTS: dict[str, str | None] = {
     "ask_special_requests": "special_requests",
     "collect_special_requests": "special_requests",
     "collect_dietary": "dietary_concerns",
+    "collect_dietary_details": "dietary_concerns",
     "ask_anything_else": "additional_notes",
     "collect_anything_else": "additional_notes",
+    "collect_pending_details": None,  # dynamic — node chooses the TBD slot itself
     "generate_contract": None,
 }
 
 # Words/phrases that clearly signal the user wants to correct a PREVIOUS answer.
 _CORRECTION_SIGNALS = re.compile(
-    r'\b(actually|wait|i meant|let me change|can you (change|update|fix)|'
-    r'change (my|the)|update (my|the)|i want to (change|update)|'
+    r'\b(actually|wait|i meant|let me change|can you (change|update|fix|edit|add|remove|delete)|'
+    r'change (my|the)|update (my|the)|edit (my|the)|add (to|in|on)|remove|delete|'
+    r'i want to (change|update|edit|add|remove|delete)|'
     r'correction|oh wait|no wait|sorry,?\s+i|i made a mistake|'
-    r'i forgot to|i need to (change|update|fix)|'
-    r'make that|scratch that)\b',
+    r'i forgot to|i need to (change|update|fix|edit|add|remove|delete)|'
+    r'make that|scratch that|instead of|rather than|replace .+ with|'
+    r'revise|modify|clear|wipe|drop)\b',
+    re.IGNORECASE,
+)
+
+# Bare modify/action verbs — no leading "actually/wait" needed, since users can't rely on @AI.
+# Pair this with a slot keyword to be safe. Covers: change, update, edit, fix, modify, revise,
+# correct, switch, add, remove, delete, append, insert, drop, clear, wipe.
+_MODIFY_VERB = re.compile(
+    r'\b(change|update|edit|fix|modify|revise|correct|switch|add|remove|delete|'
+    r'append|insert|drop|clear|wipe)\b',
     re.IGNORECASE,
 )
 
@@ -83,11 +95,12 @@ _ADD_TO_PREV_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Phrases that signal the user wants to add something to a PREVIOUS slot.
+# Phrases that signal the user wants to add/append/insert to a PREVIOUS slot.
 # Unlike correction signals, these don't need a correction signal — they are
 # additive-only and always route to check_modifications.
 _ADDITIVE_SIGNALS = re.compile(
-    r'\b(i also need|also need|i need to add|please also add)\b',
+    r'\b(i also need|also need|i need to add|please also add|also (add|include|put)|'
+    r'plus|and also|throw in|toss in|include|add in|add on|add more)\b',
     re.IGNORECASE,
 )
 
@@ -128,14 +141,67 @@ def _detect_off_topic_correction(msg: str, current_slot: str | None, filled_slot
     return False
 
 
+# "replace X with Y" / "change X to Y" / "swap X for Y" — anchored by value, not slot name.
+# Even without a slot keyword, if X matches a currently-filled slot value we should route
+# to check_modifications.
+_REPLACE_BY_VALUE_PATTERN = re.compile(
+    r'\b(replace|swap|switch)\s+(.+?)\s+(with|for|to)\s+(.+)$|'
+    r'\bchange\s+(.+?)\s+to\s+(.+)$',
+    re.IGNORECASE,
+)
+
+
+def _detect_replace_by_value(msg: str, slots: dict) -> bool:
+    """Return True if the message says 'replace X with Y' and X appears inside any filled slot's value.
+
+    This catches cases where the user names the OLD value (e.g. 'replace algunoor karimnagar
+    with peddapeli') instead of naming the slot ('replace the venue ...').
+    """
+    m = _REPLACE_BY_VALUE_PATTERN.search(msg)
+    if not m:
+        return False
+    # Group layout: 'replace/swap/switch X with/for/to Y' → groups 2 & 4 ; 'change X to Y' → groups 5 & 6
+    old_val = (m.group(2) or m.group(5) or "").strip().lower()
+    if not old_val or len(old_val) < 2:
+        return False
+    for _, data in slots.items():
+        if not data.get("filled"):
+            continue
+        cur = str(data.get("value") or "").lower()
+        if not cur or cur in ("no", "none", ""):
+            continue
+        # Substring match (either direction) — robust against partial phrasings like
+        # 'replace algunoor with X' when value is 'algunoor karimnagar'
+        if old_val in cur or cur in old_val:
+            return True
+    return False
+
+
+def _detect_modify_intent(msg: str, current_slot: str | None) -> bool:
+    """Return True when the user uses a modify verb (change/update/edit/fix/modify/revise/switch)
+    alongside a slot keyword for a DIFFERENT slot than the current one.
+
+    This replaces explicit @AI tagging — we infer edit intent from keywords instead.
+    """
+    if not _MODIFY_VERB.search(msg):
+        return False
+    msg_lower = msg.lower()
+    for slot, patterns in _SLOT_KEYWORDS.items():
+        if slot == current_slot:
+            continue
+        for pattern in patterns:
+            if re.search(pattern, msg_lower):
+                return True
+    return False
+
+
 def route_message(state: ConversationState) -> str:
     """
     Route to the correct node based on state.
 
     Priority:
-    1. If user message contains @AI tag → check_modifications
-    2. If message is a natural correction for a different slot → check_modifications
-    3. Otherwise → current_node from state
+    1. If message is a natural correction/addition targeting a DIFFERENT slot → check_modifications
+    2. Otherwise → current_node from state
     """
     last_user_msg = ""
     for msg in reversed(list(state.get("messages", []))):
@@ -143,19 +209,23 @@ def route_message(state: ConversationState) -> str:
             last_user_msg = msg.content
             break
 
-    # 1. Explicit @AI tag
-    if re.search(r'@\w*ai\b', last_user_msg, re.IGNORECASE):
-        return "check_modifications"
-
     current = state.get("current_node", "start")
 
-    # 2. Natural correction for a slot different from what we're currently asking
+    # 1. Natural correction/addition for a slot different from what we're currently asking
     current_slot = _NODE_COLLECTS.get(current)
     filled_slots = {
         name for name, data in state.get("slots", {}).items()
         if data.get("filled")
     }
     if _detect_off_topic_correction(last_user_msg, current_slot, filled_slots):
+        return "check_modifications"
+
+    # 2. Natural "modify/change/update" intent combined with a slot keyword — route to check_modifications.
+    if _detect_modify_intent(last_user_msg, current_slot):
+        return "check_modifications"
+
+    # 3. "replace X with Y" / "change X to Y" — if X matches any filled slot value, route to modify.
+    if _detect_replace_by_value(last_user_msg, state.get("slots", {})):
         return "check_modifications"
 
     from agent.nodes import NODE_MAP

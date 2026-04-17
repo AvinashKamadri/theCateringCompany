@@ -1,7 +1,11 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import DotGrid from "@/components/ui/DotGrid";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   return (
     <div className="flex min-h-screen">
       {/* Left panel — branding */}
@@ -55,7 +59,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
 
         {/* Form sits above the grid */}
-        <div className="relative z-10 w-full max-w-md">
+        <div key={pathname} className="relative z-10 w-full max-w-md tc-page-enter">
           {/* Mobile logo */}
           <div className="lg:hidden mb-8">
             <Link href="/" className="flex items-center gap-2.5">

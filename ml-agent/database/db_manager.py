@@ -559,7 +559,11 @@ async def update_project_summary(
     data = {}
     if event_date:
         from datetime import datetime
-        data["event_date"] = datetime.strptime(event_date, "%Y-%m-%d")
+        try:
+            data["event_date"] = datetime.strptime(event_date, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            # Never crash the API on a malformed date — skip the field instead.
+            pass
     if guest_count:
         data["guest_count"] = guest_count
     if summary:

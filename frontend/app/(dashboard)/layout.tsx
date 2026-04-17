@@ -1,21 +1,23 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { AppNav } from '@/components/layout/app-nav';
 
-const emptySubscribe = () => () => {};
-
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { isAuthenticated } = useAuthStore();
+  const [hydrated, setHydrated] = useState(false);
 
   // Wait for Zustand to rehydrate from localStorage before checking auth.
   // Without this, isAuthenticated is false on first render even for logged-in
   // users, causing an immediate redirect to /signin → middleware sends them
   // back to /projects because the cookie is valid.
-  const hydrated = useSyncExternalStore(emptySubscribe, () => true, () => false);
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   useEffect(() => {
     if (hydrated && !isAuthenticated) router.push('/signin');
@@ -26,7 +28,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen bg-neutral-50">
       <AppNav />
-      <main className="pt-14">{children}</main>
+      <main className="pt-14">
+        <div key={pathname} className="tc-page-enter">{children}</div>
+      </main>
     </div>
   );
 }

@@ -2,8 +2,23 @@
 Agent response schema for backend integration
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Literal
 from pydantic import BaseModel, Field
+
+
+class InputHint(BaseModel):
+    """Frontend rendering hint — what UI widget to show for the next user input.
+
+    Independent of LLM phrasing: backend tells FE the expected input type so the
+    FE can render a calendar, email box, multi-choice buttons, etc.
+    """
+    kind: Literal["date", "email", "phone", "number", "choice", "multi_choice", "text"] = Field(
+        ..., description="Widget type the FE should render"
+    )
+    slot: Optional[str] = Field(default=None, description="Slot being collected")
+    choices: Optional[List[str]] = Field(default=None, description="Options for choice/multi_choice widgets")
+    min: Optional[int] = Field(default=None, description="Min numeric value / min selectable items")
+    max: Optional[int] = Field(default=None, description="Max numeric value / max selectable items")
 
 
 class AgentResponse(BaseModel):
@@ -32,6 +47,12 @@ class AgentResponse(BaseModel):
     # Contract data (only present when is_complete=True)
     contract_data: Optional[Dict[str, Any]] = Field(default=None, description="Contract data when conversation is complete")
     
+    # FE rendering hint
+    input_hint: Optional[InputHint] = Field(
+        default=None,
+        description="How the FE should render the next input (calendar, choice buttons, etc.)"
+    )
+
     # Error handling
     error: Optional[str] = Field(default=None, description="Error message if something went wrong")
     

@@ -809,9 +809,6 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    MAX_REVISIONS = 3
-    total_revisions = _count_slot_revisions(state["slots"], "selected_dishes", "appetizers")
-
     user_lower = user_msg.lower()
 
     # Detect if the user is directly requesting a change with specific details
@@ -826,19 +823,8 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
     )
     directly_requesting_change = direct_change_check.strip().lower() == "direct_change"
 
-    # If the user directly requested a change WITH details already in the message,
-    # forward immediately to collect_menu_changes_node — no need to ask what they want.
+    # If the user directly requested a change WITH details, forward to collect_menu_changes.
     if directly_requesting_change:
-        if total_revisions >= MAX_REVISIONS:
-            response = await llm_respond(
-                f"{SYSTEM_PROMPT}\n\n"
-                "The customer wants more changes but the menu has already been revised several times. "
-                "Politely let them know we'll go with the current selections and move on.",
-                f"Current menu: {_slots_context(state)}"
-            )
-            state["current_node"] = "ask_desserts"
-            state["messages"] = add_ai_message(state, response)
-            return state
         return await collect_menu_changes_node(state)
 
     # Find the last AI message to understand the exact question framing
@@ -875,14 +861,7 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
     if intent_val == "done":
         intent_val = "keep"
     if intent_val == "change":
-        if total_revisions >= MAX_REVISIONS:
-            response = await llm_respond(
-                f"{SYSTEM_PROMPT}\n\n"
-                "Menu revised several times already. Let them know we'll finalize and move on.",
-                f"Current menu: {_slots_context(state)}"
-            )
-            state["current_node"] = "ask_desserts"
-        else:
+        if True:
             # Show the menu WITH current selection highlighted — route to collect_menu_changes
             # so picking an item does add/remove rather than wiping the full selection.
             current_dishes = get_slot_value(state["slots"], "selected_dishes") or ""
@@ -984,6 +963,12 @@ async def collect_menu_changes_node(state: ConversationState) -> ConversationSta
     # --- Step 3: Persist updated slot ---
     if resolved_text and resolved_text != current_value:
         fill_slot(state["slots"], slot_name, resolved_text)
+
+    # Increment revision counter (used by ask_menu_changes_node cap check)
+    rev_count = state["slots"].get("_menu_revision_count", {}).get("value", 0)
+    state["slots"]["_menu_revision_count"] = {
+        "value": rev_count + 1, "filled": True, "modified_at": None, "modification_history": []
+    }
 
     # Always log the request in menu_notes for traceability
     existing_notes = get_slot_value(state["slots"], "menu_notes") or ""

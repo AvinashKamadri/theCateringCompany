@@ -810,7 +810,7 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
     user_msg = get_last_human_message(state["messages"])
 
     MAX_REVISIONS = 3
-    total_revisions = _count_slot_revisions(state["slots"], "selected_dishes", "appetizers")
+    total_revisions = state["slots"].get("_menu_revision_count", {}).get("value", 0)
 
     user_lower = user_msg.lower()
 
@@ -984,6 +984,12 @@ async def collect_menu_changes_node(state: ConversationState) -> ConversationSta
     # --- Step 3: Persist updated slot ---
     if resolved_text and resolved_text != current_value:
         fill_slot(state["slots"], slot_name, resolved_text)
+
+    # Increment revision counter (used by ask_menu_changes_node cap check)
+    rev_count = state["slots"].get("_menu_revision_count", {}).get("value", 0)
+    state["slots"]["_menu_revision_count"] = {
+        "value": rev_count + 1, "filled": True, "modified_at": None, "modification_history": []
+    }
 
     # Always log the request in menu_notes for traceability
     existing_notes = get_slot_value(state["slots"], "menu_notes") or ""

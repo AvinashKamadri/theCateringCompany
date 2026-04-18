@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { AiChat } from '@/components/chat/ai-chat';
+import { AiChat, ChatHeader } from '@/components/chat/ai-chat';
 import type { ContractData } from '@/types/chat-ai.types';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api/client';
@@ -15,8 +15,9 @@ import {
 import { AppNav } from '@/components/layout/app-nav';
 
 function getMenuImageUrl(name: string): string | null {
+  // Only strip price-parens; keep flavor lists intact.
   const clean = name
-    .replace(/\s*\(.*?\)\s*/g, '').replace(/\s*\$[\d.,]+\/?\w*/g, '').trim()
+    .replace(/\s*\([^)]*\$[^)]*\)\s*/g, '').replace(/\s*\$[\d.,]+\/?\w*/g, '').trim()
     .toLowerCase().replace(/[&]/g, 'and').replace(/[\/]/g, '-').replace(/w\//g, 'w-')
     .replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
   return clean ? `/menu-images/${clean}.jpg` : null;
@@ -253,12 +254,15 @@ function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
         </div>
       )}
 
-      {/* Desktop: right sidebar */}
-      <div className="hidden lg:flex w-72 xl:w-80 bg-white border-l border-neutral-200 flex-col overflow-y-auto shrink-0">
-        <div className="px-5 pt-6 pb-4 border-b border-neutral-100">
-          <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">Your Selections</p>
+      {/* Desktop: right sidebar — frosted light panel over the chat bg so
+          the photo shows through with blur. Text stays dark for readability. */}
+      <div className="hidden lg:flex w-72 xl:w-80 flex-col shrink-0 relative">
+        <div className="flex flex-col overflow-y-auto flex-1 bg-white/70 backdrop-blur-xl backdrop-saturate-150 border-l border-neutral-200/60">
+          <div className="px-5 pt-6 pb-4 border-b border-neutral-200/60">
+            <p className="text-[10px] font-semibold tracking-widest text-neutral-500 uppercase">Your Selections</p>
+          </div>
+          <div className="px-5 py-5 flex-1">{panelContent}</div>
         </div>
-        <div className="px-5 py-5 flex-1">{panelContent}</div>
       </div>
     </>
   );
@@ -418,42 +422,51 @@ function AiIntakeContent() {
 
   if (!isAuthenticated || isStaff) return null;
 
+  const outerBg =
+    view === 'chat'
+      ? { backgroundImage: "url('/chat-bg2.jpg')" }
+      : view === 'picker'
+        ? { backgroundImage: "url('/cat-bg2.jpg')" }
+        : undefined;
+
   return (
-    <div className="h-screen flex flex-col bg-neutral-50">
+    <div
+      className={`h-screen flex flex-col ${view === 'chat' || view === 'picker' ? 'bg-cover bg-center bg-fixed' : 'bg-neutral-50'}`}
+      style={outerBg}
+    >
       <AppNav />
 
-      <div className="flex flex-1 overflow-hidden pt-14 min-h-0">
+      {/* Full-width chat header spanning across both the chat column and the
+          "Your Selections" sidebar. Background reaches all the way to the
+          screen's top edge (under the floating nav pill); inner content is
+          padded so it sits below the pill. */}
+      {view === 'chat' && (
+        <div className="shrink-0 pt-14 bg-white/85 backdrop-blur-xl backdrop-saturate-150">
+          <div className="-mt-px">
+            <ChatHeader
+              isSaving={isSaving}
+              showSessionsButton={sessions.filter((s) => !s.error).length > 0}
+              onShowSessions={() => setView('picker')}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className={`flex flex-1 overflow-hidden min-h-0 ${view === 'chat' ? '' : 'pt-14'}`}>
         {/* Left: main content area */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {/* Thin top bar for session switching + saving indicator */}
-          {(view === 'chat' && sessions.filter((s) => !s.error).length > 0) || isSaving ? (
-            <div className="bg-white border-b border-neutral-100 px-6 py-2 flex items-center justify-between shrink-0">
-              <div />
-              <div className="flex items-center gap-3">
-                {view === 'chat' && sessions.filter((s) => !s.error).length > 0 && (
-                  <button
-                    onClick={() => setView('picker')}
-                    className="text-xs text-neutral-500 hover:text-neutral-900 flex items-center gap-1.5 border border-neutral-200 rounded-md px-2.5 py-1 hover:border-neutral-300 transition-colors"
-                  >
-                    <MessageSquare className="w-3 h-3" />
-                    My chats
-                  </button>
-                )}
-                {isSaving && (
-                  <div className="flex items-center gap-1.5 text-neutral-500 text-xs">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Saving…
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : null}
+          {/* Thin top bar removed — "My chats" + saving indicator now render
+              inside the AiChat header itself (see props on <AiChat /> below). */}
 
           {/* Session Picker */}
           {view === 'picker' && !loadingSessions && (
-            <div className="flex-1 overflow-y-auto p-3 sm:p-6">
+            <div
+              className="flex-1 overflow-y-auto p-3 sm:p-6 relative bg-cover bg-center bg-fixed"
+              style={{ backgroundImage: "url('/cat-bg2.jpg')" }}
+            >
+              <div className="max-w-5xl mx-auto space-y-6">
               {/* Hero banner */}
-              <div className="max-w-lg mx-auto mb-6 relative overflow-hidden rounded-2xl bg-linear-to-br from-neutral-900 via-neutral-800 to-neutral-900 px-6 sm:px-8 py-8 sm:py-10 text-white">
+              <div className="relative overflow-hidden rounded-2xl bg-linear-to-br from-neutral-900 via-neutral-800 to-neutral-900 px-6 sm:px-8 py-8 sm:py-10 text-white">
                 <div className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '24px 24px' }} />
                 <div className="relative z-10">
                   <div className="flex items-center gap-2 mb-3">
@@ -479,8 +492,8 @@ function AiIntakeContent() {
               </div>
 
               {/* Session list */}
-              <div className="max-w-lg mx-auto tc-glossy rounded-2xl overflow-hidden">
-                <div className="px-5 sm:px-6 py-4 sm:py-5 border-b border-neutral-100 flex items-end justify-between">
+              <div className="tc-glossy rounded-2xl overflow-hidden">
+                <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-neutral-100 flex items-end justify-between">
                   <div>
                     <h2 className="font-semibold text-neutral-900 text-base">Your event chats</h2>
                     <p className="text-xs text-neutral-500 mt-0.5">Pick up where you left off</p>
@@ -491,11 +504,11 @@ function AiIntakeContent() {
                     </span>
                   )}
                 </div>
-                <div className="divide-y divide-neutral-100">
-                  {/* New event — primary CTA row */}
+                <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {/* New event — primary CTA row, spans full width */}
                   <button
                     onClick={() => { setActiveThreadId(undefined); setCurrentSlots({}); setProgress({ filled: 0, total: 20 }); setView('chat'); }}
-                    className="group w-full flex items-center gap-4 px-5 sm:px-6 py-4 hover:bg-neutral-50/70 transition-colors text-left"
+                    className="sm:col-span-2 group w-full flex items-center gap-4 px-4 py-4 rounded-xl bg-white hover:bg-neutral-50 border border-neutral-200 hover:border-neutral-300 transition-colors text-left"
                   >
                     <div className="tc-glossy-dark w-11 h-11 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-[1.04] transition-transform">
                       <Plus className="w-5 h-5 text-white" strokeWidth={2.5} />
@@ -529,7 +542,7 @@ function AiIntakeContent() {
                         key={s.threadId}
                         onClick={() => { setActiveThreadId(s.threadId); setView('chat'); }}
                         disabled={s.error}
-                        className="group w-full flex items-center gap-4 px-5 sm:px-6 py-4 hover:bg-neutral-50/70 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="group w-full flex items-center gap-4 px-4 py-4 rounded-xl bg-white hover:bg-neutral-50 border border-neutral-200 hover:border-neutral-300 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-sm font-semibold ${
                           s.isCompleted
@@ -575,13 +588,18 @@ function AiIntakeContent() {
                   })}
                 </div>
               </div>
+              </div>{/* /grid */}
             </div>
           )}
 
           {/* Chat */}
           {view === 'chat' && (
-            <div className="flex-1 overflow-hidden">
+            <div
+              className="flex-1 overflow-hidden bg-cover bg-center bg-fixed"
+              style={{ backgroundImage: "url('/chat-bg2.jpg')" }}
+            >
               <AiChat
+                hideHeader
                 onComplete={handleComplete}
                 onSlotsUpdate={handleSlotsUpdate}
                 onProgressUpdate={setProgress}
@@ -601,15 +619,18 @@ function AiIntakeContent() {
           )}
         </div>
 
-        {/* Right: event plan panel (desktop sidebar + mobile sheet) */}
-        <EventPlanPanel
-          slots={currentSlots}
-          mobileOpen={mobileEventPlanOpen}
-          onMobileToggle={() => setMobileEventPlanOpen((o) => !o)}
-        />
+        {/* Right: event plan panel (desktop sidebar + mobile sheet).
+            Hidden on the session picker — only relevant while chatting. */}
+        {view === 'chat' && (
+          <EventPlanPanel
+            slots={currentSlots}
+            mobileOpen={mobileEventPlanOpen}
+            onMobileToggle={() => setMobileEventPlanOpen((o) => !o)}
+          />
+        )}
 
         {/* Mobile: floating pill to open event plan */}
-        {Object.keys(currentSlots).length > 0 && (
+        {view === 'chat' && Object.keys(currentSlots).length > 0 && (
           <button
             onClick={() => setMobileEventPlanOpen(true)}
             className="lg:hidden fixed bottom-24 right-4 z-40 flex items-center gap-1.5 bg-black text-white text-xs font-medium px-3 py-2 rounded-full shadow-lg"

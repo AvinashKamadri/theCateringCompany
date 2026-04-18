@@ -47,8 +47,8 @@ export function AppNav() {
   const userInitial = displayName.charAt(0).toUpperCase() || '?';
 
   return (
-    <nav className="bg-white border-b border-neutral-200 fixed top-0 left-0 right-0 z-50 h-14">
-      <div className="relative px-4 sm:px-6 h-full flex items-center">
+    <nav className="fixed top-3 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-1.5rem)] max-w-5xl h-12 rounded-full bg-white/70 backdrop-blur-xl backdrop-saturate-150 border border-white/60 shadow-[0_8px_28px_-10px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.8)]">
+      <div className="relative px-3 sm:px-5 h-full flex items-center">
         {/* Left: logo */}
         <Link href="/projects" className="flex items-center gap-2 shrink-0">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-black">
@@ -107,10 +107,11 @@ export function AppNav() {
         </div>
       </div>
 
-      {/* Mobile dropdown */}
+      {/* Mobile dropdown — separate pill below the navbar so the rounded nav
+          doesn't clip the menu. */}
       {isMobileMenuOpen && (
-        <div className="md:hidden border-t border-neutral-200 bg-white">
-          <div className="px-4 py-2 space-y-0.5">
+        <div className="md:hidden absolute top-[calc(100%+8px)] left-0 right-0 rounded-2xl bg-white/85 backdrop-blur-xl backdrop-saturate-150 border border-white/60 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.8)] overflow-hidden">
+          <div className="px-3 py-2 space-y-0.5">
             {navItems.map((item) => {
               const isActive = item.href === '/chat'
                 ? pathname === '/chat'

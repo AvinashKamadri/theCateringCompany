@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, Fragment } from 'react';
-import { Send, Loader2, Sparkles, Check, ChevronDown } from 'lucide-react';
+import { Send, Loader2, Sparkles, Check, ChevronDown, MessageSquare } from 'lucide-react';
 import { chatAiApi } from '@/lib/api/chat-ai';
 import type { ChatMessage, ChatState, ContractData } from '@/types/chat-ai.types';
 import { toast } from 'sonner';
@@ -18,6 +18,54 @@ interface AiChatProps {
   onThreadStart?: (threadId: string) => void;
   onSlotsUpdate?: (slots: Partial<ContractData>) => void;
   onProgressUpdate?: (progress: { filled: number; total: number }) => void;
+  /** When true, show a "My chats" button in the header that calls onShowSessions. */
+  showSessionsButton?: boolean;
+  onShowSessions?: () => void;
+  /** When true, show a spinner + "Saving…" label in the header. */
+  isSaving?: boolean;
+  /** When true, AiChat skips rendering its own header (for layouts that
+   *  render a full-width header above the chat+sidebar row). */
+  hideHeader?: boolean;
+}
+
+/** Stand-alone chat header for layouts that span it across columns. */
+export function ChatHeader({
+  isSaving,
+  showSessionsButton,
+  onShowSessions,
+}: {
+  isSaving?: boolean;
+  showSessionsButton?: boolean;
+  onShowSessions?: () => void;
+}) {
+  return (
+    <div className="px-4 sm:px-6 py-3 sm:py-4 bg-white/85 backdrop-blur-xl backdrop-saturate-150 border-b border-neutral-200/60">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 sm:w-10 sm:h-10 bg-black rounded-xl flex items-center justify-center shrink-0">
+          <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base sm:text-lg font-bold text-neutral-900 truncate">Catering Assistant</h2>
+          <p className="text-xs text-neutral-500 hidden sm:block">Let's plan your perfect event together</p>
+        </div>
+        {isSaving && (
+          <div className="flex items-center gap-1.5 text-neutral-500 text-xs shrink-0">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span className="hidden sm:inline">Saving…</span>
+          </div>
+        )}
+        {showSessionsButton && onShowSessions && (
+          <button
+            onClick={onShowSessions}
+            className="shrink-0 flex items-center gap-1.5 text-xs text-neutral-600 hover:text-black border border-neutral-200 hover:border-neutral-400 bg-white rounded-md px-2.5 py-1 transition-colors"
+          >
+            <MessageSquare className="w-3 h-3" />
+            <span className="hidden sm:inline">My chats</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const STORAGE_KEY = 'tc_chat_sessions';
@@ -380,6 +428,26 @@ function parseListItems(content: string): ListItem[] | null {
   return null;
 }
 
+// Parse an inline "Your current selected X: A ($p), B ($p), ..." phrase into
+// items for read-only display. Used in confirmation/removal ack messages so
+// the user sees their existing selection as cards instead of a text blob.
+const INLINE_SELECTED_RE = /(?:your\s+)?current\s+(?:selected|chosen|picked)\s+(?:dishes|items|menu|appetizers|desserts|selections?):\s*([^\n]+)/i;
+function parseInlineSelectedItems(content: string): ListItem[] | null {
+  const m = INLINE_SELECTED_RE.exec(content);
+  if (!m) return null;
+  const tail = m[1].replace(/\s+Now[\s,].*$/i, '').replace(/\s*\.?\s*$/, '');
+  const parts = tail.split(/,\s*(?![^()]*\))/); // split on commas not inside parens
+  const items: ListItem[] = [];
+  for (const raw of parts) {
+    const seg = raw.trim();
+    if (!seg) continue;
+    const priced = seg.match(/^(.+?)\s*\((\$[\d.,]+[^)]*)\)\s*$/);
+    if (priced) items.push({ name: priced[1].trim(), price: priced[2].trim() });
+    else if (seg.length >= 2 && seg.length <= 80) items.push({ name: seg });
+  }
+  return items.length ? items : null;
+}
+
 // Multi-select: items with prices AND more than 5 options (e.g. appetizers, mains).
 // Single-select: no prices (event types, cake flavors, fillings, buttercreams).
 function isMultiSelect(items: ListItem[], content?: string): boolean {
@@ -394,15 +462,17 @@ function isMultiSelect(items: ListItem[], content?: string): boolean {
 
 // Confirmation messages list selected items — should be read-only, not interactive.
 const CONFIRM_PATTERNS = [
-  /just to confirm.{0,20}(your|the) (menu|selection|order|choices?)/i,
+  /just to confirm/i,
   /your (menu|selection|order|choices?) (includes?|contains?|is)/i,
   /to confirm.{0,30}(your|the) (menu|selection)/i,
   /here'?s? (a )?summary/i,
-  /you('ve| have) (selected|picked|chosen|removed)/i,
+  /you('ve| have) (selected|picked|chosen|removed|added|got|gone with)/i,
   /confirming your/i,
   /here'?s? what you('ve| have) got/i,
   /your (current|updated) (menu|selection)/i,
   /noted.*here'?s/i,
+  /\bsounds? good\??/i,
+  /(perfect|great|awesome|nice|amazing)[,!]?\s+(you('ve| have) (added|picked|got)|that'?s)/i,
 ];
 function isConfirmationMessage(intro: string): boolean {
   return CONFIRM_PATTERNS.some((p) => p.test(intro));
@@ -443,13 +513,19 @@ const IMAGE_ALIAS: Record<string, string> = {
   'tiered-cake': 'wedding-tiered-cakes',
   'tiered-cakes': 'wedding-tiered-cakes',
   'wedding-cake': 'wedding-tiered-cakes',
+  '2-tier-6-and-8-serves-25': 'wedding-tiered-cakes',
+  '2-tier-6-and-8': 'wedding-tiered-cakes',
+  '2-tier-wedding-cake-6-and-8': 'wedding-tiered-cakes',
+  '2-tier': 'wedding-tiered-cakes',
 };
 
 function getMenuImageUrl(name: string): string | null {
   // Convert "Chicken Tikka Skewers ($3.50/pp)" → "chicken-tikka-skewers"
+  // Only strip parens when they contain a price ($); keep flavor lists like
+  // "Meatballs (BBQ, Swedish, Sweet and Sour)" so the slug still matches.
   const clean = name
-    .replace(/\s*\(.*?\)\s*/g, '')        // remove price in parens
-    .replace(/\s*\$[\d.,]+\/?\w*/g, '')   // remove $price
+    .replace(/\s*\([^)]*\$[^)]*\)\s*/g, '') // remove price-parens only
+    .replace(/\s*\$[\d.,]+\/?\w*/g, '')     // remove bare $price
     .trim()
     .toLowerCase()
     .replace(/[&]/g, 'and')
@@ -534,8 +610,10 @@ function MenuItemCard({
   return (
     <button
       onClick={onToggle}
-      className={`relative flex flex-col rounded-xl border-2 overflow-hidden text-left transition-all focus:outline-none ${
-        selected ? 'border-black bg-black/5 shadow-sm' : 'border-neutral-200 bg-white hover:border-neutral-400'
+      className={`relative flex flex-col rounded-xl border-2 overflow-hidden text-left transition-all focus:outline-none bg-white ${
+        selected
+          ? 'border-black ring-2 ring-black/15 shadow-md'
+          : 'border-neutral-200 hover:border-neutral-400'
       }`}
     >
       {imgUrl && !imgError ? (
@@ -576,6 +654,7 @@ function ItemSelector({
   onSelectionChange,
   multi,
   maxSelect,
+  onAutoSend,
 }: {
   items: ListItem[];
   categories?: CategoryGroup[];
@@ -583,6 +662,9 @@ function ItemSelector({
   onSelectionChange: (names: string[]) => void;
   multi: boolean;
   maxSelect?: number;
+  /** If set and `multi` is false, clicking an option immediately sends that
+   *  choice instead of waiting for the user to press Send. */
+  onAutoSend?: (name: string) => void;
 }) {
   const toggle = (name: string) => {
     if (multi) {
@@ -590,8 +672,16 @@ function ItemSelector({
       if (isSelected) {
         onSelectionChange(selected.filter((n) => n !== name));
       } else if (!maxSelect || selected.length < maxSelect) {
-        onSelectionChange([...selected, name]);
+        const next = [...selected, name];
+        onSelectionChange(next);
+        // If this selection just filled the required count, auto-send after
+        // a brief moment so the user can still back out if it was a misclick.
+        if (onAutoSend && maxSelect && next.length === maxSelect) {
+          window.setTimeout(() => onAutoSend(next.join(', ')), 450);
+        }
       }
+    } else if (onAutoSend) {
+      onAutoSend(name);
     } else {
       onSelectionChange(selected.includes(name) ? [] : [name]);
     }
@@ -616,9 +706,11 @@ function ItemSelector({
             </div>
           ))}
           {selected.length > 0 && (
-            <p className="text-xs text-neutral-500 mt-2">
-              <span className="font-medium text-neutral-800">{selected.length}</span>
-              {maxSelect ? `/${maxSelect}` : ''} selected — hit Send to confirm
+            <p className="mt-2">
+              <span className="inline-block bg-white/85 backdrop-blur-sm rounded-md px-2 py-0.5 text-xs text-neutral-700 shadow-sm">
+                <span className="font-semibold text-neutral-900">{selected.length}</span>
+                {maxSelect ? `/${maxSelect}` : ''} selected — hit Send to confirm
+              </span>
             </p>
           )}
         </div>
@@ -650,7 +742,11 @@ function ItemSelector({
         ))}
       </div>
       {selected.length > 0 && (
-        <p className="text-xs text-neutral-500 mt-1">Hit Send to confirm</p>
+        <p className="mt-1">
+          <span className="inline-block bg-white/85 backdrop-blur-sm rounded-md px-2 py-0.5 text-xs text-neutral-700 shadow-sm">
+            Hit Send to confirm
+          </span>
+        </p>
       )}
     </div>
   );
@@ -977,7 +1073,7 @@ function DatePickerCalendar({ value, onChange, onConfirm, disabled }: {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function AiChat({ projectId, authorId, userId, userName = 'You', initialThreadId, onComplete, onThreadStart, onSlotsUpdate, onProgressUpdate }: AiChatProps) {
+export function AiChat({ projectId, authorId, userId, userName = 'You', initialThreadId, onComplete, onThreadStart, onSlotsUpdate, onProgressUpdate, showSessionsButton, onShowSessions, isSaving, hideHeader }: AiChatProps) {
   const [state, setState] = useState<ChatState>({
     messages: [],
     isLoading: false,
@@ -1010,8 +1106,16 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
   const lastSlotsFilled = useRef(0);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [state.messages]);
+    // Scroll immediately, then again after the card grid and any lazy images
+    // have had a chance to expand the list height. Without the second pass,
+    // new messages that render wider cards (menu, desserts) get cut off.
+    const el = messagesEndRef.current;
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth' });
+    const t1 = window.setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 120);
+    const t2 = window.setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 420);
+    return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
+  }, [state.messages, state.isLoading]);
 
   // Subtle pop sound when a new AI response arrives.
   const lastAiCountRef = useRef(0);
@@ -1460,19 +1564,14 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
         onClose={() => setCommandDialog({ isOpen: false, command: null })}
         onSelect={handleCommandSelect}
       />
-      <div className="flex flex-col h-full bg-white">
-        {/* Header */}
-        <div className="border-b border-neutral-200 px-4 sm:px-6 py-3 sm:py-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-black rounded-xl flex items-center justify-center shrink-0">
-              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-            </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-neutral-900">Catering Assistant</h2>
-              <p className="text-xs text-neutral-500 hidden sm:block">Let's plan your perfect event together</p>
-            </div>
-          </div>
-        </div>
+      <div className="flex flex-col h-full">
+        {!hideHeader && (
+          <ChatHeader
+            isSaving={isSaving}
+            showSessionsButton={showSessionsButton}
+            onShowSessions={onShowSessions}
+          />
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4">
@@ -1501,7 +1600,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       </div>
                       <span className="text-[10px] text-neutral-400">AI</span>
                     </div>
-                    <div className="max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 bg-neutral-100 text-neutral-900">
+                    <div className="tc-bubble-ai max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-neutral-900">
                       <MarkdownMessage content={intro} />
                       <span className="text-xs mt-1 block text-neutral-400">{time}</span>
                     </div>
@@ -1521,7 +1620,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       </div>
                       <span className="text-[10px] text-neutral-400">AI</span>
                     </div>
-                    <div className="max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 bg-neutral-100 text-neutral-900">
+                    <div className="tc-bubble-ai max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-neutral-900">
                       <MarkdownMessage content={msg.content} />
                       <span className="text-xs mt-1 block text-neutral-400">{time}</span>
                     </div>
@@ -1530,8 +1629,12 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
               }
 
               const multi = isMultiSelect(listItems, msg.content);
-              // Only cap desserts (items with no prices but exactly the dessert count ≤8)
-              const isDesserts = !listItems.some((i) => i.price) && listItems.length <= 8 && listItems.length > 6;
+              // Cap desserts at 4: detect by intro text OR by shape of the list.
+              const isDesserts =
+                /\bdesserts?\b/i.test(intro) ||
+                /\bsweet(en)?\b/i.test(intro) ||
+                /pick (up to|at most)?\s*4\b/i.test(msg.content) ||
+                (!listItems.some((i) => i.price) && listItems.length <= 8 && listItems.length > 6);
               const maxSelect = isDesserts ? 4 : undefined;
 
               return (
@@ -1555,8 +1658,13 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       onSelectionChange={handleMenuSelectionChange}
                       multi={multi}
                       maxSelect={maxSelect}
+                      /* Single-select OR multi-select with a strict maxSelect
+                       *  (e.g. desserts capped at 4) auto-sends. Menu and
+                       *  appetizers are multi WITHOUT maxSelect → no auto-send,
+                       *  user must press Send manually. */
+                      onAutoSend={(value) => handleSendMessage(value)}
                     />
-                    <span className="text-xs text-neutral-400 mt-1 block">{time}</span>
+                    <span className="mt-1 inline-block bg-white/85 backdrop-blur-sm rounded-md px-2 py-0.5 text-xs text-neutral-600 shadow-sm">{time}</span>
                   </div>
                 </div>
               );
@@ -1565,7 +1673,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
             if (msg.role === 'user') {
               return (
                 <div key={idx} className="flex justify-end gap-2.5 tc-msg-user">
-                  <div className="max-w-[85%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 bg-black text-white">
+                  <div className="tc-bubble-user max-w-[85%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-white">
                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                     <span className="text-xs mt-1 block text-neutral-400">{time}</span>
                   </div>
@@ -1587,7 +1695,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                   </div>
                   <span className="text-[10px] text-neutral-400">AI</span>
                 </div>
-                <div className="max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 bg-neutral-100 text-neutral-900">
+                <div className="tc-bubble-ai max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-neutral-900">
                   <MarkdownMessage content={msg.content} />
                   <span className="text-xs mt-1 block text-neutral-400">{time}</span>
                 </div>
@@ -1645,18 +1753,18 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           };
 
           return (
-            <div className={`border-t border-neutral-200 px-3 sm:px-6 py-3 sm:py-4 bg-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
-              <div className="flex items-end gap-2 sm:gap-3">
+            <div className={`px-3 sm:px-6 py-3 sm:py-4 bg-black text-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
+              <div className="flex items-end gap-2 sm:gap-3 min-w-0">
                 {isNameMode ? (
-                  /* First name + Last name split input */
-                  <div className="flex-1 flex gap-2">
+                  /* First name + Last name split input — stacked on mobile */
+                  <div className="flex-1 min-w-0 flex flex-col sm:flex-row gap-2">
                     <input
                       type="text"
                       value={firstName}
                       onChange={(e) => setFirstName(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && firstName.trim() && lastName.trim()) { e.preventDefault(); handleSpecialSend(); } }}
                       placeholder="First name"
-                      className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                      className="w-full sm:flex-1 min-w-0 border border-neutral-300 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400"
                       autoFocus
                       disabled={state.isLoading}
                     />
@@ -1666,18 +1774,18 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       onChange={(e) => setLastName(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && firstName.trim() && lastName.trim()) { e.preventDefault(); handleSpecialSend(); } }}
                       placeholder="Last name"
-                      className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                      className="w-full sm:flex-1 min-w-0 border border-neutral-300 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400"
                       disabled={state.isLoading}
                     />
                   </div>
                 ) : isPhoneMode ? (
                   /* Phone input with country code */
-                  <div className="flex-1 flex items-center border border-neutral-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-black focus-within:border-transparent">
+                  <div className="flex-1 flex items-center border border-neutral-300 rounded-xl overflow-hidden bg-white focus-within:ring-2 focus-within:ring-white focus-within:border-white">
                     <div className="relative shrink-0">
                       <select
                         value={COUNTRY_CODES.indexOf(countryCode)}
                         onChange={(e) => setCountryCode(COUNTRY_CODES[Number(e.target.value)])}
-                        className="appearance-none bg-neutral-50 border-r border-neutral-200 pl-3 pr-7 py-3 text-sm text-neutral-700 focus:outline-none cursor-pointer h-full"
+                        className="appearance-none bg-neutral-50 border-r border-neutral-200 pl-3 pr-7 py-3 text-sm text-neutral-900 focus:outline-none cursor-pointer h-full"
                       >
                         {COUNTRY_CODES.map((c, i) => (
                           <option key={`${c.code}-${c.name}`} value={i}>
@@ -1694,7 +1802,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
                       placeholder="0000000000"
                       maxLength={10}
-                      className="flex-1 px-3 py-3 text-sm focus:outline-none bg-white"
+                      className="flex-1 px-3 py-3 text-sm focus:outline-none bg-white text-neutral-900 placeholder:text-neutral-400"
                       disabled={state.isLoading}
                     />
                   </div>
@@ -1706,7 +1814,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
                     placeholder="you@example.com"
-                    className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                    className="flex-1 border border-neutral-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400"
                     disabled={state.isLoading}
                   />
                 ) : isDateMode ? (
@@ -1728,7 +1836,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       min={10}
                       max={10000}
                       placeholder="Number of guests"
-                      className="flex-1 border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                      className="flex-1 border border-neutral-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400"
                       disabled={state.isLoading}
                     />
                     <button
@@ -1750,7 +1858,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                     }}
                     onKeyDown={handleKeyDown}
                     placeholder={activeMenuMsgIdx !== null ? 'Select above or type to make changes…' : 'Type your message…'}
-                    className="flex-1 resize-none border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent min-h-[52px] max-h-[120px]"
+                    className="flex-1 resize-none border border-neutral-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400 min-h-[52px] max-h-[120px]"
                     rows={1}
                     disabled={state.isLoading}
                   />
@@ -1758,13 +1866,13 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                 <button
                   onClick={specialMode ? handleSpecialSend : () => handleSendMessage()}
                   disabled={state.isLoading || (isNameMode ? (!firstName.trim() || !lastName.trim()) : (isEmailMode ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) : (isGuestMode ? (!input.trim() || Number(input) < 10) : !input.trim())))}
-                  className="tc-btn-glossy p-3 rounded-xl shrink-0"
+                  className="bg-white text-black w-12 h-[52px] flex items-center justify-center rounded-xl shrink-0 hover:bg-neutral-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-[0_4px_14px_rgba(255,255,255,0.18)]"
                 >
                   {state.isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                 </button>
               </div>
               <div className="flex items-center justify-center gap-3 mt-2">
-                <p className="text-xs text-neutral-400 text-center">
+                <p className="text-xs font-medium text-neutral-300 text-center">
                   {isNameMode
                     ? 'Enter your first and last name'
                     : isPhoneMode

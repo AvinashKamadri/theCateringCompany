@@ -13,6 +13,19 @@ from database.db_manager import load_menu_by_category
 from tools.modification_detection import _format_recent_messages
 
 
+_DONE_PHRASES = frozenset({
+    "no", "nope", "nah", "nah thanks", "no thanks", "none", "nothing",
+    "im good", "i'm good", "good", "all good", "all set", "i'm set", "im set",
+    "that's it", "thats it", "that's all", "thats all", "done", "finish",
+    "finished", "finalize", "move on", "next", "skip", "ok", "okay",
+    "yes good", "looks good", "sounds good", "perfect", "great",
+})
+
+
+def _is_done(msg: str) -> bool:
+    return msg.strip().lower().rstrip("!.?,") in _DONE_PHRASES
+
+
 def _slots_context(state):
     return {k: v["value"] for k, v in state["slots"].items() if v.get("filled") and not k.startswith("__")}
 
@@ -28,13 +41,16 @@ async def ask_utensils_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    wants_utensils = await llm_extract(
-        "The customer was asked if they want utensils for their event. "
-        "Classify their answer. 'unclear' is for ambiguous like 'maybe', 'not sure', 'idk', "
-        "'what do you recommend'.\n\nReturn ONLY: yes, no, or unclear",
-        user_msg
-    )
-    intent_norm = norm_llm(wants_utensils)
+    if _is_done(user_msg):
+        intent_norm = "no"
+    else:
+        wants_utensils = await llm_extract(
+            "The customer was asked if they want utensils for their event. "
+            "Classify their answer. 'unclear' is for ambiguous like 'maybe', 'not sure', 'idk', "
+            "'what do you recommend'.\n\nReturn ONLY: yes, no, or unclear",
+            user_msg
+        )
+        intent_norm = norm_llm(wants_utensils)
     if intent_norm == "unclear":
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer gave an ambiguous answer about utensils. "
@@ -128,15 +144,18 @@ async def ask_desserts_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # Use LLM to detect intent — handles slang, hype, enthusiasm naturally
-    intent = await llm_extract(
-        "Does this message mean the person wants desserts, or are they declining/skipping desserts? "
-        "Consider any form of enthusiasm, excitement, or affirmation as 'yes'. "
-        "Only return 'no' if they clearly decline (e.g. 'no thanks', 'skip', 'pass', 'none'). "
-        "Return ONLY: yes or no",
-        user_msg
-    )
-    wants_desserts = norm_llm(intent) != "no"
+    # Short-circuit: unambiguous done phrases mean no desserts
+    if _is_done(user_msg):
+        wants_desserts = False
+    else:
+        intent = await llm_extract(
+            "Does this message mean the person wants desserts, or are they declining/skipping desserts? "
+            "Consider any form of enthusiasm, excitement, or affirmation as 'yes'. "
+            "Only return 'no' if they clearly decline (e.g. 'no thanks', 'skip', 'pass', 'none', 'im good'). "
+            "Return ONLY: yes or no",
+            user_msg
+        )
+        wants_desserts = norm_llm(intent) != "no"
 
     if wants_desserts:
         # Python builds the dessert list — LLM only generates intro
@@ -174,14 +193,18 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
 
     # If user wants to skip, move on
     ctx = _recent_ctx(state)
-    skip_check = await llm_extract(
-        "The customer was shown a dessert menu and asked to pick items. "
-        "Are they skipping/declining desserts, or making selections?\n\n"
-        f"Recent conversation:\n{ctx}\n\n"
-        "Return ONLY: skip or selecting",
-        user_msg
-    )
-    if norm_llm(skip_check) == "skip":
+    if _is_done(user_msg):
+        skip_result = "skip"
+    else:
+        skip_check = await llm_extract(
+            "The customer was shown a dessert menu and asked to pick items. "
+            "Are they skipping/declining desserts, or making selections?\n\n"
+            f"Recent conversation:\n{ctx}\n\n"
+            "Return ONLY: skip or selecting",
+            user_msg
+        )
+        skip_result = norm_llm(skip_check)
+    if skip_result == "skip":
         fill_slot(state["slots"], "desserts", "no")
         context = f"No desserts. Slots: {_slots_context(state)}"
         response = await llm_respond(
@@ -432,21 +455,27 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
             last_ai_msg = msg.content
             break
 
-    ctx = _recent_ctx(state)
-    intent = await llm_extract(
-        "The AI just asked the customer if they want to add more desserts or if they're done. "
-        "Based on the exact question + customer reply, determine their intent.\n\n"
-        "Rules:\n"
-        "- 'yes', 'yeah', 'yep', 'sure' → more (they want to add more)\n"
-        "- 'no', 'nope', 'that's it', 'nothing else', 'all good', 'done' → done\n"
-        "- Naming specific dessert items → more\n"
-        "- Ambiguous one-word replies → lean 'more' if question was 'anything else?' (positive framing)\n\n"
-        f"Recent conversation:\n{ctx}\n\n"
-        f"AI asked: {last_ai_msg}\n"
-        f"Customer replied: {user_msg}\n\n"
-        "Return ONLY: more or done",
-        user_msg
-    )
+    # Short-circuit: unambiguous "done" phrases bypass the LLM entirely
+    if _is_done(user_msg):
+        intent_val = "done"
+    else:
+        ctx = _recent_ctx(state)
+        raw = await llm_extract(
+            "The AI just asked the customer if they want to add more desserts or if they're done. "
+            "Based on the exact question + customer reply, determine their intent.\n\n"
+            "Rules:\n"
+            "- 'yes', 'yeah', 'yep', 'sure' → more (they want to add more)\n"
+            "- 'no', 'nope', 'that's it', 'nothing else', 'all good', 'done', 'im good', 'i'm good' → done\n"
+            "- Naming specific dessert items → more\n"
+            "- Ambiguous one-word replies → lean 'done' unless the question was 'want more?' style\n\n"
+            f"Recent conversation:\n{ctx}\n\n"
+            f"AI asked: {last_ai_msg}\n"
+            f"Customer replied: {user_msg}\n\n"
+            "Return ONLY: more or done",
+            user_msg
+        )
+        intent_val = raw.strip().lower()
+    intent = intent_val
     if intent.strip().lower() != "more":
         context = f"Desserts finalized. Slots: {_slots_context(state)}"
         response = await llm_respond(
@@ -478,15 +507,18 @@ async def ask_rentals_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extraction = await llm_extract(
-        "The customer was asked about rentals. Available options: 1=Linens, 2=Tables, 3=Chairs. "
-        "The customer may type numbers, names, or both. "
-        "Map: 1/linens → Linens, 2/tables → Tables, 3/chairs → Chairs. "
-        "Return ONLY a comma-separated list (e.g. 'Linens, Tables'). "
-        "If they gave a vague answer like 'yes', 'sure', 'okay' WITHOUT specifying which ones, return ASK. "
-        "Return NONE if they clearly don't want any.",
-        user_msg
-    )
+    if _is_done(user_msg):
+        extraction = "NONE"
+    else:
+        extraction = await llm_extract(
+            "The customer was asked about rentals. Available options: 1=Linens, 2=Tables, 3=Chairs. "
+            "The customer may type numbers, names, or both. "
+            "Map: 1/linens → Linens, 2/tables → Tables, 3/chairs → Chairs. "
+            "Return ONLY a comma-separated list (e.g. 'Linens, Tables'). "
+            "If they gave a vague answer like 'yes', 'sure', 'okay' WITHOUT specifying which ones, return ASK. "
+            "Return NONE if they clearly don't want any.",
+            user_msg
+        )
     if extraction.strip().upper() == "NONE":
         fill_slot(state["slots"], "rentals", "no")
     elif extraction.strip().upper() == "ASK":

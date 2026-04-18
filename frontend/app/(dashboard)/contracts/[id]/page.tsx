@@ -41,32 +41,32 @@ const STATUS_CONFIG: Record<string, { label: string; icon: any; style: string }>
   pending_staff_approval: {
     label: 'Pending Staff Approval',
     icon: Clock,
-    style: 'bg-yellow-50 text-yellow-800 border-yellow-200',
+    style: 'bg-gradient-to-br from-amber-50 to-amber-100 text-amber-900 border-amber-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
   approved: {
     label: 'Approved — Sending to Client',
     icon: CheckCircle2,
-    style: 'bg-blue-50 text-blue-800 border-blue-200',
+    style: 'bg-gradient-to-br from-sky-50 to-sky-100 text-sky-900 border-sky-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
   sent: {
     label: 'Sent for Signature',
     icon: FileText,
-    style: 'bg-purple-50 text-purple-800 border-purple-200',
+    style: 'bg-gradient-to-br from-violet-50 to-violet-100 text-violet-900 border-violet-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
   signed: {
     label: 'Signed',
     icon: CheckCircle2,
-    style: 'bg-green-50 text-green-800 border-green-200',
+    style: 'bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-900 border-emerald-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
   rejected: {
     label: 'Rejected',
     icon: AlertCircle,
-    style: 'bg-red-50 text-red-800 border-red-200',
+    style: 'bg-gradient-to-br from-red-50 to-red-100 text-red-900 border-red-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
   draft: {
     label: 'Draft',
     icon: FileText,
-    style: 'bg-gray-50 text-gray-700 border-gray-200',
+    style: 'bg-gradient-to-br from-neutral-50 to-neutral-100 text-neutral-800 border-neutral-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
 };
 
@@ -376,7 +376,7 @@ export default function ContractDetailPage() {
 
       {/* Header */}
       <div className="bg-white border-b border-neutral-200">
-        <div className="max-w-6xl mx-auto px-6 py-5">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-5">
           <button onClick={() => router.back()} className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-900 mb-4 transition-colors">
             <ArrowLeft className="h-3.5 w-3.5" /> Back
           </button>
@@ -397,7 +397,7 @@ export default function ContractDetailPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-6">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 py-6">
 
         {/* Staff review panel — full width */}
         {isStaff && isPending && (
@@ -418,7 +418,7 @@ export default function ContractDetailPage() {
                   {previewing ? 'Generating…' : contract.pdf_path ? 'Regenerate PDF' : 'Preview PDF'}
                 </button>
                 <button onClick={handleApprove} disabled={approving || !hasPricingSaved} title={!hasPricingSaved ? 'Save pricing first' : undefined}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-black text-white rounded-xl hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold transition-colors">
+                  className="tc-btn-glossy flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold">
                   {approving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsUp className="h-3.5 w-3.5" />}
                   Approve & Send
                 </button>
@@ -646,7 +646,7 @@ export default function ContractDetailPage() {
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Actions</p>
               {isStaff && contract.pdf_path && (
                 <a href={`/api/contracts/${contract.id}/pdf`} target="_blank" rel="noopener noreferrer"
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-white rounded-xl hover:bg-neutral-800 transition text-sm font-medium">
+                  className="tc-btn-glossy w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium">
                   <FileText className="h-4 w-4" /> View PDF
                 </a>
               )}

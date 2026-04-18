@@ -48,7 +48,12 @@ async def get_main_dish_items() -> tuple[list[dict], dict]:
 
 
 async def get_dessert_items(is_wedding: bool = False) -> list[dict]:
-    """Get flat list of dessert items, expanding mini desserts bundle."""
+    """Get flat list of dessert items, expanding mini desserts bundle.
+
+    Wedding cakes are intentionally excluded — they are collected via a
+    dedicated flow ("Would you like a wedding cake?") in the frontend and
+    should not appear inside the dessert picker.
+    """
     menu = await load_menu_by_category()
     items = []
     for cat_name, cat_items in menu.items():
@@ -63,10 +68,6 @@ async def get_dessert_items(is_wedding: bool = False) -> list[dict]:
                                           "price_type": item["price_type"]})
                 else:
                     items.append(item)
-        elif "cake" in cat_lower:
-            # Always include cakes (e.g. Wedding Cakes) in the dessert menu,
-            # regardless of event type — customers ask for cake at birthdays too.
-            items.extend(cat_items)
     return items
 
 
@@ -332,11 +333,13 @@ async def get_appetizer_context(state) -> str:
 
 
 async def get_dessert_context(state) -> str:
-    """Fetch dessert items from DB — includes Coffee and Desserts + Wedding Cakes for weddings."""
+    """Fetch dessert items from DB — Desserts only.
+
+    Wedding cakes are collected via a dedicated frontend flow and must not
+    appear in the dessert picker.
+    """
     menu = await load_menu_by_category()
     slots = _slots_context(state)
-    event_type = (slots.get("event_type") or "").lower()
-    is_wedding = "wedding" in event_type
 
     dessert_items = []
     for cat_name, items in menu.items():
@@ -352,8 +355,6 @@ async def get_dessert_context(state) -> str:
                                                   "price_type": item["price_type"]})
                 else:
                     dessert_items.append(item)
-        elif is_wedding and "cake" in cat_lower:
-            dessert_items.extend(items)
 
     formatted = _format_items_list(dessert_items) if dessert_items else "No dessert items available."
     return (
@@ -808,34 +809,22 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    MAX_REVISIONS = 3
-    total_revisions = _count_slot_revisions(state["slots"], "selected_dishes", "appetizers")
-
     user_lower = user_msg.lower()
 
     # Detect if the user is directly requesting a change with specific details
     direct_change_check = await llm_extract(
         "The customer was asked if they want to make changes to their menu selections. "
-        "Are they directly requesting a specific change (add, remove, swap, replace an item) "
-        "or are they just saying yes/no/looks good?\n\n"
+        "Are they naming a SPECIFIC ITEM to add, remove, swap, or replace (e.g. 'remove Crab Cakes', 'add BBQ Chicken')? "
+        "Return 'direct_change' ONLY if a specific menu item name is mentioned. "
+        "Vague phrases like 'make changes', 'yes changes', 'no make changes', 'want to change' "
+        "do NOT count — return 'response' for those.\n\n"
         "Return ONLY: direct_change or response",
         user_msg
     )
     directly_requesting_change = direct_change_check.strip().lower() == "direct_change"
 
-    # If the user directly requested a change WITH details already in the message,
-    # forward immediately to collect_menu_changes_node — no need to ask what they want.
+    # If the user directly requested a change WITH details, forward to collect_menu_changes.
     if directly_requesting_change:
-        if total_revisions >= MAX_REVISIONS:
-            response = await llm_respond(
-                f"{SYSTEM_PROMPT}\n\n"
-                "The customer wants more changes but the menu has already been revised several times. "
-                "Politely let them know we'll go with the current selections and move on.",
-                f"Current menu: {_slots_context(state)}"
-            )
-            state["current_node"] = "ask_desserts"
-            state["messages"] = add_ai_message(state, response)
-            return state
         return await collect_menu_changes_node(state)
 
     # Find the last AI message to understand the exact question framing
@@ -872,14 +861,7 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
     if intent_val == "done":
         intent_val = "keep"
     if intent_val == "change":
-        if total_revisions >= MAX_REVISIONS:
-            response = await llm_respond(
-                f"{SYSTEM_PROMPT}\n\n"
-                "Menu revised several times already. Let them know we'll finalize and move on.",
-                f"Current menu: {_slots_context(state)}"
-            )
-            state["current_node"] = "ask_desserts"
-        else:
+        if True:
             # Show the menu WITH current selection highlighted — route to collect_menu_changes
             # so picking an item does add/remove rather than wiping the full selection.
             current_dishes = get_slot_value(state["slots"], "selected_dishes") or ""
@@ -981,6 +963,12 @@ async def collect_menu_changes_node(state: ConversationState) -> ConversationSta
     # --- Step 3: Persist updated slot ---
     if resolved_text and resolved_text != current_value:
         fill_slot(state["slots"], slot_name, resolved_text)
+
+    # Increment revision counter (used by ask_menu_changes_node cap check)
+    rev_count = state["slots"].get("_menu_revision_count", {}).get("value", 0)
+    state["slots"]["_menu_revision_count"] = {
+        "value": rev_count + 1, "filled": True, "modified_at": None, "modification_history": []
+    }
 
     # Always log the request in menu_notes for traceability
     existing_notes = get_slot_value(state["slots"], "menu_notes") or ""

@@ -63,7 +63,7 @@ _CORRECTION_SIGNALS = re.compile(
     r'correction|oh wait|no wait|sorry,?\s+i|i made a mistake|'
     r'i forgot to|i need to (change|update|fix|edit|add|remove|delete)|'
     r'make that|scratch that|instead of|rather than|replace .+ with|'
-    r'revise|modify|clear|wipe|drop|skip)\b',
+    r'revise|modify|clear|wipe|drop(?!.?off)|skip)\b',
     re.IGNORECASE,
 )
 

@@ -816,8 +816,10 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
     # Detect if the user is directly requesting a change with specific details
     direct_change_check = await llm_extract(
         "The customer was asked if they want to make changes to their menu selections. "
-        "Are they directly requesting a specific change (add, remove, swap, replace an item) "
-        "or are they just saying yes/no/looks good?\n\n"
+        "Are they naming a SPECIFIC ITEM to add, remove, swap, or replace (e.g. 'remove Crab Cakes', 'add BBQ Chicken')? "
+        "Return 'direct_change' ONLY if a specific menu item name is mentioned. "
+        "Vague phrases like 'make changes', 'yes changes', 'no make changes', 'want to change' "
+        "do NOT count — return 'response' for those.\n\n"
         "Return ONLY: direct_change or response",
         user_msg
     )

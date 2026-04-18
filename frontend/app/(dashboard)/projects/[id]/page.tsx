@@ -65,7 +65,7 @@ const ROLE_BADGE: Record<CollaboratorRole, string> = {
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const projectId = params.id as string;
+  const projectId = params?.id as string;
   const currentUser = useAuthStore((s) => s.user);
 
   const [project, setProject] = useState<Project | null>(null);

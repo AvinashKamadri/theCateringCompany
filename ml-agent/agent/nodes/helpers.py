@@ -15,11 +15,27 @@ logger = logging.getLogger(__name__)
 # Project ID is set per-conversation by the orchestrator
 _current_project_id: str | None = None
 
+# Full message history for the current turn — seeded by the orchestrator so
+# downstream llm_respond calls can grab the rolling context without each
+# node having to thread `messages` through manually.
+_current_messages: list | None = None
+
 
 def set_current_project_id(project_id: str | None):
     """Set the project ID for AI generation logging in this conversation turn."""
     global _current_project_id
     _current_project_id = project_id
+
+
+def set_current_messages(messages: list | None):
+    """Seed the conversation history for the current turn."""
+    global _current_messages
+    _current_messages = messages
+
+
+def get_current_messages() -> list | None:
+    """Return the conversation history seeded for the current turn, if any."""
+    return _current_messages
 
 
 def get_last_human_message(messages) -> str:

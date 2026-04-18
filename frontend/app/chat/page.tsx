@@ -271,10 +271,10 @@ function AiIntakeContent() {
   const [isSaving, setIsSaving] = useState(false);
   const [draftProjectId, setDraftProjectId] = useState<string | undefined>(undefined);
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
-    searchParams.get('thread') ?? undefined
+    searchParams?.get('thread') ?? undefined
   );
   const [view, setView] = useState<'picker' | 'chat'>(
-    searchParams.get('thread') ? 'chat' : 'picker'
+    searchParams?.get('thread') ? 'chat' : 'picker'
   );
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);

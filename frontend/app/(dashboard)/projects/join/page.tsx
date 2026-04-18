@@ -22,7 +22,7 @@ function extractCode(input: string): string {
 function JoinProjectContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [input, setInput] = useState(searchParams.get("code") ?? "");
+  const [input, setInput] = useState(searchParams?.get("code") ?? "");
   const [preview, setPreview] = useState<{ id: string; title: string; status: string } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -30,7 +30,7 @@ function JoinProjectContent() {
 
   // Auto-preview when code arrives via URL
   useEffect(() => {
-    const urlCode = searchParams.get("code");
+    const urlCode = searchParams?.get("code");
     if (urlCode) {
       setPreviewing(true);
       projectsApi.lookupByCode(urlCode.trim()).then((result) => {

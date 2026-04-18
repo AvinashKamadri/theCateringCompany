@@ -14,7 +14,10 @@
       "Bash(grep -E \"\\\\.py$\")",
       "Bash(python -c \"import ast; [print\\(f'{f}: OK'\\) or ast.parse\\(open\\(f\\).read\\(\\)\\) for f in ['agent/routing.py', 'agent/nodes/check_modifications.py', 'agent/nodes/menu.py', 'agent/nodes/addons.py']]\")",
       "Bash(python -c ' *)",
-      "Bash(git rebase *)"
+      "Bash(git rebase *)",
+      "Bash(npx tsc *)",
+      "Bash(docker compose *)",
+      "Bash(docker network *)"
     ]
   }
 }

@@ -4,6 +4,7 @@ FastAPI server wrapping the catering intake agent.
 # Code version — bump this to verify server is running latest code
 _CODE_VERSION = "v6-2026-03-14"
 
+import os
 import uuid
 from contextlib import asynccontextmanager
 
@@ -46,9 +47,14 @@ async def get_version():
     """Check which code version the server is running."""
     return {"version": _CODE_VERSION}
 
+_cors_origins_env = os.getenv("CORS_ORIGIN", "").strip()
+_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] or [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

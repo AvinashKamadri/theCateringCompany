@@ -62,7 +62,7 @@ export function AppNav() {
           {navItems.map((item) => {
             const isActive = item.href === '/chat'
               ? pathname === '/chat'
-              : pathname.startsWith(item.href);
+              : !!pathname?.startsWith(item.href);
             return (
               <Link
                 key={item.name}
@@ -112,7 +112,7 @@ export function AppNav() {
             {navItems.map((item) => {
               const isActive = item.href === '/chat'
                 ? pathname === '/chat'
-                : pathname.startsWith(item.href);
+                : !!pathname?.startsWith(item.href);
               return (
                 <Link
                   key={item.name}

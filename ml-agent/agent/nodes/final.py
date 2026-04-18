@@ -10,6 +10,7 @@ from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
     get_last_human_message, add_ai_message, llm_extract, llm_respond, norm_llm,
 )
+from agent.nodes.addons import _is_done
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 from tools.pricing import calculate_event_pricing
 from config.business_rules import config
@@ -43,14 +44,17 @@ async def ask_special_requests_node(state: ConversationState) -> ConversationSta
         return state
 
     # Nothing noted yet — classify the user's current response
-    intent = await llm_extract(
-        "The customer was asked if they have any special requests for their event. "
-        "Did they: (a) provide a specific request in their message, "
-        "(b) say yes but not specify what, or (c) decline/say no?\n\n"
-        "Return ONLY: request, yes, or no",
-        user_msg
-    )
-    intent_val = norm_llm(intent)
+    if _is_done(user_msg):
+        intent_val = "no"
+    else:
+        intent = await llm_extract(
+            "The customer was asked if they have any special requests for their event. "
+            "Did they: (a) provide a specific request in their message, "
+            "(b) say yes but not specify what, or (c) decline/say no?\n\n"
+            "Return ONLY: request, yes, or no",
+            user_msg
+        )
+        intent_val = norm_llm(intent)
 
     if intent_val == "request":
         fill_slot(state["slots"], "special_requests", user_msg.strip())
@@ -94,14 +98,18 @@ async def collect_special_requests_node(state: ConversationState) -> Conversatio
     drinks_already_noted = any(kw in existing_lower for kw in _DRINKS_KEYWORDS)
 
     # Classify the current message
-    is_adding = await llm_extract(
-        "The customer was asked if they have more special requests. "
-        "Are they adding another specific request in this message, or are they done/confirming? "
-        "Return ONLY: add or done",
-        user_msg
-    )
+    if _is_done(user_msg):
+        adding_val = "done"
+    else:
+        is_adding = await llm_extract(
+            "The customer was asked if they have more special requests. "
+            "Are they adding another specific request in this message, or are they done/confirming? "
+            "Return ONLY: add or done",
+            user_msg
+        )
+        adding_val = norm_llm(is_adding)
 
-    if norm_llm(is_adding) != "add":
+    if adding_val != "add":
         if not existing or existing == "none":
             fill_slot(state["slots"], "special_requests", "none")
 
@@ -164,14 +172,17 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
 
     # First-turn Yes/No gate — before anything is stored.
     if not existing_dietary and not in_details_phase:
-        intent = await llm_extract(
-            "The customer was asked if they have any health or dietary concerns. "
-            "Did they: (a) decline / say no, (b) say yes but not specify, "
-            "or (c) already describe a specific concern in their reply?\n\n"
-            "Return ONLY: no, yes, or detail",
-            user_msg,
-        )
-        intent_val = norm_llm(intent)
+        if _is_done(user_msg):
+            intent_val = "no"
+        else:
+            intent = await llm_extract(
+                "The customer was asked if they have any health or dietary concerns. "
+                "Did they: (a) decline / say no, (b) say yes but not specify, "
+                "or (c) already describe a specific concern in their reply?\n\n"
+                "Return ONLY: no, yes, or detail",
+                user_msg,
+            )
+            intent_val = norm_llm(intent)
         if intent_val == "no":
             fill_slot(state["slots"], "dietary_concerns", "none")
             response = await llm_respond(
@@ -305,13 +316,17 @@ async def ask_anything_else_node(state: ConversationState) -> ConversationState:
 
     # Only route to collect_anything_else if user is explicitly naming/adding something.
     # Default to done — vague/ambiguous responses proceed to followup.
-    intent = await llm_extract(
-        "The customer was asked if they need anything else for their event. "
-        "Are they explicitly naming or requesting something new to add, or are they done? "
-        "Return ONLY: add or done",
-        user_msg
-    )
-    if norm_llm(intent) == "add":
+    if _is_done(user_msg):
+        anything_intent = "done"
+    else:
+        intent = await llm_extract(
+            "The customer was asked if they need anything else for their event. "
+            "Are they explicitly naming or requesting something new to add, or are they done? "
+            "Return ONLY: add or done",
+            user_msg
+        )
+        anything_intent = norm_llm(intent)
+    if anything_intent == "add":
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['ask_anything_else']}",
             f"Customer wants to add something. Ask what else they need.\nSlots: {_slots_context(state)}"

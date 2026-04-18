@@ -41,13 +41,16 @@ async def ask_utensils_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    wants_utensils = await llm_extract(
-        "The customer was asked if they want utensils for their event. "
-        "Classify their answer. 'unclear' is for ambiguous like 'maybe', 'not sure', 'idk', "
-        "'what do you recommend'.\n\nReturn ONLY: yes, no, or unclear",
-        user_msg
-    )
-    intent_norm = norm_llm(wants_utensils)
+    if _is_done(user_msg):
+        intent_norm = "no"
+    else:
+        wants_utensils = await llm_extract(
+            "The customer was asked if they want utensils for their event. "
+            "Classify their answer. 'unclear' is for ambiguous like 'maybe', 'not sure', 'idk', "
+            "'what do you recommend'.\n\nReturn ONLY: yes, no, or unclear",
+            user_msg
+        )
+        intent_norm = norm_llm(wants_utensils)
     if intent_norm == "unclear":
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer gave an ambiguous answer about utensils. "
@@ -141,15 +144,18 @@ async def ask_desserts_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # Use LLM to detect intent — handles slang, hype, enthusiasm naturally
-    intent = await llm_extract(
-        "Does this message mean the person wants desserts, or are they declining/skipping desserts? "
-        "Consider any form of enthusiasm, excitement, or affirmation as 'yes'. "
-        "Only return 'no' if they clearly decline (e.g. 'no thanks', 'skip', 'pass', 'none'). "
-        "Return ONLY: yes or no",
-        user_msg
-    )
-    wants_desserts = norm_llm(intent) != "no"
+    # Short-circuit: unambiguous done phrases mean no desserts
+    if _is_done(user_msg):
+        wants_desserts = False
+    else:
+        intent = await llm_extract(
+            "Does this message mean the person wants desserts, or are they declining/skipping desserts? "
+            "Consider any form of enthusiasm, excitement, or affirmation as 'yes'. "
+            "Only return 'no' if they clearly decline (e.g. 'no thanks', 'skip', 'pass', 'none', 'im good'). "
+            "Return ONLY: yes or no",
+            user_msg
+        )
+        wants_desserts = norm_llm(intent) != "no"
 
     if wants_desserts:
         # Python builds the dessert list — LLM only generates intro
@@ -187,14 +193,18 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
 
     # If user wants to skip, move on
     ctx = _recent_ctx(state)
-    skip_check = await llm_extract(
-        "The customer was shown a dessert menu and asked to pick items. "
-        "Are they skipping/declining desserts, or making selections?\n\n"
-        f"Recent conversation:\n{ctx}\n\n"
-        "Return ONLY: skip or selecting",
-        user_msg
-    )
-    if norm_llm(skip_check) == "skip":
+    if _is_done(user_msg):
+        skip_result = "skip"
+    else:
+        skip_check = await llm_extract(
+            "The customer was shown a dessert menu and asked to pick items. "
+            "Are they skipping/declining desserts, or making selections?\n\n"
+            f"Recent conversation:\n{ctx}\n\n"
+            "Return ONLY: skip or selecting",
+            user_msg
+        )
+        skip_result = norm_llm(skip_check)
+    if skip_result == "skip":
         fill_slot(state["slots"], "desserts", "no")
         context = f"No desserts. Slots: {_slots_context(state)}"
         response = await llm_respond(
@@ -497,15 +507,18 @@ async def ask_rentals_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extraction = await llm_extract(
-        "The customer was asked about rentals. Available options: 1=Linens, 2=Tables, 3=Chairs. "
-        "The customer may type numbers, names, or both. "
-        "Map: 1/linens → Linens, 2/tables → Tables, 3/chairs → Chairs. "
-        "Return ONLY a comma-separated list (e.g. 'Linens, Tables'). "
-        "If they gave a vague answer like 'yes', 'sure', 'okay' WITHOUT specifying which ones, return ASK. "
-        "Return NONE if they clearly don't want any.",
-        user_msg
-    )
+    if _is_done(user_msg):
+        extraction = "NONE"
+    else:
+        extraction = await llm_extract(
+            "The customer was asked about rentals. Available options: 1=Linens, 2=Tables, 3=Chairs. "
+            "The customer may type numbers, names, or both. "
+            "Map: 1/linens → Linens, 2/tables → Tables, 3/chairs → Chairs. "
+            "Return ONLY a comma-separated list (e.g. 'Linens, Tables'). "
+            "If they gave a vague answer like 'yes', 'sure', 'okay' WITHOUT specifying which ones, return ASK. "
+            "Return NONE if they clearly don't want any.",
+            user_msg
+        )
     if extraction.strip().upper() == "NONE":
         fill_slot(state["slots"], "rentals", "no")
     elif extraction.strip().upper() == "ASK":

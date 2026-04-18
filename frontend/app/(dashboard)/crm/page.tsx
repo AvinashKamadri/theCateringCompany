@@ -166,7 +166,7 @@ export default function CRMPage() {
                 { label: 'Total Projects',  value: stats.total,                       icon: FileText,   sub: `${stats.by_status.active ?? 0} active` },
                 { label: 'Confirmed',       value: stats.by_status.confirmed ?? 0,    icon: TrendingUp, sub: `${stats.by_status.completed ?? 0} completed` },
                 { label: 'Avg Guest Count', value: stats.avg_guests,                  icon: Users,      sub: 'per event' },
-                { label: 'Via AI Intake',   value: stats.via_ai,                      icon: Sparkles,   sub: `${stats.total ? Math.round((stats.via_ai / stats.total) * 100) : 0}% of total` },
+                { label: 'Via Event Chat',   value: stats.via_ai,                      icon: Sparkles,   sub: `${stats.total ? Math.round((stats.via_ai / stats.total) * 100) : 0}% of total` },
               ].map(({ label, value, icon: Icon, sub }) => (
                 <div key={label} className="rounded-xl border border-neutral-200 bg-white p-4">
                   <div className="flex items-center justify-between mb-2">

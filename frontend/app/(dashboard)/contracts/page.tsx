@@ -100,7 +100,7 @@ export default function ContractsPage() {
             <div>
               <h1 className="text-xl font-bold text-neutral-900">Contracts</h1>
               <p className="text-sm text-neutral-400 mt-0.5">
-                {user?.email}{isStaff ? ' · staff view' : ''}
+                {isStaff ? 'Review and manage all client contracts' : 'Your event agreements'}
               </p>
             </div>
             {!isStaff && (
@@ -109,7 +109,7 @@ export default function ContractsPage() {
                 className="flex items-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                New intake
+                Plan an event
               </Link>
             )}
           </div>
@@ -174,7 +174,7 @@ export default function ContractsPage() {
             <p className="text-sm text-neutral-500 mb-6 max-w-xs mx-auto">
               {isStaff
                 ? 'No contracts have been submitted by clients yet.'
-                : 'Contracts are created after completing the AI intake chat.'}
+                : 'Chat with us to plan your event — we\'ll create your contract once everything\'s set.'}
             </p>
             {!isStaff && (
               <Link
@@ -182,7 +182,7 @@ export default function ContractsPage() {
                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                Start AI Intake
+                Start planning
               </Link>
             )}
           </div>
@@ -219,13 +219,15 @@ export default function ContractsPage() {
                   )}
                 </div>,
                 <div key="p2" style={{ padding: '6px 7px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  {contract.total_amount != null ? (
+                  {(isStaff || contract.status === 'signed') && contract.total_amount != null ? (
                     <>
                       <span style={{ fontSize: 9, color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>Total</span>
                       <span style={{ fontSize: 13, fontWeight: 800, color: '#111', lineHeight: 1.2 }}>
                         ${contract.total_amount.toLocaleString()}
                       </span>
                     </>
+                  ) : !isStaff && contract.total_amount != null ? (
+                    <span style={{ fontSize: 10, color: '#999', fontStyle: 'italic' }}>After signing</span>
                   ) : (
                     <span style={{ fontSize: 10, color: '#999' }}>No amount</span>
                   )}
@@ -243,7 +245,7 @@ export default function ContractsPage() {
                   href={`/contracts/${contract.id}`}
                   className="flex flex-col items-center gap-3 group"
                 >
-                  <div className="w-[180px] h-[162px] flex items-end justify-center">
+                  <div className="w-[180px] h-[162px] flex items-end justify-center rounded-2xl tc-shadow-soft-hover">
                     <Folder color={FOLDER_COLOR} size={1.8} items={folderItems} />
                   </div>
                   <div className="text-center w-[180px] px-1">
@@ -259,7 +261,7 @@ export default function ContractsPage() {
                       {project?.guest_count != null && (
                         <span className="text-[11px] text-neutral-400">· {project.guest_count} guests</span>
                       )}
-                      {contract.total_amount != null && (
+                      {contract.total_amount != null && (isStaff || contract.status === 'signed') && (
                         <span className="text-[11px] text-neutral-500">· ${contract.total_amount.toLocaleString()}</span>
                       )}
                     </div>

@@ -187,26 +187,28 @@ export class StaffContractsController {
         : (rawSummary as any);
     console.log('[DEBUG] Step 5: AI event data:', JSON.stringify(aiEventData, null, 2));
 
-    // Extract email: try contract body, AI summary, then fall back to creator's account email
+    // Extract email from the intake chat only — never fall back to the
+    // logged-in staff account, or the contract will be sent to staff instead
+    // of the client.
     const clientEmail =
       contractBody?.client_info?.email ||
       contractBody?.slots?.email ||
       aiEventData.contact_email ||
-      contract.users_contracts_created_byTousers?.email;
+      aiEventData.email;
 
-    // Extract name: try contract body (both shapes), AI summary, then creator username
+    // Extract name from the intake chat only (same reasoning).
     const clientName =
       contractBody?.client_info?.name ||
       contractBody?.slots?.name ||
       aiEventData.client_name ||
-      contract.users_contracts_created_byTousers?.email?.split('@')[0] ||
+      aiEventData.name ||
       'Client';
 
     console.log('[DEBUG] Step 6: Extracted - Email:', clientEmail, 'Name:', clientName);
 
     if (!clientEmail) {
-      console.log('[DEBUG] Step 7: ERROR - No email found anywhere for contract!');
-      throw new Error('Cannot determine client email — no email in contract body or creator account');
+      console.log('[DEBUG] Step 7: ERROR - No client email captured in intake chat!');
+      throw new Error('Cannot send contract — the intake chat did not capture a client email. Ask the client for their email before approving.');
     }
 
     // Mark as approved (intermediate state); status becomes 'sent' only after OpenSign succeeds
@@ -228,9 +230,13 @@ export class StaffContractsController {
 
     console.log('[DEBUG] Step 8: Contract updated to approved status');
 
-    // Always regenerate PDF at approve time so it reflects saved pricing
-    this.logger.log(`📄 [Staff] Regenerating PDF with latest pricing for contract ${contractId}`);
-    const pdfPath = await this.contractPdfService.generateSimpleContract(contractId);
+    // Always regenerate PDF at approve time. This version is client-facing —
+    // suppress the Billing Summary (line item prices, tax, gratuity, deposit,
+    // estimated total) so the client doesn't see the estimate in the signed
+    // agreement. Staff preview PDFs (via /contracts/:id/preview-pdf) still
+    // include pricing for internal review.
+    this.logger.log(`📄 [Staff] Regenerating client-facing PDF (pricing hidden) for contract ${contractId}`);
+    const pdfPath = await this.contractPdfService.generateSimpleContract(contractId, { hidePricing: true });
 
     // Send to OpenSign for e-signature
     console.log('[DEBUG] Step 12: Sending to OpenSign...');

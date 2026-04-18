@@ -10,7 +10,7 @@ import { useAuthStore } from '@/lib/store/auth-store';
 import { chatAiApi } from '@/lib/api/chat-ai';
 import {
   Plus, MessageSquare, ChevronRight, Loader2,
-  CalendarDays, Users, MapPin, UtensilsCrossed, ChevronDown,
+  CalendarDays, Users, MapPin, UtensilsCrossed, ChevronDown, Sparkles,
 } from 'lucide-react';
 import { AppNav } from '@/components/layout/app-nav';
 
@@ -230,7 +230,7 @@ function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
           <div className="absolute inset-0 bg-black/40" onClick={onMobileToggle} />
           <div className="relative bg-white rounded-t-2xl max-h-[75vh] flex flex-col">
             <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-neutral-100 shrink-0">
-              <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">Your Event Plan</p>
+              <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">Your Selections</p>
               <button onClick={onMobileToggle} className="text-sm text-neutral-500 hover:text-black px-2 py-1">Close</button>
             </div>
             <div className="overflow-y-auto px-5 py-4 flex-1">{panelContent}</div>
@@ -241,7 +241,7 @@ function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
       {/* Desktop: right sidebar */}
       <div className="hidden lg:flex w-72 xl:w-80 bg-white border-l border-neutral-200 flex-col overflow-y-auto shrink-0">
         <div className="px-5 pt-6 pb-4 border-b border-neutral-100">
-          <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">Your Event Plan</p>
+          <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">Your Selections</p>
         </div>
         <div className="px-5 py-5 flex-1">{panelContent}</div>
       </div>
@@ -421,7 +421,7 @@ function AiIntakeContent() {
                     className="text-xs text-neutral-500 hover:text-neutral-900 flex items-center gap-1.5 border border-neutral-200 rounded-md px-2.5 py-1 hover:border-neutral-300 transition-colors"
                   >
                     <MessageSquare className="w-3 h-3" />
-                    My sessions
+                    My chats
                   </button>
                 )}
                 {isSaving && (
@@ -437,10 +437,37 @@ function AiIntakeContent() {
           {/* Session Picker */}
           {view === 'picker' && !loadingSessions && (
             <div className="flex-1 overflow-y-auto p-3 sm:p-6">
+              {/* Hero banner */}
+              <div className="max-w-lg mx-auto mb-6 relative overflow-hidden rounded-2xl bg-linear-to-br from-neutral-900 via-neutral-800 to-neutral-900 px-6 sm:px-8 py-8 sm:py-10 text-white">
+                <div className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '24px 24px' }} />
+                <div className="relative z-10">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-8 h-8 rounded-lg bg-white/10 backdrop-blur flex items-center justify-center">
+                      <Sparkles className="w-4 h-4 text-white" />
+                    </div>
+                    <span className="text-xs font-medium tracking-wider uppercase text-white/60">AI-Powered</span>
+                  </div>
+                  <h1 className="text-2xl sm:text-3xl font-bold leading-tight mb-2">
+                    Plan any event,<br />effortlessly.
+                  </h1>
+                  <p className="text-sm sm:text-base text-white/60 max-w-sm leading-relaxed">
+                    Tell us what you're dreaming of — our AI handles the menu, the details, and the paperwork.
+                  </p>
+                  <button
+                    onClick={() => { setActiveThreadId(undefined); setCurrentSlots({}); setProgress({ filled: 0, total: 20 }); setView('chat'); }}
+                    className="mt-5 inline-flex items-center gap-2 bg-white text-black px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-neutral-100 transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Start planning
+                  </button>
+                </div>
+              </div>
+
+              {/* Session list */}
               <div className="max-w-lg mx-auto bg-white rounded-xl border border-neutral-200 overflow-hidden">
                 <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-neutral-100">
-                  <h2 className="font-semibold text-neutral-900">Your intake sessions</h2>
-                  <p className="text-sm text-neutral-500 mt-0.5">Continue where you left off, or start fresh</p>
+                  <h2 className="font-semibold text-neutral-900">Your event chats</h2>
+                  <p className="text-sm text-neutral-500 mt-0.5">Pick up where you left off</p>
                 </div>
                 <div className="divide-y divide-neutral-100">
                   <button
@@ -451,8 +478,8 @@ function AiIntakeContent() {
                       <Plus className="w-5 h-5 text-white" />
                     </div>
                     <div className="flex-1">
-                      <p className="font-medium text-neutral-900">Start new session</p>
-                      <p className="text-sm text-neutral-400">Begin a fresh event intake conversation</p>
+                      <p className="font-medium text-neutral-900">Plan a new event</p>
+                      <p className="text-sm text-neutral-400">Chat with our assistant to build your perfect menu</p>
                     </div>
                     <ChevronRight className="w-4 h-4 text-neutral-300" />
                   </button>
@@ -553,7 +580,7 @@ function AiIntakeContent() {
             className="lg:hidden fixed bottom-24 right-4 z-40 flex items-center gap-1.5 bg-black text-white text-xs font-medium px-3 py-2 rounded-full shadow-lg"
           >
             <UtensilsCrossed className="w-3.5 h-3.5" />
-            View Plan
+            Your Selections
           </button>
         )}
       </div>

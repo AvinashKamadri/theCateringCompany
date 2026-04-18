@@ -9,15 +9,15 @@ import { apiClient } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
 const hostNavigation = [
-  { name: 'AI Intake',  href: '/chat',       icon: Sparkles },
-  { name: 'Projects',   href: '/projects',   icon: FolderKanban },
-  { name: 'Contracts',  href: '/contracts',  icon: FileText },
+  { name: 'Plan My Event',  href: '/chat',       icon: Sparkles },
+  { name: 'My Events',      href: '/projects',   icon: FolderKanban },
+  { name: 'Contracts',      href: '/contracts',  icon: FileText },
 ];
 
 const staffNavigation = [
-  { name: 'Projects',   href: '/projects',   icon: FolderKanban },
-  { name: 'Contracts',  href: '/contracts',  icon: FileText },
-  { name: 'CRM',        href: '/crm',        icon: Users },
+  { name: 'All Events',   href: '/projects',   icon: FolderKanban },
+  { name: 'Contracts',    href: '/contracts',  icon: FileText },
+  { name: 'CRM Dashboard',      href: '/crm',        icon: Users },
 ];
 
 export function AppNav() {

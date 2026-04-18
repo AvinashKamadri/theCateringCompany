@@ -1754,7 +1754,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                 <button
                   onClick={specialMode ? handleSpecialSend : () => handleSendMessage()}
                   disabled={state.isLoading || (isNameMode ? (!firstName.trim() || !lastName.trim()) : (isEmailMode ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) : (isGuestMode ? (!input.trim() || Number(input) < 10) : !input.trim())))}
-                  className="bg-black text-white p-3 rounded-xl hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                  className="tc-btn-glossy p-3 rounded-xl shrink-0"
                 >
                   {state.isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                 </button>

@@ -256,7 +256,7 @@ export default function ProjectDetailPage() {
                   className="flex items-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors"
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
-                  {contract ? 'View Conversation' : 'Continue Intake'}
+                  {contract ? 'View Chat' : 'Continue Planning'}
                 </button>
               )}
               {myRole === 'owner' && (
@@ -382,7 +382,7 @@ export default function ProjectDetailPage() {
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-black text-sm font-semibold rounded-xl hover:bg-neutral-100 transition-colors"
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
-                  {summary.thread_id ? 'Continue Intake' : 'Start AI Intake'}
+                  {summary.thread_id ? 'Continue Planning' : 'Plan This Event'}
                 </button>
             </BentoInfoCard>
             )}

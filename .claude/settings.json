@@ -43,7 +43,8 @@
       "Bash(npx next:*)",
       "Read(//c/Users/avina/Downloads/Telegram Desktop/**)",
       "Read(//c/Users/avina/Downloads/menu-pictures//**)",
-      "Bash(awk '{print $5}')"
+      "Bash(awk '{print $5}')",
+      "Read(//c/Users/avina/Downloads/All items//**)"
     ],
     "additionalDirectories": [
       "c:\\Users\\avina\\projects\\flashback\\TheCateringCompanyAgent\\agent\\nodes",

@@ -600,21 +600,31 @@ export default function ContractDetailPage() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-neutral-400">Version</span><span className="font-semibold">v{contract.version_number}</span></div>
                 <div className="flex justify-between"><span className="text-neutral-400">Created</span><span className="font-medium">{new Date(contract.created_at).toLocaleDateString()}</span></div>
-                {lineItems.length > 0 ? (
-                  <>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Subtotal</span><span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Tax ({taxRate}%)</span><span>${pricingTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Onsite Fee ({onsiteServiceRate}%)</span><span>${pricingOnsiteSvc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Gratuity ({gratuityRate}%)</span><span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between border-t border-neutral-100 pt-2"><span className="font-semibold text-neutral-900">Grand Total</span><span className="font-bold text-neutral-900">${pricingGrandTotal.toLocaleString()}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">50% Deposit</span><span>${pricingDeposit.toLocaleString()}</span></div>
-                  </>
-                ) : contract.total_amount != null ? (
-                  <div className="flex justify-between border-t border-neutral-100 pt-2">
-                    <span className="font-semibold text-neutral-900">Grand Total</span>
-                    <span className="font-bold text-neutral-900">${Number(contract.total_amount).toLocaleString()}</span>
+                {/* Pricing is staff-only until the client signs. Once signed,
+                    the commitment is made so the client can see the totals too. */}
+                {(isStaff || contract.status === 'signed') && (
+                  lineItems.length > 0 ? (
+                    <>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Subtotal</span><span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Tax ({taxRate}%)</span><span>${pricingTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Onsite Fee ({onsiteServiceRate}%)</span><span>${pricingOnsiteSvc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Gratuity ({gratuityRate}%)</span><span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between border-t border-neutral-100 pt-2"><span className="font-semibold text-neutral-900">Grand Total</span><span className="font-bold text-neutral-900">${pricingGrandTotal.toLocaleString()}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">50% Deposit</span><span>${pricingDeposit.toLocaleString()}</span></div>
+                    </>
+                  ) : contract.total_amount != null ? (
+                    <div className="flex justify-between border-t border-neutral-100 pt-2">
+                      <span className="font-semibold text-neutral-900">Grand Total</span>
+                      <span className="font-bold text-neutral-900">${Number(contract.total_amount).toLocaleString()}</span>
+                    </div>
+                  ) : null
+                )}
+                {!isStaff && contract.status !== 'signed' && (
+                  <div className="flex justify-between border-t border-neutral-100 pt-2 text-xs">
+                    <span className="text-neutral-400">Pricing</span>
+                    <span className="text-neutral-500 italic">Available after signing</span>
                   </div>
-                ) : null}
+                )}
                 <div className="flex justify-between pt-1"><span className="text-neutral-400 text-xs">Contract ID</span><span className="font-mono text-xs text-neutral-400 truncate max-w-[110px]">{contract.id}</span></div>
               </div>
             </BentoInfoCard>

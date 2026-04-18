@@ -18,7 +18,9 @@
       "Bash(git stash *)",
       "Bash(git cherry-pick *)",
       "Bash(GIT_EDITOR=\"true\" git cherry-pick --continue)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(npx tsc *)",
+      "Bash(grep -E \"^backend\\\\.env$|^ml-agent\\\\.env$\" .gitignore)"
     ]
   }
 }

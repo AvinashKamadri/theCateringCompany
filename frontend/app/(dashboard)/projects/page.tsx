@@ -85,7 +85,7 @@ export default function ProjectsPage() {
     <div className="min-h-screen bg-neutral-50">
       {/* Page header */}
       <div className="bg-white border-b border-neutral-200">
-        <div className="max-w-7xl mx-auto px-6 py-5">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-5">
           <div className="flex items-center justify-between mb-5">
             <div>
               <h1 className="text-xl font-bold text-black">{isStaff ? 'All Events' : 'My Events'}</h1>
@@ -150,7 +150,7 @@ export default function ProjectsPage() {
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-8">
         {filtered.length === 0 ? (
           <div className="bg-white rounded-xl border border-neutral-200 p-16 text-center">
             <div className="flex justify-center mb-4">

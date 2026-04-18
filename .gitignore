@@ -284,3 +284,8 @@ puppeteer/.local-chromium/
 
 # dev scrips
 alpha_script/
+# Local dev env files (contain secrets)
+ml-agent.env
+backend.env
+.env.pp1
+*.env.local

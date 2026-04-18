@@ -12,6 +12,7 @@ import {
   ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield, Link2,
 } from 'lucide-react';
 import BentoInfoCard from '@/components/ui/BentoInfoCard';
+import AiHint from '@/components/ui/AiHint';
 
 interface Contract {
   id: string;
@@ -227,7 +228,7 @@ export default function ProjectDetailPage() {
     <div className="min-h-screen bg-neutral-50">
       {/* Header */}
       <div className="bg-white border-b border-neutral-200">
-        <div className="max-w-6xl mx-auto px-6 py-5">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-5">
           <button
             onClick={() => router.push('/projects')}
             className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-900 mb-4 transition-colors"
@@ -253,7 +254,7 @@ export default function ProjectDetailPage() {
               {summary.thread_id && (
                 <button
                   onClick={() => router.push(`/chat?thread=${summary.thread_id}`)}
-                  className="flex items-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors"
+                  className="tc-btn-glossy flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg"
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
                   {contract ? 'View Chat' : 'Continue Planning'}
@@ -273,52 +274,89 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Bento grid */}
-      <div className="max-w-6xl mx-auto px-6 py-6">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
 
           {/* ── Event Details ── spans 2 cols */}
           <BentoInfoCard className="lg:col-span-2 p-6">
-            <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Event Details</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
-              {project.event_date && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</span>
-                  <span className="text-sm font-semibold text-neutral-900">
-                    {new Date(project.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Event Details</p>
+              {(() => {
+                const filled = [
+                  project.event_date, project.guest_count != null,
+                  (summary.venue_name || summary.venue), summary.event_type,
+                  summary.service_type, summary.dietary_concerns,
+                ].filter(Boolean).length;
+                return (
+                  <span className="text-[10px] font-medium text-neutral-400 tabular-nums">
+                    {filled}/6 fields
                   </span>
-                </div>
-              )}
-              {project.guest_count != null && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400 flex items-center gap-1"><Users className="h-3 w-3" /> Guests</span>
-                  <span className="text-sm font-semibold text-neutral-900">{project.guest_count}</span>
-                </div>
-              )}
-              {(summary.venue_name || summary.venue) && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400 flex items-center gap-1"><MapPin className="h-3 w-3" /> Venue</span>
-                  <span className="text-sm font-semibold text-neutral-900">{summary.venue_name || summary.venue}</span>
-                </div>
-              )}
-              {summary.event_type && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400">Event Type</span>
-                  <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.event_type}</span>
-                </div>
-              )}
-              {summary.service_type && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400">Service</span>
-                  <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.service_type}</span>
-                </div>
-              )}
-              {summary.dietary_concerns && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400">Dietary</span>
-                  <span className="text-sm font-semibold text-neutral-900">{summary.dietary_concerns}</span>
-                </div>
-              )}
+                );
+              })()}
             </div>
+            {(() => {
+              const hasAny =
+                project.event_date || project.guest_count != null ||
+                summary.venue_name || summary.venue || summary.event_type ||
+                summary.service_type || summary.dietary_concerns;
+              if (!hasAny) {
+                return (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-neutral-100 flex items-center justify-center mb-3">
+                      <Calendar className="h-5 w-5 text-neutral-400" />
+                    </div>
+                    <p className="text-sm font-medium text-neutral-700">Details will appear here</p>
+                    <p className="text-xs text-neutral-500 mt-1 max-w-xs">
+                      {summary.thread_id
+                        ? 'Finish the AI intake and we\'ll populate the date, venue, guest count, and more.'
+                        : 'Start the AI intake to capture the event information.'}
+                    </p>
+                  </div>
+                );
+              }
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
+                  {project.event_date && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</span>
+                      <span className="text-sm font-semibold text-neutral-900">
+                        {new Date(project.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                    </div>
+                  )}
+                  {project.guest_count != null && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400 flex items-center gap-1"><Users className="h-3 w-3" /> Guests</span>
+                      <span className="text-sm font-semibold text-neutral-900">{project.guest_count}</span>
+                    </div>
+                  )}
+                  {(summary.venue_name || summary.venue) && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400 flex items-center gap-1"><MapPin className="h-3 w-3" /> Venue</span>
+                      <span className="text-sm font-semibold text-neutral-900">{summary.venue_name || summary.venue}</span>
+                    </div>
+                  )}
+                  {summary.event_type && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400">Event Type</span>
+                      <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.event_type}</span>
+                    </div>
+                  )}
+                  {summary.service_type && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400">Service</span>
+                      <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.service_type}</span>
+                    </div>
+                  )}
+                  {summary.dietary_concerns && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400">Dietary</span>
+                      <span className="text-sm font-semibold text-neutral-900">{summary.dietary_concerns}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {summary.special_requests && summary.special_requests !== 'none' && (
               <div className="mt-4 pt-4 border-t border-neutral-100">
                 <span className="text-xs text-neutral-400">Special Requests</span>
@@ -332,14 +370,22 @@ export default function ProjectDetailPage() {
             {/* Status tile */}
             <BentoInfoCard className="p-5">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Status</p>
-              <span className={cn(
-                'inline-flex px-3 py-1.5 rounded-xl text-xs font-semibold',
-                project.status === 'confirmed' ? 'bg-neutral-900 text-white' :
-                project.status === 'completed' ? 'bg-black text-white' :
-                'bg-neutral-100 text-neutral-700'
+              <div className={cn(
+                'inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]',
+                project.status === 'confirmed' ? 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white' :
+                project.status === 'completed' ? 'bg-gradient-to-br from-neutral-800 to-black text-white' :
+                project.status === 'cancelled' ? 'bg-gradient-to-br from-red-500 to-red-700 text-white' :
+                'bg-gradient-to-br from-neutral-100 to-neutral-200 text-neutral-800 border border-neutral-300 shadow-none'
               )}>
-                {project.status}
-              </span>
+                <span className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  project.status === 'confirmed' ? 'bg-emerald-200' :
+                  project.status === 'completed' ? 'bg-white' :
+                  project.status === 'cancelled' ? 'bg-red-200' :
+                  'bg-neutral-500'
+                )} />
+                <span className="capitalize">{project.status}</span>
+              </div>
             </BentoInfoCard>
 
             {/* Contract tile */}
@@ -366,7 +412,7 @@ export default function ProjectDetailPage() {
                 </div>
                 <button
                   onClick={() => router.push(`/contracts/${contract.id}`)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-white text-sm font-medium rounded-xl hover:bg-neutral-800 transition-colors"
+                  className="tc-btn-glossy w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl"
                 >
                   <FileText className="h-3.5 w-3.5" /> View Contract
                 </button>
@@ -468,10 +514,18 @@ export default function ProjectDetailPage() {
 
           {/* ── Collaborators ── spans full width */}
           <BentoInfoCard className="lg:col-span-3 p-6" enableTilt={false}>
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Collaborators</p>
-                <p className="text-sm text-neutral-500 mt-0.5">{collaborators.length} member{collaborators.length !== 1 ? 's' : ''}</p>
+            <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <div>
+                  <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Collaborators</p>
+                  <p className="text-sm text-neutral-500 mt-0.5">{collaborators.length} member{collaborators.length !== 1 ? 's' : ''}</p>
+                </div>
+                {canManage && (
+                  <AiHint
+                    placement="bottom-right"
+                    message="Click Generate Link to share a join URL, or Add Collaborator to invite someone by email and assign them a role."
+                  />
+                )}
               </div>
               {canManage && (
                 <div className="flex items-center gap-2">
@@ -486,7 +540,7 @@ export default function ProjectDetailPage() {
                   {/* Add collaborator button */}
                   <button
                     onClick={() => { setShowAddForm(!showAddForm); loadJoinCode(); }}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-black text-white rounded-xl hover:bg-neutral-800 transition-colors"
+                    className="tc-btn-glossy flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl"
                   >
                     <UserPlus className="h-3.5 w-3.5" />
                     Add Collaborator

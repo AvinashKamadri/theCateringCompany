@@ -63,10 +63,10 @@ export default function SignUpPage() {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-neutral-200 p-8 shadow-sm">
+    <div className="tc-glossy rounded-2xl p-8">
       <div className="mb-7">
-        <h1 className="text-2xl font-bold text-black mb-1">Create your account</h1>
-        <p className="text-sm text-neutral-500">Get started with TheCateringCompany.</p>
+        <h1 className="text-2xl font-bold text-black mb-1">Let's get started</h1>
+        <p className="text-sm text-neutral-500">Create an account to start planning your event.</p>
       </div>
 
       {error && (
@@ -223,7 +223,7 @@ export default function SignUpPage() {
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          className="tc-btn-glossy w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-semibold"
         >
           {isLoading ? (
             <>

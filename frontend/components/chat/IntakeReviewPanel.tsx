@@ -89,7 +89,7 @@ export default function IntakeReviewPanel({ contractData: d, onConfirm }: Props)
         <CheckCircle2 className="w-5 h-5 text-neutral-900 shrink-0" />
         <div>
           <h3 className="text-sm font-bold text-neutral-900">Your Event Summary</h3>
-          <p className="text-xs text-neutral-400">Review your selections — no pricing yet, we'll finalize that together</p>
+          <p className="text-xs text-neutral-400">Here's what we've got so far — we'll finalize pricing together</p>
         </div>
       </div>
 
@@ -162,14 +162,14 @@ export default function IntakeReviewPanel({ contractData: d, onConfirm }: Props)
       )}
 
       <p className="text-[11px] text-neutral-400 text-center pt-1">
-        Menus are a starting point — everything can be adjusted before your event.
+        This is just the starting point — everything can be adjusted before your event.
       </p>
 
       <button
         onClick={onConfirm}
         className="w-full bg-black text-white py-3 rounded-xl text-sm font-semibold hover:bg-neutral-800 transition-colors"
       >
-        Create Project & Contract →
+        Looks good — send to our team →
       </button>
     </div>
   );

@@ -9,8 +9,11 @@ export class ContractPdfService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async generateSimpleContract(contractId: string): Promise<string> {
-    this.logger.log(`📄 Generating PDF contract for ${contractId}`);
+  async generateSimpleContract(
+    contractId: string,
+    opts: { hidePricing?: boolean } = {},
+  ): Promise<string> {
+    this.logger.log(`📄 Generating PDF contract for ${contractId}${opts.hidePricing ? ' (client-facing, pricing hidden)' : ''}`);
 
     const contract = await this.prisma.contracts.findUnique({
       where: { id: contractId },
@@ -24,9 +27,6 @@ export class ContractPdfService {
             venues: { select: { name: true, address: true } },
           },
         },
-        users_contracts_created_byTousers: {
-          select: { email: true, primary_phone: true },
-        },
       },
     });
 
@@ -34,7 +34,6 @@ export class ContractPdfService {
 
     const body = contract.body as any || {};
     const project = contract.projects_contracts_project_idToprojects;
-    const creatorEmail = contract.users_contracts_created_byTousers?.email || '';
 
     // Support both body shapes: {client_info, event_details, menu} and {slots}
     const slots = body.slots || {};
@@ -43,9 +42,12 @@ export class ContractPdfService {
     const menuData = body.menu || {};
     const additional = body.additional || {};
 
+    // Client identity comes from the intake chat (client_info / slots), never
+    // from the logged-in staff account. If the chat didn't capture it, leave
+    // blank and let the row render empty rather than mislabeling with login info.
     const clientName = clientInfo.name || slots.name || project?.title || '';
-    const clientEmail = clientInfo.email || slots.email || creatorEmail;
-    const clientPhone = clientInfo.phone || slots.phone || contract.users_contracts_created_byTousers?.primary_phone || '';
+    const clientEmail = clientInfo.email || slots.email || '';
+    const clientPhone = clientInfo.phone || slots.phone || '';
     const eventType = eventDetails.type || slots.event_type || '';
     const eventDate = eventDetails.date || slots.event_date
       || (project?.event_date ? new Date(project.event_date).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : '');
@@ -119,6 +121,7 @@ export class ContractPdfService {
       totalAmount,
       contractSummary,
       createdAt: new Date(contract.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+      hidePricing: !!opts.hidePricing,
     });
 
     // Generate PDF via puppeteer
@@ -202,6 +205,7 @@ interface TemplateData {
   totalAmount: string;
   contractSummary: string;
   createdAt: string;
+  hidePricing: boolean;
 }
 
 function buildContractHtml(d: TemplateData): string {
@@ -392,7 +396,7 @@ ${sectionBanner('Service Notes')}
 <div style="border:1px solid #E8E0D0;border-top:none;padding:8px 14px;font-size:11px;
   white-space:pre-wrap;line-height:1.6;color:#1A1A2E;">${d.contractSummary}</div>` : ''}
 
-${flourish}
+${d.hidePricing ? '' : `${flourish}
 
 <!-- ═══ BILLING SUMMARY ═══ -->
 <div style="page-break-inside:avoid;">
@@ -427,7 +431,7 @@ ${sectionBanner('Billing Summary')}
   Payments accepted: Check (payable to "The Caterer LLC") &nbsp;·&nbsp;
   Venmo (2% fee) &nbsp;·&nbsp; Credit/Debit (1.5%; MasterCard 3.5%)
 </div>
-</div>
+</div>`}
 
 <!-- ═══ TERMS & CONDITIONS ═══ -->
 <div class="page-break">

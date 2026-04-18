@@ -27,11 +27,11 @@ export class ProjectsController {
    */
   @Get()
   async findAll(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { userId: string; role?: string },
     @Query('q') q?: string,
     @Query('status') status?: string,
   ) {
-    return this.projectsService.findAllForUser(user.userId, q, status);
+    return this.projectsService.findAllForUser(user.userId, q, status, user.role);
   }
 
   // ─── Literal routes must come BEFORE :id to avoid param collision ───────────

@@ -195,11 +195,57 @@ def _detect_modify_intent(msg: str, current_slot: str | None) -> bool:
     return False
 
 
+# ── Section-jump shortcuts ────────────────────────────────────────────────────
+# When the user names a section ("add desserts", "go to appetizers", "skip to
+# utensils"), route directly to the node that handles that section instead of
+# leaking into whatever node was current. The trigger verbs are loose on
+# purpose so we catch natural phrasings like "want desserts" or "more desserts"
+# alongside explicit "add/go to/pick" forms. Each entry is (pattern, node).
+_SECTION_JUMP: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\b(add|more|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\bdesserts?\b', re.IGNORECASE), "ask_desserts"),
+    (re.compile(r'\b(add|more|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\b(appetizers?|hors\s*d\'?oeuvres?|starters?)\b', re.IGNORECASE), "ask_appetizers"),
+    (re.compile(r'\b(add|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\b(main\s+(dish(es)?|courses?)|entr[eé]es?|dishes?|menu\s+items?)\b', re.IGNORECASE), "select_dishes"),
+    (re.compile(r'\b(add|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\butensils?\b', re.IGNORECASE), "ask_utensils"),
+    (re.compile(r'\b(add|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\brentals?\b', re.IGNORECASE), "ask_rentals"),
+    (re.compile(r'\b(add|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\b(bar(\s+service)?|drinks?|beverages?)\b', re.IGNORECASE), "collect_bar_service"),
+]
+
+
+def _detect_section_jump(msg: str, current: str) -> str | None:
+    """If the user asks for a section by name, return that section's node.
+
+    Skips the match when the user is already IN that section's ask/select pair
+    (e.g. "add desserts" while current_node is ask_desserts/select_desserts —
+    the current node will handle it naturally).
+    """
+    # Map: current node → nodes we should NOT jump TO (already here)
+    stay_put = {
+        "ask_desserts": {"ask_desserts", "select_desserts", "ask_more_desserts"},
+        "select_desserts": {"ask_desserts", "select_desserts", "ask_more_desserts"},
+        "ask_more_desserts": {"ask_desserts", "select_desserts", "ask_more_desserts"},
+        "ask_appetizers": {"ask_appetizers", "select_appetizers"},
+        "select_appetizers": {"ask_appetizers", "select_appetizers"},
+        "select_dishes": {"select_dishes", "present_menu", "ask_menu_changes", "collect_menu_changes"},
+        "ask_utensils": {"ask_utensils", "select_utensils"},
+        "select_utensils": {"ask_utensils", "select_utensils"},
+        "ask_rentals": {"ask_rentals"},
+        "collect_bar_service": {"collect_bar_service", "collect_drinks"},
+    }
+    blocked = stay_put.get(current, set())
+    for pattern, node in _SECTION_JUMP:
+        if node in blocked:
+            continue
+        if pattern.search(msg):
+            return node
+    return None
+
+
 def route_message(state: ConversationState) -> str:
     """
     Route to the correct node based on state.
 
     Priority:
+    0. Section-jump shortcut ("add desserts", "go to appetizers", …)
     1. If message is a natural correction/addition targeting a DIFFERENT slot → check_modifications
     2. Otherwise → current_node from state
     """
@@ -210,6 +256,12 @@ def route_message(state: ConversationState) -> str:
             break
 
     current = state.get("current_node", "start")
+
+    # 0. Section-jump shortcut — route directly to the named section.
+    jump = _detect_section_jump(last_user_msg, current)
+    if jump is not None:
+        state["current_node"] = jump
+        return jump
 
     # 1. Natural correction/addition for a slot different from what we're currently asking
     current_slot = _NODE_COLLECTS.get(current)

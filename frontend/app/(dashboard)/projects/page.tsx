@@ -10,9 +10,9 @@ import { cn } from '@/lib/utils';
 import Folder from '@/components/ui/Folder';
 
 const STATUS_LABELS: Record<string, string> = {
-  inquiry: 'Inquiry',
-  proposal_sent: 'Proposal Sent',
-  confirmed: 'Confirmed',
+  inquiry: 'New Inquiry',
+  proposal_sent: 'Quote Sent',
+  confirmed: 'Booked',
   completed: 'Completed',
   draft: 'Draft',
 };
@@ -27,8 +27,11 @@ const STATUS_STYLES: Record<string, string> = {
 
 const FOLDER_COLOR = '#1a1a1a';
 
+const STAFF_DOMAINS = ['@catering-company.com'];
+
 export default function ProjectsPage() {
   const { user } = useAuthStore();
+  const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -85,8 +88,8 @@ export default function ProjectsPage() {
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center justify-between mb-5">
             <div>
-              <h1 className="text-xl font-bold text-black">Projects</h1>
-              <p className="text-sm text-neutral-400 mt-0.5">{user?.email}</p>
+              <h1 className="text-xl font-bold text-black">{isStaff ? 'All Events' : 'My Events'}</h1>
+              <p className="text-sm text-neutral-400 mt-0.5">{isStaff ? 'Manage all client events' : 'Your upcoming events'}</p>
             </div>
             <div className="flex items-center gap-2">
               <Link
@@ -101,7 +104,7 @@ export default function ProjectsPage() {
                 className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-black rounded-lg hover:bg-neutral-800 transition-colors"
               >
                 <Plus className="h-4 w-4" />
-                New Project
+                New Event
               </Link>
             </div>
           </div>
@@ -155,9 +158,9 @@ export default function ProjectsPage() {
                 <FileText className="h-6 w-6 text-neutral-400" />
               </div>
             </div>
-            <h3 className="text-base font-semibold text-black mb-1">No projects found</h3>
+            <h3 className="text-base font-semibold text-black mb-1">No events yet</h3>
             <p className="text-sm text-neutral-400 mb-6">
-              {searchQuery ? 'Try adjusting your search or filter.' : 'Create your first project to get started.'}
+              {searchQuery ? 'Try adjusting your search or filter.' : 'Plan your first event to get started.'}
             </p>
             {!searchQuery && (
               <Link
@@ -165,7 +168,7 @@ export default function ProjectsPage() {
                 className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-black rounded-lg hover:bg-neutral-800 transition-colors"
               >
                 <Plus className="h-4 w-4" />
-                Create project
+                Plan an event
               </Link>
             )}
           </div>

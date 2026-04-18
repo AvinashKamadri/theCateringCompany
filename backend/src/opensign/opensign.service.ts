@@ -339,7 +339,7 @@ export class OpenSignService {
   async ensureWebhookRegistered(webhookBaseUrl: string): Promise<void> {
     if (!this.enabled) return;
 
-    const targetUrl = `${webhookBaseUrl}/webhooks/docuseal`;
+    const targetUrl = `${webhookBaseUrl}/api/webhooks/docuseal`;
 
     try {
       // List existing webhooks
@@ -357,7 +357,7 @@ export class OpenSignService {
 
       // Remove stale entries pointing to same host but different path (avoid duplicates)
       for (const wh of existing) {
-        if (wh.url?.includes('/webhooks/docuseal')) {
+        if (wh.url?.includes('/webhooks/docuseal') || wh.url?.includes('/api/webhooks/docuseal')) {
           await this.client.delete(`/webhooks/${wh.id}`).catch(() => {});
           this.logger.log(`Removed stale DocuSeal webhook: ${wh.url}`);
         }

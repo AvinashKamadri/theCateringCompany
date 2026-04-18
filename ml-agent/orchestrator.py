@@ -150,8 +150,8 @@ class AgentOrchestrator:
             ai_conversation_state_id=new_state_id,
         )
 
-        # Count filled slots
-        slots_filled = sum(1 for s in new_slots.values() if s.get("filled"))
+        # Count filled slots (exclude internal bookkeeping keys prefixed with __)
+        slots_filled = sum(1 for k, s in new_slots.items() if s.get("filled") and not k.startswith("__"))
 
         # Frontend hint for the next input widget
         input_hint = get_input_hint(new_node, result)

@@ -177,9 +177,9 @@ async def get_conversation(thread_id: str):
 
     messages = await load_messages(thread_id)
 
-    # Extract filled slot values
+    # Extract filled slot values (exclude internal bookkeeping keys prefixed with __)
     slots = state.get("slots", {})
-    filled_slots = {k: v["value"] for k, v in slots.items() if v.get("filled")}
+    filled_slots = {k: v["value"] for k, v in slots.items() if v.get("filled") and not k.startswith("__")}
 
     return {
         "thread_id": thread_id,
@@ -200,8 +200,9 @@ async def get_slots(thread_id: str):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     slots = state.get("slots", {})
-    filled = {k: v["value"] for k, v in slots.items() if v.get("filled")}
-    unfilled = [k for k, v in slots.items() if not v.get("filled")]
+    public_slots = {k: v for k, v in slots.items() if not k.startswith("__")}
+    filled = {k: v["value"] for k, v in public_slots.items() if v.get("filled")}
+    unfilled = [k for k, v in public_slots.items() if not v.get("filled")]
 
     return {
         "thread_id": thread_id,
@@ -209,7 +210,7 @@ async def get_slots(thread_id: str):
         "filled": filled,
         "unfilled": unfilled,
         "slots_filled": len(filled),
-        "total_slots": len(slots),
+        "total_slots": len(public_slots),
     }
 
 

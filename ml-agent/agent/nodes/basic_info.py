@@ -133,11 +133,19 @@ _UNSURE_PHRASES = frozenset({
     "pata nahi", "pata nai", "nai malum", "nahi malum",
 })
 
+_UNSURE_RE = _re.compile(
+    r'\b(tbd|tba|to\s+be\s+(decided|determined|confirmed)|'
+    r'will\s+(decide|confirm|sort\s+out|figure\s+out)\s+later|'
+    r'confirm\s+(on\s+call|later)|decide\s+later|not\s+sure\s+yet|'
+    r'undecided|skip\s+(for\s+now)?)\b',
+    _re.IGNORECASE,
+)
+
 
 def _is_unsure(user_msg: str) -> bool:
     """True when the user gave a stand-alone 'I don't know / decide later' reply."""
     cleaned = user_msg.strip().lower().rstrip(".!?,")
-    return cleaned in _UNSURE_PHRASES
+    return cleaned in _UNSURE_PHRASES or bool(_UNSURE_RE.search(cleaned))
 
 
 _WEEKDAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,

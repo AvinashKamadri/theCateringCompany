@@ -15,11 +15,20 @@ logger = logging.getLogger(__name__)
 # Project ID is set per-conversation by the orchestrator
 _current_project_id: str | None = None
 
+# Conversation messages — set once per turn so llm_respond has full history automatically
+_current_messages: list = []
+
 
 def set_current_project_id(project_id: str | None):
     """Set the project ID for AI generation logging in this conversation turn."""
     global _current_project_id
     _current_project_id = project_id
+
+
+def set_current_messages(messages: list):
+    """Set the conversation messages for this turn so all llm_respond calls get history."""
+    global _current_messages
+    _current_messages = list(messages) if messages else []
 
 
 def get_last_human_message(messages) -> str:
@@ -191,7 +200,20 @@ async def llm_extract(system_prompt: str, user_message: str) -> str:
     return text
 
 
-async def llm_respond(system_prompt: str, context: str) -> str:
+def _format_history(messages: list, n: int = 12) -> str:
+    """Format the last N conversation messages as a compact history string."""
+    pool = list(messages)[-n:]
+    lines = []
+    for m in pool:
+        if isinstance(m, HumanMessage):
+            lines.append(f"Customer: {m.content}")
+        elif isinstance(m, AIMessage):
+            content = m.content[:200] + "…" if len(m.content) > 200 else m.content
+            lines.append(f"Agent: {content}")
+    return "\n".join(lines)
+
+
+async def llm_respond(system_prompt: str, context: str, messages: list | None = None) -> str:
     """Conversational response generation — friendly messages, questions, acknowledgments.
 
     Two layers of variation to keep the bot feeling natural:
@@ -201,6 +223,9 @@ async def llm_respond(system_prompt: str, context: str) -> str:
     Also injects slot-authority so the LLM always uses CURRENT slot values
     over stale conversation history (important after @AI mid-flow modifications).
     Never use this for extraction or intent classification.
+
+    Pass `messages=state["messages"]` to include recent conversation history so the LLM
+    has full context when generating the next response.
     """
     import random
     _STYLES = [
@@ -228,14 +253,21 @@ async def llm_respond(system_prompt: str, context: str) -> str:
         "NEVER advance the conversation to a new step on your own — the Python controller decides flow. "
         "If the instruction says re-ask for X, you ONLY re-ask for X and nothing else."
     )
+    msg_list = messages if messages is not None else _current_messages
+    if msg_list:
+        history = _format_history(msg_list)
+        full_context = f"Recent conversation:\n{history}\n\n{context}"
+    else:
+        full_context = context
+
     start = time.monotonic()
     response = await llm_warm.ainvoke([
         SystemMessage(content=system_prompt + variation + slot_authority),
-        HumanMessage(content=context),
+        HumanMessage(content=full_context),
     ])
     latency_ms = int((time.monotonic() - start) * 1000)
     text = response.content
-    await _log_generation(system_prompt, context, text, latency_ms, "intake_parse")
+    await _log_generation(system_prompt, full_context, text, latency_ms, "intake_parse")
     return text
 
 

@@ -803,32 +803,40 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
             # ── 3c-mixed. Mixed remove+add in one message ──
             if intent == "mixed":
                 ops = await _extract_mixed_ops(last_message)
-                working = list(current_items)
+                surviving_names = list(current_items)  # plain names from existing slot
 
                 removed_names, added_names = [], []
+                new_formatted_parts = []  # formatted "Name ($x.xx/pp)" for newly added items
 
-                # Removes first
+                # Removes first (fuzzy match against surviving plain names)
                 for item_name in ops.get("remove", []):
-                    item_lower = item_name.lower()
-                    before = list(working)
-                    working = [
-                        n for n in working
-                        if item_lower not in n.lower() and n.lower() not in item_lower
+                    before = list(surviving_names)
+                    surviving_names = [
+                        n for n in surviving_names
+                        if not _name_similar(n, item_name)
                     ]
-                    if len(working) < len(before):
+                    if len(surviving_names) < len(before):
                         removed_names.append(item_name)
 
-                # Then adds
+                # Then adds (resolve from DB, format with prices)
+                surviving_lower = {n.lower() for n in surviving_names}
                 for item_name in ops.get("add", []):
                     matched, _ = await _resolve_to_db_items(item_name, filtered_menu)
                     if not matched:
                         _, matched, _ = await _find_item_in_any_menu(item_name, menu_context)
                     if matched:
-                        existing_lower = {n.lower() for n in working}
                         for m in matched:
-                            if m["name"].lower() not in existing_lower:
-                                working.append(m["name"])
+                            if m["name"].lower() not in surviving_lower:
+                                surviving_lower.add(m["name"].lower())
                                 added_names.append(m["name"])
+                                price = m.get("unit_price")
+                                ptype = m.get("price_type", "per_person")
+                                if price:
+                                    new_formatted_parts.append(
+                                        f"{m['name']} (${price:.2f}/pp)" if ptype == "per_person" else f"{m['name']} (${price:.2f})"
+                                    )
+                                else:
+                                    new_formatted_parts.append(m["name"])
                     else:
                         sr_existing = state["slots"].get("special_requests", {}).get("value") or ""
                         sr_merged = f"{sr_existing}; {item_name}" if sr_existing and sr_existing.lower() not in ("none", "no", "") else item_name
@@ -840,7 +848,17 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                         }
                         added_names.append(f"{item_name} (added to special requests)")
 
-                _, resolved = await _resolve_to_db_items(", ".join(working), filtered_menu) if working else ([], "")
+                # Rebuild resolved: keep surviving entries from original slot string + append new formatted
+                surviving_lower_set = {n.lower() for n in surviving_names}
+                kept_parts = [
+                    part.strip() for part in current_value.split(",")
+                    if part.strip() and any(
+                        n.lower() in part.lower() or part.lower().startswith(n.lower())
+                        for n in surviving_names
+                    )
+                ] if current_value else []
+                all_parts = kept_parts + new_formatted_parts
+                resolved = ", ".join(all_parts) if all_parts else ""
                 now = datetime.now().isoformat()
                 history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
                 history.append({"old_value": current_value, "new_value": resolved, "timestamp": now})
@@ -860,22 +878,33 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
                 state["messages"] = add_ai_message(state, f"{confirm}\n\n{fresh_q}" if fresh_q else confirm)
                 return state
 
-            # ── 3c. Remove → keyword match against current items ──
+            # ── 3c. Remove → fuzzy match against current items ──
             if intent == "remove":
                 items_text = str(new_value).strip()
                 matched_remove, _ = await _resolve_to_db_items(items_text, filtered_menu)
                 remove_names = {i["name"].lower() for i in matched_remove}
-                remove_kws = [p.strip().lower() for p in items_text.split(",") if p.strip()]
+                # Parse requested remove targets (comma-separated)
+                remove_targets = [p.strip() for p in items_text.split(",") if p.strip()]
                 updated = [
                     n for n in current_items
                     if n.lower() not in remove_names
-                    and not any(kw and kw in n.lower() for kw in remove_kws)
+                    and not any(_name_similar(n, t) for t in remove_targets)
                 ]
                 removed_count = len(current_items) - len(updated)
                 now = datetime.now().isoformat()
 
                 if removed_count > 0 and updated:
-                    _, resolved = await _resolve_to_db_items(", ".join(updated), filtered_menu)
+                    # Rebuild from original slot string — filter out removed items by name
+                    # to avoid re-resolving existing items through a filtered menu (loses items)
+                    updated_lower = {n.lower() for n in updated}
+                    resolved_parts = [
+                        part.strip() for part in current_value.split(",")
+                        if part.strip() and any(
+                            n.lower() in part.lower() or part.lower().startswith(n.lower())
+                            for n in updated
+                        )
+                    ]
+                    resolved = ", ".join(resolved_parts) if resolved_parts else ", ".join(updated)
                     history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
                     history.append({"old_value": current_value, "new_value": resolved, "timestamp": now})
                     state["slots"][target_slot] = {
@@ -908,10 +937,23 @@ async def check_modifications_node(state: ConversationState) -> ConversationStat
             if matched_add:
                 # Found in DB — append (deduplicated)
                 existing_lower = {n.lower() for n in current_items}
-                new_names = [i["name"] for i in matched_add if i["name"].lower() not in existing_lower]
+                new_items = [i for i in matched_add if i["name"].lower() not in existing_lower]
+                new_names = [i["name"] for i in new_items]
                 already_have = [i["name"] for i in matched_add if i["name"].lower() in existing_lower]
-                merged = current_items + new_names
-                _, resolved = await _resolve_to_db_items(", ".join(merged), filtered_menu) if merged else ([], current_value)
+                # Format only the NEW items with prices and append to existing slot string
+                # (never re-resolve existing items — avoids losing items filtered by category)
+                new_formatted = []
+                for i in new_items:
+                    price = i.get("unit_price")
+                    ptype = i.get("price_type", "per_person")
+                    if price:
+                        new_formatted.append(f"{i['name']} (${price:.2f}/pp)" if ptype == "per_person" else f"{i['name']} (${price:.2f})")
+                    else:
+                        new_formatted.append(i["name"])
+                if current_value and current_value.strip().lower() not in ("none", "no", ""):
+                    resolved = current_value + (", " + ", ".join(new_formatted) if new_formatted else "")
+                else:
+                    resolved = ", ".join(new_formatted)
                 now = datetime.now().isoformat()
                 history = list(state["slots"].get(target_slot, {}).get("modification_history") or [])
                 history.append({"old_value": current_value, "new_value": resolved, "timestamp": now})

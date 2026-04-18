@@ -45,6 +45,12 @@ services:
       DATABASE_URL: postgresql://cateringco:local_dev_password@postgres:5432/cateringco_dev
       BACKEND_PORT: 3001
       REDIS_URL: redis://redis:6379
+      DOCUSEAL_ENABLED: ${DOCUSEAL_ENABLED:-false}
+      DOCUSEAL_API_KEY: ${DOCUSEAL_API_KEY:-}
+      DOCUSEAL_API_URL: ${DOCUSEAL_API_URL:-https://api.docuseal.co}
+      DOCUSEAL_SIGNING_URL: ${DOCUSEAL_SIGNING_URL:-https://docuseal.co}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy

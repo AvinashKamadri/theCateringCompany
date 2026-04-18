@@ -45,7 +45,9 @@ export class OpenSignService {
   constructor(private readonly configService: ConfigService) {
     this.enabled =
       this.configService.get('DOCUSEAL_ENABLED') === 'true' ||
-      this.configService.get('OPENSIGN_ENABLED') === 'true';
+      process.env.DOCUSEAL_ENABLED === 'true' ||
+      this.configService.get('OPENSIGN_ENABLED') === 'true' ||
+      process.env.OPENSIGN_ENABLED === 'true';
 
     const apiKey =
       this.configService.get('DOCUSEAL_API_KEY') ||
@@ -65,7 +67,7 @@ export class OpenSignService {
     });
 
     this.logger.log(
-      `DocuSeal service initialized (enabled: ${this.enabled}, api: ${apiUrl})`,
+      `DocuSeal service initialized (enabled: ${this.enabled}, api: ${apiUrl}, DOCUSEAL_ENABLED env: "${process.env.DOCUSEAL_ENABLED}")`,
     );
   }
 

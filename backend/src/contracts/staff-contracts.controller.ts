@@ -190,13 +190,16 @@ export class StaffContractsController {
     // Extract email from the intake chat only — never fall back to the
     // logged-in staff account, or the contract will be sent to staff instead
     // of the client.
+    // Prefer email captured in intake chat; fall back to the account that
+    // created the contract (the client's login email — never the approving
+    // staff member's email).
     const clientEmail =
       contractBody?.client_info?.email ||
       contractBody?.slots?.email ||
       aiEventData.contact_email ||
-      aiEventData.email;
+      aiEventData.email ||
+      contract.users_contracts_created_byTousers?.email;
 
-    // Extract name from the intake chat only (same reasoning).
     const clientName =
       contractBody?.client_info?.name ||
       contractBody?.slots?.name ||
@@ -207,8 +210,8 @@ export class StaffContractsController {
     console.log('[DEBUG] Step 6: Extracted - Email:', clientEmail, 'Name:', clientName);
 
     if (!clientEmail) {
-      console.log('[DEBUG] Step 7: ERROR - No client email captured in intake chat!');
-      throw new Error('Cannot send contract — the intake chat did not capture a client email. Ask the client for their email before approving.');
+      console.log('[DEBUG] Step 7: ERROR - No client email found!');
+      throw new Error('Cannot send contract — no client email found. Please attach an email to this contract before approving.');
     }
 
     // Mark as approved (intermediate state); status becomes 'sent' only after OpenSign succeeds
@@ -281,6 +284,23 @@ export class StaffContractsController {
       this.logger.error(`❌ [Staff] Error details:`, error);
       throw error;
     }
+  }
+
+  /**
+   * POST /staff/contracts/:id/reset
+   * Reset contract back to pending_staff_approval so it can be re-approved
+   */
+  @Post(':id/reset')
+  async resetContract(
+    @Param('id') contractId: string,
+    @CurrentUser() user: { userId: string; email: string },
+  ) {
+    this.logger.log(`🔄 [Staff] ${user.email} resetting contract ${contractId} to pending`);
+    await this.prisma.contracts.update({
+      where: { id: contractId },
+      data: { status: 'pending_staff_approval' },
+    });
+    return { success: true, message: 'Contract reset to pending_staff_approval' };
   }
 
   /**

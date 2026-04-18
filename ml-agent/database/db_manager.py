@@ -188,7 +188,7 @@ async def load_conversation_state(thread_id: str) -> dict | None:
         "project_id": row.project_id,
         "thread_id": row.thread_id,
         "current_node": row.current_node,
-        "slots": row.slots,  # native JSONB, no json.loads needed
+        "slots": row.slots or {},
         "is_completed": row.is_completed,
     }
 

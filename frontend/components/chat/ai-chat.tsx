@@ -1632,7 +1632,10 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                 );
               }
 
-              const isConfirm = isConfirmationMessage(intro);
+              // Only suppress cards for pure confirmations — if the message also
+              // presents a new numbered list or inline yes/no choices, always show cards.
+              const hasNewQuestion = /^\s*\d+\./m.test(msg.content) || detectInlineChoices(msg.content) !== null;
+              const isConfirm = isConfirmationMessage(intro) && !hasNewQuestion;
 
               // Confirmation messages: render as plain read-only list, not interactive cards
               if (isConfirm) {

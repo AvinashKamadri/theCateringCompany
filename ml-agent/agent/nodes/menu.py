@@ -48,7 +48,12 @@ async def get_main_dish_items() -> tuple[list[dict], dict]:
 
 
 async def get_dessert_items(is_wedding: bool = False) -> list[dict]:
-    """Get flat list of dessert items, expanding mini desserts bundle."""
+    """Get flat list of dessert items, expanding mini desserts bundle.
+
+    Wedding cakes are intentionally excluded — they are collected via a
+    dedicated flow ("Would you like a wedding cake?") in the frontend and
+    should not appear inside the dessert picker.
+    """
     menu = await load_menu_by_category()
     items = []
     for cat_name, cat_items in menu.items():
@@ -63,10 +68,6 @@ async def get_dessert_items(is_wedding: bool = False) -> list[dict]:
                                           "price_type": item["price_type"]})
                 else:
                     items.append(item)
-        elif "cake" in cat_lower:
-            # Always include cakes (e.g. Wedding Cakes) in the dessert menu,
-            # regardless of event type — customers ask for cake at birthdays too.
-            items.extend(cat_items)
     return items
 
 
@@ -332,11 +333,13 @@ async def get_appetizer_context(state) -> str:
 
 
 async def get_dessert_context(state) -> str:
-    """Fetch dessert items from DB — includes Coffee and Desserts + Wedding Cakes for weddings."""
+    """Fetch dessert items from DB — Desserts only.
+
+    Wedding cakes are collected via a dedicated frontend flow and must not
+    appear in the dessert picker.
+    """
     menu = await load_menu_by_category()
     slots = _slots_context(state)
-    event_type = (slots.get("event_type") or "").lower()
-    is_wedding = "wedding" in event_type
 
     dessert_items = []
     for cat_name, items in menu.items():
@@ -352,8 +355,6 @@ async def get_dessert_context(state) -> str:
                                                   "price_type": item["price_type"]})
                 else:
                     dessert_items.append(item)
-        elif is_wedding and "cake" in cat_lower:
-            dessert_items.extend(items)
 
     formatted = _format_items_list(dessert_items) if dessert_items else "No dessert items available."
     return (

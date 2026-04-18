@@ -10,10 +10,17 @@ from agent.nodes.helpers import (
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 from agent.nodes.menu import get_dessert_context, _resolve_to_db_items
 from database.db_manager import load_menu_by_category
+from tools.modification_detection import _format_recent_messages
 
 
 def _slots_context(state):
-    return {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+    return {k: v["value"] for k, v in state["slots"].items() if v.get("filled") and not k.startswith("__")}
+
+
+def _recent_ctx(state, n: int = 6) -> str:
+    """Compact recent conversation block for injecting into LLM classifier prompts."""
+    msgs = list(state.get("messages", []))
+    return _format_recent_messages(msgs, n=n) if msgs else ""
 
 
 async def ask_utensils_node(state: ConversationState) -> ConversationState:
@@ -166,9 +173,11 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
     user_msg = get_last_human_message(state["messages"])
 
     # If user wants to skip, move on
+    ctx = _recent_ctx(state)
     skip_check = await llm_extract(
         "The customer was shown a dessert menu and asked to pick items. "
         "Are they skipping/declining desserts, or making selections?\n\n"
+        f"Recent conversation:\n{ctx}\n\n"
         "Return ONLY: skip or selecting",
         user_msg
     )
@@ -183,30 +192,23 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
         state["messages"] = add_ai_message(state, response)
         return state
 
-    # Load dessert-only menu for resolution (so "Coffee Bar" etc. match correctly)
-    menu = await load_menu_by_category()
-    dessert_menu = {}
-    for cat_name, items in menu.items():
-        cat_lower = cat_name.lower()
-        if any(kw in cat_lower for kw in ["dessert", "cake"]):
-            dessert_menu[cat_name] = items
+    # Use get_dessert_items() which expands bundle sub-items into individual named items.
+    # This ensures "Lemon Bars", "Fruit Tarts" etc. are resolvable even though they live
+    # in a bundle description in the DB rather than as standalone rows.
+    from agent.nodes.menu import get_dessert_items as _get_dessert_items
+    event_type_val = (get_slot_value(state["slots"], "event_type") or "").lower()
+    expanded_items = await _get_dessert_items(is_wedding="wedding" in event_type_val)
 
-    # Build numbered list — expand mini dessert bundle into individual items from description
-    numbered_lines = []
-    item_num = 1
-    for items in dessert_menu.values():
-        for item in items:
-            if "mini desserts" in item["name"].lower() and item.get("description"):
-                # Expand bundle: show each sub-item individually
-                for sub in item["description"].split(","):
-                    sub = sub.strip()
-                    if sub:
-                        numbered_lines.append(f"{item_num}. {sub}")
-                        item_num += 1
-            else:
-                numbered_lines.append(f"{item_num}. {item['name']}")
-                item_num += 1
+    # Build numbered list from expanded items for extraction context
+    numbered_lines = [f"{i+1}. {item['name']}" for i, item in enumerate(expanded_items)]
     numbered_str = "\n".join(numbered_lines)
+
+    # Build a flat lookup: name_lower → item dict (for resolution)
+    expanded_lookup = {item["name"].lower(): item for item in expanded_items}
+
+    # Also keep the raw dessert_menu for DB-resolution fallback
+    menu = await load_menu_by_category()
+    dessert_menu = {k: v for k, v in menu.items() if any(kw in k.lower() for kw in ["dessert", "cake"])}
 
     extraction = await llm_extract(
         "Extract the dessert selections from this customer message. "
@@ -217,8 +219,39 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
         user_msg
     )
 
-    # Try DB resolution first
-    matched_items, resolved_text = await _resolve_to_db_items(extraction, dessert_menu)
+    # Resolve against expanded items first (handles sub-items like Lemon Bars, Fruit Tarts),
+    # then fall back to raw DB resolution for bundle-level items.
+    extracted_names = [n.strip() for n in extraction.split(",") if n.strip()]
+    matched_items = []
+    resolved_names = []
+    for name in extracted_names:
+        name_lower = name.lower()
+        if name_lower in expanded_lookup:
+            matched_items.append(expanded_lookup[name_lower])
+            resolved_names.append(expanded_lookup[name_lower]["name"])
+        else:
+            # Partial match fallback
+            for key, item in expanded_lookup.items():
+                if name_lower in key or key in name_lower:
+                    if item["name"] not in resolved_names:
+                        matched_items.append(item)
+                        resolved_names.append(item["name"])
+                    break
+
+    if resolved_names:
+        # Format with prices for display
+        parts = []
+        for item in matched_items:
+            if item.get("unit_price"):
+                parts.append(f"{item['name']} (${item['unit_price']:.2f}/{item.get('price_type','pp')})")
+            else:
+                parts.append(item["name"])
+        resolved_text = ", ".join(p.split(" ($")[0] for p in parts)  # store names only, prices added by build
+        # Store as plain names for slot value
+        resolved_text = ", ".join(resolved_names)
+    else:
+        # Fall back to original DB resolution for bundle-level names
+        matched_items, resolved_text = await _resolve_to_db_items(extraction, dessert_menu)
 
     # Check if extraction matches mini dessert sub-items (from description, not standalone DB items).
     # Robust detection: any dessert item whose NAME contains "mini" contributes its description
@@ -357,7 +390,8 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
 
     # Resume-after-mod: if we entered here via a mid-conversation @AI edit,
     # just acknowledge and jump back to where the user was — don't run ask_more_desserts.
-    resume_node = state.pop("_resume_after_mod", None)
+    resume_slot = state["slots"].pop("__resume_after_mod__", None)
+    resume_node = resume_slot["value"] if resume_slot and resume_slot.get("filled") else None
     if resume_node:
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer just updated desserts to: {new_val}. "
@@ -398,6 +432,7 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
             last_ai_msg = msg.content
             break
 
+    ctx = _recent_ctx(state)
     intent = await llm_extract(
         "The AI just asked the customer if they want to add more desserts or if they're done. "
         "Based on the exact question + customer reply, determine their intent.\n\n"
@@ -406,6 +441,7 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
         "- 'no', 'nope', 'that's it', 'nothing else', 'all good', 'done' → done\n"
         "- Naming specific dessert items → more\n"
         "- Ambiguous one-word replies → lean 'more' if question was 'anything else?' (positive framing)\n\n"
+        f"Recent conversation:\n{ctx}\n\n"
         f"AI asked: {last_ai_msg}\n"
         f"Customer replied: {user_msg}\n\n"
         "Return ONLY: more or done",

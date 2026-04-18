@@ -820,7 +820,8 @@ async def collect_pending_details_node(state: ConversationState) -> Conversation
     """
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
-    asking = state.get("_pending_asking")
+    # Read from slots so it survives DB round-trips (top-level state keys are not persisted)
+    asking = (state["slots"].get("__pending_asking__") or {}).get("value")
     today = datetime.now()
 
     # --- Process the answer for whatever we asked last turn ---
@@ -872,15 +873,13 @@ async def collect_pending_details_node(state: ConversationState) -> Conversation
                     pass
 
         if resolved_ok:
-            state.pop("_pending_asking", None)
+            state["slots"].pop("__pending_asking__", None)
         elif wants_confirm_on_call:
             fill_slot(state["slots"], asking, "TBD — confirm on call")
-            state.pop("_pending_asking", None)
+            state["slots"].pop("__pending_asking__", None)
         else:
-            # Couldn't parse — re-ask the same slot, keep _pending_asking set.
-            response = (
-                f"Sorry, I didn't catch that. {_PENDING_SLOT_PROMPTS[asking]}"
-            )
+            # Couldn't parse — re-ask the same slot
+            response = f"Sorry, I didn't catch that. {_PENDING_SLOT_PROMPTS[asking]}"
             state["current_node"] = "collect_pending_details"
             state["messages"] = add_ai_message(state, response)
             return state
@@ -888,13 +887,16 @@ async def collect_pending_details_node(state: ConversationState) -> Conversation
     # --- Find the next TBD slot to ask about ---
     next_slot = _find_next_pending(state["slots"])
     if next_slot:
-        state["_pending_asking"] = next_slot
+        state["slots"]["__pending_asking__"] = {
+            "value": next_slot, "filled": True,
+            "modified_at": None, "modification_history": [],
+        }
         state["current_node"] = "collect_pending_details"
         state["messages"] = add_ai_message(state, _PENDING_SLOT_PROMPTS[next_slot])
         return state
 
     # Nothing left pending — go straight to contract generation.
-    state.pop("_pending_asking", None)
+    state["slots"].pop("__pending_asking__", None)
     response = (
         "Perfect — we've got everything we need. "
         "Your summary is being prepared and our team will review it shortly. Thanks!"

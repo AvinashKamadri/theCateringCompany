@@ -13,6 +13,19 @@ from database.db_manager import load_menu_by_category
 from tools.modification_detection import _format_recent_messages
 
 
+_DONE_PHRASES = frozenset({
+    "no", "nope", "nah", "nah thanks", "no thanks", "none", "nothing",
+    "im good", "i'm good", "good", "all good", "all set", "i'm set", "im set",
+    "that's it", "thats it", "that's all", "thats all", "done", "finish",
+    "finished", "finalize", "move on", "next", "skip", "ok", "okay",
+    "yes good", "looks good", "sounds good", "perfect", "great",
+})
+
+
+def _is_done(msg: str) -> bool:
+    return msg.strip().lower().rstrip("!.?,") in _DONE_PHRASES
+
+
 def _slots_context(state):
     return {k: v["value"] for k, v in state["slots"].items() if v.get("filled") and not k.startswith("__")}
 
@@ -432,21 +445,27 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
             last_ai_msg = msg.content
             break
 
-    ctx = _recent_ctx(state)
-    intent = await llm_extract(
-        "The AI just asked the customer if they want to add more desserts or if they're done. "
-        "Based on the exact question + customer reply, determine their intent.\n\n"
-        "Rules:\n"
-        "- 'yes', 'yeah', 'yep', 'sure' → more (they want to add more)\n"
-        "- 'no', 'nope', 'that's it', 'nothing else', 'all good', 'done' → done\n"
-        "- Naming specific dessert items → more\n"
-        "- Ambiguous one-word replies → lean 'more' if question was 'anything else?' (positive framing)\n\n"
-        f"Recent conversation:\n{ctx}\n\n"
-        f"AI asked: {last_ai_msg}\n"
-        f"Customer replied: {user_msg}\n\n"
-        "Return ONLY: more or done",
-        user_msg
-    )
+    # Short-circuit: unambiguous "done" phrases bypass the LLM entirely
+    if _is_done(user_msg):
+        intent_val = "done"
+    else:
+        ctx = _recent_ctx(state)
+        raw = await llm_extract(
+            "The AI just asked the customer if they want to add more desserts or if they're done. "
+            "Based on the exact question + customer reply, determine their intent.\n\n"
+            "Rules:\n"
+            "- 'yes', 'yeah', 'yep', 'sure' → more (they want to add more)\n"
+            "- 'no', 'nope', 'that's it', 'nothing else', 'all good', 'done', 'im good', 'i'm good' → done\n"
+            "- Naming specific dessert items → more\n"
+            "- Ambiguous one-word replies → lean 'done' unless the question was 'want more?' style\n\n"
+            f"Recent conversation:\n{ctx}\n\n"
+            f"AI asked: {last_ai_msg}\n"
+            f"Customer replied: {user_msg}\n\n"
+            "Return ONLY: more or done",
+            user_msg
+        )
+        intent_val = raw.strip().lower()
+    intent = intent_val
     if intent.strip().lower() != "more":
         context = f"Desserts finalized. Slots: {_slots_context(state)}"
         response = await llm_respond(

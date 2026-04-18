@@ -20,7 +20,11 @@
       "Bash(GIT_EDITOR=\"true\" git cherry-pick --continue)",
       "Bash(git rm *)",
       "Bash(npx tsc *)",
-      "Bash(grep -E \"^backend\\\\.env$|^ml-agent\\\\.env$\" .gitignore)"
+      "Bash(grep -E \"^backend\\\\.env$|^ml-agent\\\\.env$\" .gitignore)",
+      "Bash(tasklist /FI \"IMAGENAME eq python.exe\")",
+      "Bash(tasklist /FI \"IMAGENAME eq python3.exe\")",
+      "Bash(netstat -ano)",
+      "Bash(.venv/Scripts/python -c ' *)"
     ]
   }
 }

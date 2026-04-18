@@ -317,6 +317,16 @@ function parseCategorizedItems(content: string): CategoryGroup[] | null {
   return valid.length >= 2 ? valid : null;
 }
 
+// Normalize card labels to canonical slot values the ML agent expects.
+// Service-type cards are verbose for UX ("Drop-off (we deliver, no staff)")
+// but the agent's slot validator accepts only "drop-off" / "on-site".
+function normalizeCardValue(value: string): string {
+  const v = value.trim();
+  if (/^drop[-\s]?off\b/i.test(v)) return 'drop-off';
+  if (/^on[-\s]?site\b|^onsite\b/i.test(v)) return 'on-site';
+  return v;
+}
+
 // ─── Inline choice detection from AI messages ──────────────────────────────
 // Detects known question patterns and returns synthetic card options
 // Ordered: most specific first, yes/no last
@@ -694,7 +704,7 @@ function ItemSelector({
           {categories.map((group) => (
             <div key={group.category}>
               {group.category && (
-                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">
+                <p className="inline-block bg-white rounded-md border border-neutral-200 px-2.5 py-1 text-xs font-bold text-neutral-900 uppercase tracking-wider mb-2 shadow-sm">
                   {group.category}
                 </p>
               )}
@@ -725,9 +735,11 @@ function ItemSelector({
           ))}
         </div>
         {selected.length > 0 && (
-          <p className="text-xs text-neutral-500 mt-2">
-            <span className="font-medium text-neutral-800">{selected.length}</span>
-            {maxSelect ? `/${maxSelect}` : ''} selected — hit Send to confirm
+          <p className="mt-2">
+            <span className="inline-block bg-white/90 backdrop-blur-sm rounded-md px-2 py-0.5 text-xs text-neutral-700 shadow-sm">
+              <span className="font-semibold text-neutral-900">{selected.length}</span>
+              {maxSelect ? `/${maxSelect}` : ''} selected — hit Send to confirm
+            </span>
           </p>
         )}
       </div>
@@ -1301,7 +1313,19 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
 
       // ── Contact: email ──
       if (frontendStep === 'contact_email') {
-        onSlotsUpdate?.({ email: content } as any);
+        const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
+        const trimmed = content.trim();
+        if (!emailRegex.test(trimmed)) {
+          const retryMsg: ChatMessage = {
+            role: 'ai',
+            content: "Hmm, that doesn't look like a valid email. Could you double-check? (e.g., name@example.com)",
+            timestamp: new Date(),
+          };
+          setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, retryMsg] }));
+          // Stay on contact_email — don't advance.
+          return;
+        }
+        onSlotsUpdate?.({ email: trimmed } as any);
         const phoneMsg: ChatMessage = {
           role: 'ai',
           content: 'And your phone number?',
@@ -1662,7 +1686,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                        *  (e.g. desserts capped at 4) auto-sends. Menu and
                        *  appetizers are multi WITHOUT maxSelect → no auto-send,
                        *  user must press Send manually. */
-                      onAutoSend={(value) => handleSendMessage(value)}
+                      onAutoSend={(value) => handleSendMessage(normalizeCardValue(value))}
                     />
                     <span className="mt-1 inline-block bg-white/85 backdrop-blur-sm rounded-md px-2 py-0.5 text-xs text-neutral-600 shadow-sm">{time}</span>
                   </div>

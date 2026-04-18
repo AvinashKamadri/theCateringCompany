@@ -192,7 +192,36 @@ async def collect_dietary_node(state: ConversationState) -> ConversationState:
             state["current_node"] = "collect_dietary_details"
             state["messages"] = add_ai_message(state, response)
             return state
-        # intent_val == "detail" → fall through to existing extraction logic below
+        # intent_val == "detail" → fall through, but first check if it's a food request
+
+    # If the user is requesting a specific food item ("get me X", "add gluten-free bread")
+    # rather than stating a dietary restriction, route to special_requests instead.
+    is_food_request = await llm_extract(
+        "Is the customer making a specific FOOD ITEM REQUEST "
+        "(e.g. 'get me gluten free bread', 'add a vegan option', 'can we have X') "
+        "or stating a DIETARY RESTRICTION / ALLERGY "
+        "(e.g. 'I have a nut allergy', 'I am vegan', 'no pork', 'halal only')?\n"
+        "Return ONLY: request or restriction",
+        user_msg,
+    )
+    if is_food_request.strip().lower() == "request":
+        existing_sr = get_slot_value(state["slots"], "special_requests") or ""
+        merged_sr = (
+            f"{existing_sr}; {user_msg}"
+            if existing_sr and existing_sr.lower() not in ("none", "no", "")
+            else user_msg
+        )
+        fill_slot(state["slots"], "special_requests", merged_sr)
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nThe customer made a food request: '{user_msg}'. "
+            "This is a special request, not a dietary restriction. "
+            "Acknowledge it warmly and confirm it's noted. "
+            "Then ask: Is there anything else you need for your event?",
+            f"Context: {_slots_context(state)}",
+        )
+        state["current_node"] = "ask_anything_else"
+        state["messages"] = add_ai_message(state, response)
+        return state
 
     # Check if this is a follow-up clarification (user already has dietary stored)
     if existing_dietary and existing_dietary != "none":

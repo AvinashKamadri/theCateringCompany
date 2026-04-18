@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from agent.graph import build_conversation_graph
 from agent.state import initialize_empty_slots, ConversationState, SLOT_NAMES
 from agent.input_hints import get_input_hint
-from agent.nodes.helpers import set_current_project_id
+from agent.nodes.helpers import set_current_project_id, set_current_messages
 from database.db_manager import (
     save_conversation_state, save_message,
     load_conversation_state, load_messages,
@@ -69,7 +69,7 @@ class AgentOrchestrator:
             current_node = "start"
             slots = initialize_empty_slots()
 
-        # Set project ID for AI generation logging
+        # Set project ID and seed conversation history for AI generation logging
         set_current_project_id(project_id)
 
         # Rebuild messages from DB
@@ -83,6 +83,9 @@ class AgentOrchestrator:
 
         # Add current user message
         messages.append(HumanMessage(content=message))
+
+        # Seed conversation history so all llm_respond calls get full context automatically
+        set_current_messages(messages)
 
         # Save user message to messages table
         await save_message(
@@ -151,8 +154,8 @@ class AgentOrchestrator:
             ai_conversation_state_id=new_state_id,
         )
 
-        # Count filled slots
-        slots_filled = sum(1 for s in new_slots.values() if s.get("filled"))
+        # Count filled slots (exclude internal bookkeeping keys prefixed with __)
+        slots_filled = sum(1 for k, s in new_slots.items() if s.get("filled") and not k.startswith("__"))
 
         # Frontend hint for the next input widget
         input_hint = get_input_hint(new_node, result)

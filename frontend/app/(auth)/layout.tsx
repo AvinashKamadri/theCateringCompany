@@ -9,7 +9,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="flex min-h-screen">
       {/* Left panel — catering hero photo with tagline overlay */}
-      <div className="hidden lg:flex lg:w-5/12 relative overflow-hidden bg-black">
+      <div className="hidden lg:flex lg:w-5/12 relative overflow-hidden bg-black rounded-r-[40px] shadow-[0_20px_60px_-20px_rgba(0,0,0,0.5)]">
         {/* Background photo. Swap the src to any image in /public if desired. */}
         <img
           src="/login-bg1.jpg"

@@ -37,8 +37,23 @@ interface SessionSummary extends StoredSession {
   isCompleted: boolean;
   clientName?: string;
   eventType?: string;
+  eventDate?: string;
   loading: boolean;
   error?: boolean;
+}
+
+function formatRelativeTime(date: Date): string {
+  const now = Date.now();
+  const then = date.getTime();
+  const diffSec = Math.round((now - then) / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.round(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 function loadStoredSessions(): StoredSession[] {
@@ -256,10 +271,10 @@ function AiIntakeContent() {
   const [isSaving, setIsSaving] = useState(false);
   const [draftProjectId, setDraftProjectId] = useState<string | undefined>(undefined);
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
-    searchParams.get('thread') ?? undefined
+    searchParams?.get('thread') ?? undefined
   );
   const [view, setView] = useState<'picker' | 'chat'>(
-    searchParams.get('thread') ? 'chat' : 'picker'
+    searchParams?.get('thread') ? 'chat' : 'picker'
   );
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
@@ -303,6 +318,7 @@ function AiIntakeContent() {
                     isCompleted: conv.is_completed ?? false,
                     clientName: (conv.slots as any)?.name ?? undefined,
                     eventType: (conv.slots as any)?.event_type ?? undefined,
+                    eventDate: (conv.slots as any)?.event_date ?? undefined,
                     loading: false,
                   }
                 : p
@@ -322,10 +338,9 @@ function AiIntakeContent() {
   const titleUpdatedRef = useRef(false);
 
   const handleSlotsUpdate = async (slots: Partial<ContractData>) => {
-    // Full replace when slots look like a complete object from the API (has name or event_type),
-    // otherwise merge partial updates (email, phone from frontend)
-    const isFullUpdate = 'name' in slots || 'event_type' in slots || 'selected_dishes' in slots;
-    setCurrentSlots((prev) => isFullUpdate ? { ...slots } : { ...prev, ...slots });
+    // Always merge — API responses include all filled slots, frontend patches are single-field.
+    // Merging ensures frontend-captured fields (email, phone) aren't wiped by API responses.
+    setCurrentSlots((prev) => ({ ...prev, ...slots }));
 
     // Update project title (once only)
     if (draftProjectId && !titleUpdatedRef.current) {
@@ -464,80 +479,100 @@ function AiIntakeContent() {
               </div>
 
               {/* Session list */}
-              <div className="max-w-lg mx-auto bg-white rounded-xl border border-neutral-200 overflow-hidden">
-                <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-neutral-100">
-                  <h2 className="font-semibold text-neutral-900">Your event chats</h2>
-                  <p className="text-sm text-neutral-500 mt-0.5">Pick up where you left off</p>
+              <div className="max-w-lg mx-auto tc-glossy rounded-2xl overflow-hidden">
+                <div className="px-5 sm:px-6 py-4 sm:py-5 border-b border-neutral-100 flex items-end justify-between">
+                  <div>
+                    <h2 className="font-semibold text-neutral-900 text-base">Your event chats</h2>
+                    <p className="text-xs text-neutral-500 mt-0.5">Pick up where you left off</p>
+                  </div>
+                  {sessions.length > 0 && (
+                    <span className="text-[11px] font-medium text-neutral-400 tabular-nums">
+                      {sessions.length} {sessions.length === 1 ? 'session' : 'sessions'}
+                    </span>
+                  )}
                 </div>
                 <div className="divide-y divide-neutral-100">
+                  {/* New event — primary CTA row */}
                   <button
                     onClick={() => { setActiveThreadId(undefined); setCurrentSlots({}); setProgress({ filled: 0, total: 20 }); setView('chat'); }}
-                    className="w-full flex items-center gap-4 px-6 py-4 hover:bg-neutral-50 transition-colors text-left"
+                    className="group w-full flex items-center gap-4 px-5 sm:px-6 py-4 hover:bg-neutral-50/70 transition-colors text-left"
                   >
-                    <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center shrink-0">
-                      <Plus className="w-5 h-5 text-white" />
+                    <div className="tc-glossy-dark w-11 h-11 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-[1.04] transition-transform">
+                      <Plus className="w-5 h-5 text-white" strokeWidth={2.5} />
                     </div>
-                    <div className="flex-1">
-                      <p className="font-medium text-neutral-900">Plan a new event</p>
-                      <p className="text-sm text-neutral-400">Chat with our assistant to build your perfect menu</p>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-neutral-900">Plan a new event</p>
+                      <p className="text-xs text-neutral-500 mt-0.5">Start a fresh chat with the assistant</p>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-neutral-300" />
+                    <ChevronRight className="w-4 h-4 text-neutral-300 group-hover:text-neutral-600 group-hover:translate-x-0.5 transition-all" />
                   </button>
 
-                  {sessions.map((s) => (
-                    <button
-                      key={s.threadId}
-                      onClick={() => { setActiveThreadId(s.threadId); setView('chat'); }}
-                      disabled={s.error}
-                      className="w-full flex items-center gap-4 px-6 py-4 hover:bg-neutral-50 transition-colors text-left disabled:opacity-40"
-                    >
-                      <div className="w-10 h-10 bg-neutral-100 rounded-xl flex items-center justify-center shrink-0">
-                        {s.loading
-                          ? <Loader2 className="w-4 h-4 text-neutral-400 animate-spin" />
-                          : <MessageSquare className="w-4 h-4 text-neutral-500" />
-                        }
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-neutral-900 truncate">
-                            {s.loading ? 'Loading…'
-                              : s.clientName ? `${s.clientName}${s.eventType ? ` · ${s.eventType}` : ''}`
-                              : 'Intake session'}
-                          </p>
-                          {s.isCompleted && !s.loading && (
-                            <span className="shrink-0 text-xs bg-neutral-900 text-white px-2 py-0.5 rounded-full">
-                              Complete
-                            </span>
-                          )}
+                  {sessions.map((s) => {
+                    const pct = s.totalSlots > 0 ? Math.round((s.slotsFilled / s.totalSlots) * 100) : 0;
+                    const initial = s.clientName?.trim().charAt(0).toUpperCase() || '';
+                    const title = s.loading
+                      ? 'Loading…'
+                      : s.clientName
+                        ? s.clientName
+                        : 'Untitled draft';
+                    const subtitle = s.loading
+                      ? ' '
+                      : s.error
+                        ? 'Unavailable'
+                        : [
+                            s.eventType,
+                            s.eventDate && new Date(s.eventDate).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+                          ].filter(Boolean).join(' · ') || 'No details yet';
+                    const relTime = formatRelativeTime(new Date(s.lastActiveAt));
+                    return (
+                      <button
+                        key={s.threadId}
+                        onClick={() => { setActiveThreadId(s.threadId); setView('chat'); }}
+                        disabled={s.error}
+                        className="group w-full flex items-center gap-4 px-5 sm:px-6 py-4 hover:bg-neutral-50/70 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-sm font-semibold ${
+                          s.isCompleted
+                            ? 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]'
+                            : initial
+                              ? 'bg-gradient-to-br from-neutral-700 to-neutral-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]'
+                              : 'bg-neutral-100 text-neutral-400'
+                        }`}>
+                          {s.loading
+                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                            : initial || <MessageSquare className="w-4 h-4" />}
                         </div>
-                        <div className="flex items-center gap-3 mt-1">
-                          {!s.loading && !s.error && (
-                            <>
-                              <div className="flex items-center gap-1.5">
-                                <div className="w-16 h-1 bg-neutral-100 rounded-full overflow-hidden">
-                                  <div
-                                    className="h-full bg-black rounded-full"
-                                    style={{ width: `${(s.slotsFilled / s.totalSlots) * 100}%` }}
-                                  />
-                                </div>
-                                <span className="text-xs text-neutral-400 tabular-nums">
-                                  {s.slotsFilled}/{s.totalSlots}
-                                </span>
-                              </div>
-                              <span className="text-xs text-neutral-400">
-                                {new Date(s.lastActiveAt).toLocaleDateString([], {
-                                  month: 'short', day: 'numeric',
-                                  hour: '2-digit', minute: '2-digit',
-                                })}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold text-neutral-900 truncate text-sm">{title}</p>
+                            {s.isCompleted && !s.loading && (
+                              <span className="shrink-0 text-[10px] font-medium bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-full border border-emerald-200">
+                                Complete
                               </span>
-                            </>
+                            )}
+                          </div>
+                          <p className="text-xs text-neutral-500 truncate mt-0.5">{subtitle}</p>
+                          {!s.loading && !s.error && (
+                            <div className="flex items-center gap-2 mt-2">
+                              <div className="flex-1 max-w-[140px] h-1 bg-neutral-100 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all ${s.isCompleted ? 'bg-emerald-600' : 'bg-neutral-900'}`}
+                                  style={{ width: `${Math.max(pct, s.isCompleted ? 100 : 4)}%` }}
+                                />
+                              </div>
+                              <span className="text-[10px] text-neutral-400 tabular-nums font-medium">
+                                {pct}%
+                              </span>
+                            </div>
                           )}
-                          {s.error && <span className="text-xs text-red-400">Unavailable</span>}
                         </div>
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-neutral-300 shrink-0" />
-                    </button>
-                  ))}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className="text-[11px] text-neutral-400 whitespace-nowrap">{relTime}</span>
+                          <ChevronRight className="w-4 h-4 text-neutral-300 group-hover:text-neutral-600 group-hover:translate-x-0.5 transition-all" />
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>

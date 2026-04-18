@@ -13,10 +13,16 @@ from agent.nodes.helpers import (
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS, EXTRACTION_PROMPTS
 from database.db_manager import load_menu_by_category, load_dessert_items
+from tools.modification_detection import _format_recent_messages
 
 
 def _slots_context(state):
-    return {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
+    return {k: v["value"] for k, v in state["slots"].items() if v.get("filled") and not k.startswith("__")}
+
+
+def _recent_ctx(state, n: int = 6) -> str:
+    msgs = list(state.get("messages", []))
+    return _format_recent_messages(msgs, n=n) if msgs else ""
 
 
 async def get_appetizer_items() -> list[dict]:
@@ -569,7 +575,8 @@ async def select_dishes_node(state: ConversationState) -> ConversationState:
         return state
 
     # Resume-after-mod: mid-conv @AI edit just updates the slot and returns.
-    resume_node = state.pop("_resume_after_mod", None)
+    resume_slot = state["slots"].pop("__resume_after_mod__", None)
+    resume_node = resume_slot["value"] if resume_slot and resume_slot.get("filled") else None
     if resume_node:
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer just updated their main dishes to: {resolved_text}. "
@@ -703,7 +710,8 @@ async def select_appetizers_node(state: ConversationState) -> ConversationState:
         return state
 
     # Resume-after-mod: mid-conv @AI edit just updates the slot and returns.
-    resume_node = state.pop("_resume_after_mod", None)
+    resume_slot = state["slots"].pop("__resume_after_mod__", None)
+    resume_node = resume_slot["value"] if resume_slot and resume_slot.get("filled") else None
     if resume_node:
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer just updated their appetizers to: {resolved_text}. "
@@ -841,6 +849,7 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
     # Use LLM to determine: happy with selections (finalize) vs want to redo (re-show menu)
     # IMPORTANT: Pass the exact AI question so classifier understands framing direction.
     # "Everything good?" + "no" = change. "Any changes?" + "no" = keep. Framing matters.
+    ctx = _recent_ctx(state)
     intent = await llm_extract(
         "Below is the exact question the AI asked the customer, followed by the customer's reply. "
         "Based on what the CUSTOMER ACTUALLY WANTS (not just yes/no word), determine if they want to "
@@ -851,6 +860,7 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
         "- 'Any changes?' + 'no/nope/nothing' → keep\n"
         "- 'Any changes?' + 'yes/yeah' → change\n"
         "- If they name a specific dish to add/remove → change\n\n"
+        f"Recent conversation:\n{ctx}\n\n"
         f"AI asked: {last_ai_msg}\n"
         f"Customer replied: {user_msg}\n\n"
         "Return ONLY: change or keep",
@@ -870,16 +880,19 @@ async def ask_menu_changes_node(state: ConversationState) -> ConversationState:
             )
             state["current_node"] = "ask_desserts"
         else:
-            # Re-show the full menu — Python built
+            # Show the menu WITH current selection highlighted — route to collect_menu_changes
+            # so picking an item does add/remove rather than wiping the full selection.
+            current_dishes = get_slot_value(state["slots"], "selected_dishes") or ""
+            current_note = f"**Your current selection:** {current_dishes}\n\n" if current_dishes else ""
             _, categorized = await get_main_dish_items()
             menu_list = build_numbered_list([], categories=categorized, category_headers=True)
             intro = await llm_respond(
-                f"{SYSTEM_PROMPT}\n\nCustomer wants to re-select dishes. "
-                "Write a casual 1-line transition. Do NOT list items.",
+                f"{SYSTEM_PROMPT}\n\nCustomer wants to change their dish selection. "
+                "Write a casual 1-line transition telling them to tell you what to add, remove, or swap. Do NOT list items.",
                 f"Current menu: {_slots_context(state)}"
             )
-            response = f"{intro}\n\n{menu_list}\n\nPick 3 to 5 dishes!"
-            state["current_node"] = "select_dishes"
+            response = f"{intro}\n\n{current_note}{menu_list}\n\nTell me what to add, remove, or swap!"
+            state["current_node"] = "collect_menu_changes"
     else:
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n"

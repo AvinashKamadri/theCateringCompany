@@ -15,7 +15,7 @@ function SignInForm() {
   // If already authenticated (e.g. back-button after login), push forward
   useEffect(() => {
     if (isAuthenticated) {
-      router.replace(searchParams.get('redirect') || '/projects');
+      router.replace(searchParams?.get('redirect') || '/projects');
     }
   }, [isAuthenticated, router, searchParams]);
   const [showPassword, setShowPassword] = useState(false);
@@ -33,7 +33,7 @@ function SignInForm() {
         document.cookie = `app_jwt=${data.accessToken}; path=/; max-age=7200; SameSite=Lax`;
       }
       setUser(data.user);
-      const redirect = searchParams.get("redirect");
+      const redirect = searchParams?.get("redirect");
       router.replace(redirect || "/projects");
     } catch (err: any) {
       setError(err.message || "Invalid email or password.");

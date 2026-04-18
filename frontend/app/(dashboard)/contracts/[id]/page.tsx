@@ -73,7 +73,7 @@ const STATUS_CONFIG: Record<string, { label: string; icon: any; style: string }>
 export default function ContractDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const contractId = params.id as string;
+  const contractId = params?.id as string;
   const { user } = useAuthStore();
 
   const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));

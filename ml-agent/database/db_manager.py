@@ -215,12 +215,23 @@ async def save_message(
     if sender_type in ("client", "human"):
         sender_type = "user"
 
+    # Resolve author_id: AI messages use system user, user messages use provided
+    # UUID if valid, otherwise null (anonymous intake conversation)
+    import re as _re
+    _UUID_RE = _re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.I)
+    if sender_type == "ai":
+        resolved_author = SYSTEM_USER_ID
+    elif author_id and _UUID_RE.match(str(author_id)):
+        resolved_author = author_id
+    else:
+        resolved_author = None
+
     await client.messages.create(
         data={
             "id": msg_id,
             "thread_id": thread_id,
             "project_id": project_id,
-            "author_id": None,
+            "author_id": resolved_author,
             "sender_type": sender_type,
             "content": content,
             "ai_conversation_state_id": ai_conversation_state_id,
@@ -259,7 +270,6 @@ async def save_contract(
     body: dict,
     total_amount: float | None = None,
     previous_version_id: str | None = None,
-    user_id: str | None = None,
 ) -> str:
     """
     Save a generated contract with versioning.
@@ -281,16 +291,6 @@ async def save_contract(
     year = event_date[:4] if event_date and len(event_date) >= 4 else "2026"
     title = f"@{client_name} {year}.docx"
 
-    # Resolve created_by: use passed user_id, or fall back to project owner
-    created_by = user_id
-    if not created_by:
-        project = await client.projects.find_unique(
-            where={"id": project_id},
-            include={"users_projects_owner_user_idTousers": True},
-        )
-        if project:
-            created_by = project.owner_user_id
-
     await client.contracts.create(
         data={
             "id": contract_id,
@@ -303,7 +303,7 @@ async def save_contract(
             "body": Json(body),
             "total_amount": Decimal(str(total_amount)) if total_amount else None,
             "ai_generated": True,
-            "created_by": created_by,
+            "created_by": SYSTEM_USER_ID,
             "is_active": True,
         }
     )
@@ -529,7 +529,7 @@ async def log_ai_generation(
             "entity_type": entity_type,
             "entity_id": entity_id,
             "project_id": project_id,
-            "triggered_by": None,
+            "triggered_by": SYSTEM_USER_ID,
             "model": model,
             "prompt_version": prompt_version,
             "input_summary": Json(input_summary) if input_summary else None,

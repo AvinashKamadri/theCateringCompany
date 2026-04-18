@@ -2,8 +2,9 @@
 FastAPI server wrapping the catering intake agent.
 """
 # Code version — bump this to verify server is running latest code
-_CODE_VERSION = "v7-2026-03-26"
+_CODE_VERSION = "v6-2026-03-14"
 
+import os
 import uuid
 from contextlib import asynccontextmanager
 
@@ -46,9 +47,11 @@ async def get_version():
     """Check which code version the server is running."""
     return {"version": _CODE_VERSION}
 
-import os
-_cors_origins = os.environ.get("CORS_ORIGIN", "http://localhost:3000").split(",")
-
+_cors_origins_env = os.getenv("CORS_ORIGIN", "").strip()
+_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] or [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -139,7 +142,6 @@ async def chat(req: ChatRequest):
             event_date=slot_vals.get("event_date", ""),
             body=body,
             total_amount=contract_data.get("total_amount"),
-            user_id=resolved_user_id,
         )
 
         # Update project with event details
@@ -181,9 +183,9 @@ async def get_conversation(thread_id: str):
 
     messages = await load_messages(thread_id)
 
-    # Extract filled slot values
+    # Extract filled slot values (exclude internal bookkeeping keys prefixed with __)
     slots = state.get("slots", {})
-    filled_slots = {k: v["value"] for k, v in slots.items() if v.get("filled")}
+    filled_slots = {k: v["value"] for k, v in slots.items() if v.get("filled") and not k.startswith("__")}
 
     return {
         "thread_id": thread_id,
@@ -204,8 +206,9 @@ async def get_slots(thread_id: str):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     slots = state.get("slots", {})
-    filled = {k: v["value"] for k, v in slots.items() if v.get("filled")}
-    unfilled = [k for k, v in slots.items() if not v.get("filled")]
+    public_slots = {k: v for k, v in slots.items() if not k.startswith("__")}
+    filled = {k: v["value"] for k, v in public_slots.items() if v.get("filled")}
+    unfilled = [k for k, v in public_slots.items() if not v.get("filled")]
 
     return {
         "thread_id": thread_id,
@@ -213,7 +216,7 @@ async def get_slots(thread_id: str):
         "filled": filled,
         "unfilled": unfilled,
         "slots_filled": len(filled),
-        "total_slots": len(slots),
+        "total_slots": len(public_slots),
     }
 
 

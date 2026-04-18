@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 from langchain_core.messages import HumanMessage, AIMessage
 from agent.graph import build_conversation_graph
 from agent.state import initialize_empty_slots, ConversationState, SLOT_NAMES
+from agent.input_hints import get_input_hint
 from agent.nodes.helpers import set_current_project_id
 from database.db_manager import (
     save_conversation_state, save_message,
@@ -153,6 +154,9 @@ class AgentOrchestrator:
         # Count filled slots
         slots_filled = sum(1 for s in new_slots.values() if s.get("filled"))
 
+        # Frontend hint for the next input widget
+        input_hint = get_input_hint(new_node, result)
+
         return {
             "content": agent_content,
             "current_node": new_node,
@@ -164,4 +168,5 @@ class AgentOrchestrator:
             "thread_id": thread_id,
             "slots": new_slots,
             "contract_data": contract_data,
+            "input_hint": input_hint,
         }

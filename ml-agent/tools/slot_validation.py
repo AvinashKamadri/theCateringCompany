@@ -169,7 +169,19 @@ def validate_event_date(value: str) -> dict:
             return {
                 "valid": False,
                 "normalized_value": None,
-                "error_message": "Event date must be in the future"
+                "error_message": "Sorry, that date is in the past. Please pick a date within the next 6-7 months."
+            }
+
+        # Must be within booking window (~7 months)
+        max_date = now + timedelta(days=213)
+        if parsed_date.date() > max_date.date():
+            return {
+                "valid": False,
+                "normalized_value": None,
+                "error_message": (
+                    f"We only book events within the next 6-7 months. "
+                    f"Please pick a date between {now.strftime('%b %d, %Y')} and {max_date.strftime('%b %d, %Y')}."
+                ),
             }
 
         normalized = parsed_date.date().isoformat()
@@ -316,14 +328,27 @@ async def validate_slot(slot_name: str, value: str) -> dict:
             field_name="Event type"
         )
     
-    # For other slots (name, venue, special_requests), basic validation
-    elif slot_name in ["name", "venue", "special_requests"]:
+    elif slot_name == "email":
+        import re as _re
+        cleaned = value.strip().lower()
+        if _re.match(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$', cleaned):
+            return {"valid": True, "normalized_value": cleaned, "error_message": None}
+        return {
+            "valid": False,
+            "normalized_value": None,
+            "error_message": "Please provide a valid email address (e.g. name@example.com)"
+        }
+
+    # For other slots (name, venue, special_requests, etc.), basic validation
+    elif slot_name in ["name", "venue", "special_requests", "partner_name", "honoree_name",
+                       "company_name", "service_style", "meal_style", "appetizer_style",
+                       "tableware", "utensils", "rentals", "labor", "drinks", "bar_service"]:
         return {
             "valid": True,
             "normalized_value": value.strip(),
             "error_message": None
         }
-    
+
     else:
         return {
             "valid": False,

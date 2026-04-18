@@ -45,3 +45,62 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #a3a3a3;
 }
+
+/* ── Subtle animations ───────────────────────────────────── */
+@keyframes tc-slide-in-right {
+  from { opacity: 0; transform: translate3d(14px, 4px, 0) scale(0.985); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes tc-slide-in-left {
+  from { opacity: 0; transform: translate3d(-10px, 4px, 0) scale(0.985); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes tc-fade-in-up {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes tc-pop-in {
+  0%   { opacity: 0; transform: scale(0.92); }
+  60%  { opacity: 1; transform: scale(1.01); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes tc-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.tc-msg-user    { animation: tc-slide-in-right 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.tc-msg-ai      { animation: tc-slide-in-left 280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.tc-page-enter  { animation: tc-fade-in-up 340ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.tc-pop-in      { animation: tc-pop-in 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.tc-fade-in     { animation: tc-fade-in 260ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tc-msg-user, .tc-msg-ai, .tc-page-enter, .tc-pop-in, .tc-fade-in { animation: none !important; }
+}
+
+/* ── Confetti ────────────────────────────────────────────── */
+.tc-confetti-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  overflow: hidden;
+}
+.tc-confetti-piece {
+  position: absolute;
+  top: -10px;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  will-change: transform, opacity;
+  animation: tc-confetti-fall var(--tc-dur, 2400ms) cubic-bezier(0.22, 0.7, 0.3, 1) forwards;
+}
+@keyframes tc-confetti-fall {
+  0%   { transform: translate3d(0, -10vh, 0) rotate(0deg); opacity: 0; }
+  8%   { opacity: 1; }
+  100% { transform: translate3d(var(--tc-dx, 0), 110vh, 0) rotate(var(--tc-rot, 720deg)); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tc-confetti-layer { display: none; }
+}

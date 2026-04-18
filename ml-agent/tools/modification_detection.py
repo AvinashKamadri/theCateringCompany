@@ -26,12 +26,14 @@ SLOT_KEYWORDS = {
     "venue": ["venue", "location", "place", "address"],
     "service_type": ["service", "drop-off", "on-site", "onsite"],
     "event_type": ["wedding", "corporate", "birthday", "event type"],
+    "appetizer_style": ["station", "passed around", "pass around", "passing", "appetizer style", "serving style", "appetizer service"],
     "special_requests": ["dietary", "halal", "vegan", "allergy", "allergies", "restrictions"],
     "appetizers": ["appetizer", "hors d'oeuvres", "hors doeuvres", "starter", "starters", "apps"],
     "selected_dishes": ["dish", "dishes", "entree", "entrees", "main course", "main dish", "food selection", "menu", "the menu", "main menu"],
     "desserts": ["dessert", "desserts", "cake", "cupcake", "brownie", "cookie", "mousse", "cheesecake", "lemon bar", "blondie", "fruit tart", "mini dessert"],
+    "drinks": ["coffee service", "coffee bar", "bar service", "bar setup", "bar package", "beer", "wine", "open bar", "signature drink", "beverage", "drink service"],
     "utensils": ["utensil", "utensils", "bamboo", "plastic", "eco-friendly", "silverware", "flatware"],
-    "rentals": ["rental", "rentals", "linen", "linens", "table", "tables", "chair", "chairs"],
+    "rentals": ["rental", "rentals", "linen", "linens", "table rental", "chair rental"],
     "partner_name": ["fiance", "fiancé", "fiancee", "partner", "groom", "bride"],
     "company_name": ["company", "organization", "corp", "business", "firm"],
     "honoree_name": ["birthday person", "honoree", "whose birthday"],
@@ -47,7 +49,7 @@ SLOT_IDENTIFICATION_FUNCTION = {
         "properties": {
             "target_slot": {
                 "type": "string",
-                "enum": ["name", "phone", "event_date", "service_type", "event_type", "venue", "guest_count", "special_requests", "appetizers", "selected_dishes", "desserts", "utensils", "rentals", "partner_name", "company_name", "honoree_name"],
+                "enum": ["name", "email", "phone", "event_date", "service_type", "event_type", "venue", "guest_count", "special_requests", "appetizers", "selected_dishes", "desserts", "drinks", "appetizer_style", "utensils", "rentals", "partner_name", "company_name", "honoree_name"],
                 "description": "The slot/field the user wants to modify"
             },
             "new_value": {
@@ -159,16 +161,19 @@ Current booking details:
 
 The user is trying to modify one of these fields:
 - name: Client's name
+- email: Email address
 - phone: Phone number
 - event_date: Date of the event
 - service_type: Service type (drop-off or on-site)
 - event_type: Event category (Wedding, Corporate, Birthday, Social, Custom)
 - venue: Venue details (address, location)
 - guest_count: Number of guests
-- special_requests: Dietary restrictions, allergies, special requests
+- special_requests: Dietary restrictions, allergies, special requests — NOT drinks or bar
 - appetizers: Appetizer / hors d'oeuvres selections (add or remove specific items)
 - selected_dishes: Main dish / entrée / menu selections (add or remove specific items; "the menu" or "main menu" refers to this)
 - desserts: Dessert selections (add or remove items like brownies, mousse cup, cake, etc.)
+- drinks: Drink / beverage / coffee / bar service selections — coffee service, bar packages, beer & wine, open bar, etc.
+- appetizer_style: How appetizers are served — passed around by staff or set up at a station
 - utensils: Utensil type (bamboo, plastic, eco-friendly)
 - rentals: Rental items (linens, tables, chairs)
 - partner_name: Fiancé/partner name (weddings)

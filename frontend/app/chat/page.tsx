@@ -14,6 +14,15 @@ import {
 } from 'lucide-react';
 import { AppNav } from '@/components/layout/app-nav';
 
+function getMenuImageUrl(name: string): string | null {
+  const clean = name
+    .replace(/\s*\(.*?\)\s*/g, '').replace(/\s*\$[\d.,]+\/?\w*/g, '').trim()
+    .toLowerCase().replace(/[&]/g, 'and').replace(/[\/]/g, '-').replace(/w\//g, 'w-')
+    .replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return clean ? `/menu-images/${clean}.jpg` : null;
+}
+
+const STAFF_DOMAINS = ['@catering-company.com'];
 const STORAGE_KEY = 'tc_chat_sessions';
 
 interface StoredSession {
@@ -161,14 +170,21 @@ function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
               </div>
               <div className="relative">
                 <div className={`space-y-2 overflow-hidden transition-all duration-300 ${itemsOpen ? 'max-h-[2000px]' : 'max-h-[198px]'}`}>
-                  {foodItems.map((item, i) => (
-                    <div key={i} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100">
-                      <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
-                        <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
+                  {foodItems.map((item, i) => {
+                    const imgUrl = getMenuImageUrl(item);
+                    return (
+                      <div key={i} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100">
+                        {imgUrl ? (
+                          <img src={imgUrl} alt={item} className="w-8 h-8 rounded-md object-cover shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                        ) : (
+                          <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
+                            <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
+                          </div>
+                        )}
+                        <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
                       </div>
-                      <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 {!itemsOpen && foodItems.length > 4 && (
                   <div className="absolute bottom-0 left-0 right-0 h-16 bg-linear-to-t from-white to-transparent pointer-events-none" />
@@ -251,7 +267,7 @@ function AiIntakeContent() {
   const [, setProgress] = useState<{ filled: number; total: number }>({ filled: 0, total: 20 });
   const [mobileEventPlanOpen, setMobileEventPlanOpen] = useState(false);
 
-  const isStaff = user?.role === 'staff' || user?.email?.toLowerCase().endsWith('@catering-company.com');
+  const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));
 
   useEffect(() => {
     if (!isAuthenticated) { router.push('/signin'); return; }
@@ -306,7 +322,10 @@ function AiIntakeContent() {
   const titleUpdatedRef = useRef(false);
 
   const handleSlotsUpdate = async (slots: Partial<ContractData>) => {
-    setCurrentSlots((prev) => ({ ...prev, ...slots }));
+    // Full replace when slots look like a complete object from the API (has name or event_type),
+    // otherwise merge partial updates (email, phone from frontend)
+    const isFullUpdate = 'name' in slots || 'event_type' in slots || 'selected_dishes' in slots;
+    setCurrentSlots((prev) => isFullUpdate ? { ...slots } : { ...prev, ...slots });
 
     // Update project title (once only)
     if (draftProjectId && !titleUpdatedRef.current) {
@@ -336,6 +355,11 @@ function AiIntakeContent() {
         return String(val).split(',').map((v: string) => v.trim()).filter(Boolean);
       };
 
+      // Extract email and phone from slots
+      const contactPhone = (s as any).phone || (s as any).contact_phone || undefined;
+      const contactEmail = (s as any).email || (s as any).contact_email || undefined;
+      const weddingCake = (s as any).wedding_cake || undefined;
+
       const response = await apiClient.post('/projects/ai-intake', {
         client_name:          s.name,
         event_type:           s.event_type,
@@ -344,6 +368,8 @@ function AiIntakeContent() {
         service_type:         s.service_type,
         venue_name:           s.venue,
         venue_address:        s.venue,
+        contact_email:        contactEmail,
+        contact_phone:        contactPhone,
         main_dishes:          parseList(s.selected_dishes),
         appetizers:           parseList(s.appetizers),
         desserts:             parseList(s.desserts),
@@ -353,6 +379,7 @@ function AiIntakeContent() {
           s.utensils && s.utensils !== 'no' ? `Utensils: ${s.utensils}` : null,
           s.rentals  && s.rentals  !== 'no' ? `Rentals: ${s.rentals}`   : null,
           s.florals  && s.florals  !== 'no' ? `Florals: ${s.florals}`   : null,
+          weddingCake ? `Wedding Cake: ${weddingCake}` : null,
         ].filter(Boolean) as string[],
         modifications: s.special_requests && s.special_requests !== 'none'
           ? [s.special_requests] : [],

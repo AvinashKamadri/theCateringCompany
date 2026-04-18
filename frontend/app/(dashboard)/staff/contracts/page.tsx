@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { RoleGuard } from '@/components/auth/RoleGuard';
 import { CheckCircle, XCircle, Clock, Eye, Send, Loader2, AlertCircle } from 'lucide-react';
@@ -8,8 +8,28 @@ import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { toast } from 'sonner';
 
-// Contract review has moved to the CRM dashboard.
-export default function StaffContractsRedirect() {
+interface Contract {
+  id: string;
+  title: string;
+  status: string;
+  created_at: string;
+  body: any;
+  projects_contracts_project_idToprojects: {
+    id: string;
+    title: string;
+    event_date: string;
+    guest_count: number;
+    ai_event_summary: any;
+  };
+  users_contracts_created_byTousers: {
+    email: string;
+  };
+}
+
+// Helper to get projects data regardless of relation name
+const getProject = (contract: Contract) => contract.projects_contracts_project_idToprojects;
+
+export default function StaffContractsPage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const [contracts, setContracts] = useState<Contract[]>([]);

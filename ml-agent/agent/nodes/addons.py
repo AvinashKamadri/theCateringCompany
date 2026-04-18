@@ -5,7 +5,7 @@ Add-on nodes: utensils, desserts, rentals.
 from agent.state import ConversationState, fill_slot, get_slot_value
 from agent.nodes.helpers import (
     get_last_human_message, add_ai_message, llm_respond, llm_extract,
-    build_numbered_list,
+    build_numbered_list, norm_llm,
 )
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 from agent.nodes.menu import get_dessert_context, _resolve_to_db_items
@@ -23,10 +23,21 @@ async def ask_utensils_node(state: ConversationState) -> ConversationState:
 
     wants_utensils = await llm_extract(
         "The customer was asked if they want utensils for their event. "
-        "Are they saying yes or no?\n\nReturn ONLY: yes or no",
+        "Classify their answer. 'unclear' is for ambiguous like 'maybe', 'not sure', 'idk', "
+        "'what do you recommend'.\n\nReturn ONLY: yes, no, or unclear",
         user_msg
     )
-    if wants_utensils.strip().lower() == "yes":
+    intent_norm = norm_llm(wants_utensils)
+    if intent_norm == "unclear":
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer gave an ambiguous answer about utensils. "
+            "Briefly explain: utensils = forks/knives/spoons for guests. Ask them warmly "
+            "to decide yes or no. One short line.",
+            f"Customer said: {user_msg}"
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
+    if intent_norm == "yes":
         utensil_list = "1. Standard Plastic\n2. Eco-friendly / Biodegradable\n3. Bamboo"
         intro = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer wants utensils. Write one casual line asking which type. "
@@ -52,30 +63,51 @@ async def ask_utensils_node(state: ConversationState) -> ConversationState:
 
 async def select_utensils_node(state: ConversationState) -> ConversationState:
     """Process utensil selection."""
+    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extraction = await llm_extract(
-        "Extract the utensil type from the customer's message. "
-        "Valid options: plastic, eco-friendly, biodegradable, bamboo. "
-        "Return ONLY the type, or unclear if no clear selection.",
-        user_msg
-    )
-    if extraction.strip().lower() == "unclear":
+    # Fast path: numeric choice (1=Plastic, 2=Eco-friendly, 3=Bamboo)
+    _NUM_MAP = {"1": "Standard Plastic", "2": "Eco-friendly", "3": "Bamboo"}
+    bare_num = _re.fullmatch(r'\s*([123])\s*\.?\s*', user_msg.strip())
+    if bare_num:
+        extraction = _NUM_MAP[bare_num.group(1)]
+    else:
+        extraction = await llm_extract(
+            "Extract the utensil type from the customer's message. "
+            "Options shown: 1=Standard Plastic, 2=Eco-friendly/Biodegradable, 3=Bamboo. "
+            "Map numbers: 1→Standard Plastic, 2→Eco-friendly, 3→Bamboo. "
+            "Return ONLY: Standard Plastic, Eco-friendly, Bamboo, or unclear.",
+            user_msg
+        )
+    if norm_llm(extraction) == "unclear":
+        retry_slot = state["slots"].get("_retry_utensils", {})
+        retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
+        state["slots"]["_retry_utensils"] = {
+            "value": retries + 1, "filled": True,
+            "modified_at": None, "modification_history": [],
+        }
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer's answer didn't match a utensil type. "
-            "Briefly clarify, then re-ask: plastic, eco-friendly, or bamboo?",
+            "Acknowledge warmly, briefly clarify, then re-ask: plastic, eco-friendly, or bamboo? "
+            "One short line. DO NOT pick one for them.",
             f"Customer said: {user_msg}"
         )
         state["messages"] = add_ai_message(state, response)
         return state
-    fill_slot(state["slots"], "utensils", extraction.strip())
+    else:
+        state["slots"].pop("_retry_utensils", None)
+    chosen = extraction.strip()
+    fill_slot(state["slots"], "utensils", chosen)
 
     tableware_list = "1. Standard Disposable (included)\n2. Premium Disposable (gold or silver) — $1 per person\n3. Full China — pricing based on guest count"
     intro = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\nUtensils confirmed. Now transition to tableware — "
-        "write one casual line. Do NOT list the options.",
-        f"Utensils: {extraction}"
+        f"{SYSTEM_PROMPT}\n\n"
+        f"The customer picked '{chosen}' utensils — confirm that specific choice briefly "
+        f"(e.g. '{chosen.capitalize()} it is!' or 'Going with {chosen} — nice.'). "
+        "Then ask what tableware they want. One casual line total. "
+        "Do NOT say 'no utensils' — they ARE getting utensils. Do NOT list tableware options.",
+        f"Utensils chosen: {chosen}"
     )
     response = f"{intro}\n\n{tableware_list}"
 
@@ -97,7 +129,7 @@ async def ask_desserts_node(state: ConversationState) -> ConversationState:
         "Return ONLY: yes or no",
         user_msg
     )
-    wants_desserts = intent.strip().lower() != "no"
+    wants_desserts = norm_llm(intent) != "no"
 
     if wants_desserts:
         # Python builds the dessert list — LLM only generates intro
@@ -112,7 +144,7 @@ async def ask_desserts_node(state: ConversationState) -> ConversationState:
             "Do NOT list any items — the list will be appended automatically.",
             f"Event: {_slots_context(state)}"
         )
-        response = f"{intro}\n\n{dessert_list}\n\nPick up to 4 mini desserts!"
+        response = f"{intro}\n\n{dessert_list}\n\nPick up to 4 items total!"
         state["current_node"] = "select_desserts"
     else:
         fill_slot(state["slots"], "desserts", "no")
@@ -140,7 +172,7 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
         "Return ONLY: skip or selecting",
         user_msg
     )
-    if skip_check.strip().lower() == "skip":
+    if norm_llm(skip_check) == "skip":
         fill_slot(state["slots"], "desserts", "no")
         context = f"No desserts. Slots: {_slots_context(state)}"
         response = await llm_respond(
@@ -188,16 +220,24 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
     # Try DB resolution first
     matched_items, resolved_text = await _resolve_to_db_items(extraction, dessert_menu)
 
-    # Check if extraction matches mini dessert sub-items (from description, not standalone DB items)
+    # Check if extraction matches mini dessert sub-items (from description, not standalone DB items).
+    # Robust detection: any dessert item whose NAME contains "mini" contributes its description
+    # entries as valid sub-options. Also accept common exact bundle names as fallback.
     _BUNDLE_NAMES = {"mini desserts - select 4", "mini desserts"}
     _MINI_OPTIONS = set()
+    _DETECTED_BUNDLE_NAMES = set()
     for items in dessert_menu.values():
         for item in items:
-            if item["name"].lower() in _BUNDLE_NAMES:
-                for part in (item.get("description") or "").split(","):
+            name_lower = item["name"].lower()
+            is_bundle = name_lower in _BUNDLE_NAMES or "mini" in name_lower
+            if is_bundle and item.get("description"):
+                _DETECTED_BUNDLE_NAMES.add(name_lower)
+                for part in item["description"].split(","):
                     part = part.strip().lower()
                     if part:
                         _MINI_OPTIONS.add(part)
+    # Merge detected bundle names into canonical set so downstream checks work uniformly
+    _BUNDLE_NAMES = _BUNDLE_NAMES | _DETECTED_BUNDLE_NAMES
 
     extraction_lower = extraction.strip().lower()
 
@@ -266,51 +306,108 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
     deduped_new = [i for i in new_items_list if i.lower() not in existing_lower]
     combined = existing_items + deduped_new
 
-    # Enforce 4-item max for mini desserts
-    is_mini = "mini desserts" in resolved_text.lower() or (existing and "mini desserts" in existing.lower())
-    max_items = 4 if is_mini else 20
+    # Enforce 4-item cap for mini desserts — count only mini items (not cakes/cupcakes/coffee).
+    # Normalize names for matching (lowercase + collapse whitespace) so capitalization
+    # and punctuation variants don't slip through the cap.
+    def _norm(s: str) -> str:
+        return _re.sub(r'\s+', ' ', s.strip().lower())
+    mini_options_norm = {_norm(o) for o in _MINI_OPTIONS} if _MINI_OPTIONS else set()
+    mini_in_combined = [i for i in combined if _norm(i) in mini_options_norm] if mini_options_norm else []
+    # Fallback: if _MINI_OPTIONS is empty, treat ALL selected items as mini if resolved_text had the prefix
+    has_mini_prefix = "mini desserts" in resolved_text.lower() or (existing and "mini desserts" in (existing or "").lower())
+    if not mini_options_norm and has_mini_prefix:
+        mini_in_combined = combined  # treat all as mini
 
-    if len(combined) > max_items:
-        # Too many — CLEAR previous selections and start fresh
-        fill_slot(state["slots"], "desserts", None)
-        state["slots"]["desserts"]["filled"] = False
-        # Python-render the dessert options
-        sorted_options = sorted(_MINI_OPTIONS, key=str.lower)
-        dessert_reask_list = "\n".join(f"{i+1}. {opt.title()}" for i, opt in enumerate(sorted_options))
+    # Absolute total cap: max 4 dessert items total (mini + non-mini combined)
+    MINI_CAP = 4
+    TOTAL_CAP = 4
+    over_mini = len(mini_in_combined) > MINI_CAP
+    over_total = len(combined) > TOTAL_CAP
+
+    if over_mini or over_total:
+        # Cap exceeded — clear the selection and re-present the dessert menu so the customer re-picks.
+        state["slots"]["desserts"] = {
+            "value": None, "filled": False,
+            "modified_at": None, "modification_history": [],
+        }
+        from agent.nodes.menu import get_dessert_items
+        event_type = (get_slot_value(state["slots"], "event_type") or "").lower()
+        d_items = await get_dessert_items(is_wedding="wedding" in event_type)
+        dessert_list = build_numbered_list(d_items, show_price=True)
         intro = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nCustomer picked {len(combined)} mini desserts but the limit is 4. "
-            "Tell them clearly: you can only pick 4 mini desserts. Ask them to re-select. "
-            "Do NOT list the options — the list will be appended automatically.",
+            f"{SYSTEM_PROMPT}\n\nCustomer tried to pick {len(combined)} desserts but the cap is {TOTAL_CAP}. "
+            "Tell them warmly, in ONE short line, that we can't keep more than 4 items and ask them to re-pick up to 4. "
+            "Do NOT list any items — the list is appended automatically.",
             f"Customer tried: {', '.join(combined)}"
         )
-        response = f"{intro}\n\n{dessert_reask_list}\n\nPick up to 4 mini desserts!"
-        # Stay on select_desserts — loop back with clean slate
+        response = f"{intro}\n\n{dessert_list}\n\nPick up to 4 items total!"
+        state["current_node"] = "select_desserts"
         state["messages"] = add_ai_message(state, response)
         return state
 
-    new_val = f"Mini Desserts: {', '.join(combined)}" if is_mini else ", ".join(combined)
+    # Combine mini and non-mini into final slot value
+    non_mini_in_combined = [i for i in combined if _norm(i) not in mini_options_norm] if mini_options_norm else []
+    has_any_mini = bool(mini_in_combined) or has_mini_prefix
+    if has_any_mini and mini_in_combined:
+        mini_part = f"Mini Desserts: {', '.join(mini_in_combined)}"
+        new_val = f"{mini_part}, {', '.join(non_mini_in_combined)}" if non_mini_in_combined else mini_part
+    else:
+        new_val = ", ".join(combined)
     fill_slot(state["slots"], "desserts", new_val)
 
+    # Resume-after-mod: if we entered here via a mid-conversation @AI edit,
+    # just acknowledge and jump back to where the user was — don't run ask_more_desserts.
+    resume_node = state.pop("_resume_after_mod", None)
+    if resume_node:
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer just updated desserts to: {new_val}. "
+            "Briefly confirm the update in ONE short line. Do NOT ask any new question.",
+            f"Desserts: {new_val}"
+        )
+        state["current_node"] = resume_node
+        state["messages"] = add_ai_message(state, response)
+        return state
+
+    # No affirmation — go straight to the drinks step. If the user wants to
+    # change desserts later they'll do it via a natural correction which routes
+    # to check_modifications.
     context = f"Desserts selected: {new_val}\nSlots: {_slots_context(state)}"
     response = await llm_respond(
-        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['select_desserts']}", context
+        f"{SYSTEM_PROMPT}\n\nCustomer just finalized desserts: {new_val}. "
+        "Briefly confirm the selection in ONE short line (no follow-up question about adding more), "
+        "then immediately ask the drinks question.\n\n"
+        f"{NODE_PROMPTS['collect_drinks']}",
+        context
     )
 
-    state["current_node"] = "ask_more_desserts"
+    state["current_node"] = "collect_drinks"
     state["messages"] = add_ai_message(state, response)
     return state
 
 
 async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
     """Handle yes/no about more desserts."""
-    from agent.nodes.helpers import is_done_confirming
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
+    # Look at the last AI message to understand exact question framing
+    last_ai_msg = ""
+    from langchain_core.messages import AIMessage
+    for msg in reversed(list(state.get("messages", []))):
+        if isinstance(msg, AIMessage):
+            last_ai_msg = msg.content
+            break
+
     intent = await llm_extract(
-        "The customer was asked if they want to add more desserts. "
-        "Are they explicitly naming or requesting additional dessert items, or are they done? "
-        "Default to done for any ambiguous response. "
+        "The AI just asked the customer if they want to add more desserts or if they're done. "
+        "Based on the exact question + customer reply, determine their intent.\n\n"
+        "Rules:\n"
+        "- 'yes', 'yeah', 'yep', 'sure' → more (they want to add more)\n"
+        "- 'no', 'nope', 'that's it', 'nothing else', 'all good', 'done' → done\n"
+        "- Naming specific dessert items → more\n"
+        "- Ambiguous one-word replies → lean 'more' if question was 'anything else?' (positive framing)\n\n"
+        f"AI asked: {last_ai_msg}\n"
+        f"Customer replied: {user_msg}\n\n"
         "Return ONLY: more or done",
         user_msg
     )
@@ -391,25 +488,40 @@ async def ask_rentals_node(state: ConversationState) -> ConversationState:
 
 async def collect_tableware_node(state: ConversationState) -> ConversationState:
     """Collect tableware choice — disposable, premium, or china."""
+    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    choice = await llm_extract(
-        "The customer was shown tableware options: 1=Standard Disposable, 2=Premium Disposable ($1pp), 3=Full China. "
-        "They may type a number or name. Extract their choice. "
-        "Return ONLY: Standard Disposable, Premium Disposable, China, or unclear.",
-        user_msg
-    )
-    if choice.strip().lower() == "unclear":
+    # Fast path: numeric choice
+    _NUM_MAP = {"1": "Standard Disposable", "2": "Premium Disposable", "3": "China"}
+    bare_num = _re.fullmatch(r'\s*([123])\s*\.?\s*', user_msg.strip())
+    if bare_num:
+        choice = _NUM_MAP[bare_num.group(1)]
+    else:
+        choice = await llm_extract(
+            "The customer was shown tableware options: 1=Standard Disposable, 2=Premium Disposable ($1pp), 3=Full China. "
+            "Map numbers: 1→Standard Disposable, 2→Premium Disposable, 3→China. "
+            "Return ONLY: Standard Disposable, Premium Disposable, China, or unclear.",
+            user_msg
+        )
+    if norm_llm(choice) == "unclear":
+        retry_slot = state["slots"].get("_retry_tableware", {})
+        retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
+        state["slots"]["_retry_tableware"] = {
+            "value": retries + 1, "filled": True,
+            "modified_at": None, "modification_history": [],
+        }
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer's answer didn't match the tableware options. "
-            "Briefly explain you need to clarify, then re-ask with the 3 options: "
+            "Acknowledge warmly, briefly clarify, then re-ask with the 3 options: "
             "1. Standard Disposable (included), 2. Premium Disposable ($1pp), 3. Full China. "
-            "Keep it casual.",
+            "One short line. DO NOT pick one for them.",
             f"Customer said: {user_msg}"
         )
         state["messages"] = add_ai_message(state, response)
         return state
+    else:
+        state["slots"].pop("_retry_tableware", None)
     fill_slot(state["slots"], "tableware", choice.strip())
 
     # Check if plated was selected — auto-note china
@@ -476,29 +588,48 @@ async def collect_labor_node(state: ConversationState) -> ConversationState:
 
 async def collect_drinks_node(state: ConversationState) -> ConversationState:
     """Collect drink preferences — water/tea/lemonade included, coffee/bar upsell."""
+    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    intent = await llm_extract(
-        "The customer was told water/tea/lemonade are included, then asked if they want coffee or bar service. "
-        "Does their reply mean: coffee, bar, both, or none? "
-        "If they said 'yes' or something vague without specifying coffee or bar, return 'ask'. "
-        "Return ONLY one of: coffee, bar, both, none, ask",
-        user_msg
-    )
-    choice = intent.strip().lower()
+    # Fast path: numeric choice (1=Coffee, 2=Bar, 3=Both) — skip LLM
+    _NUM_MAP = {"1": "coffee", "2": "bar", "3": "both"}
+    stripped = user_msg.strip()
+    bare_num_match = _re.fullmatch(r'\s*([123])\s*\.?\s*', stripped)
+    if bare_num_match:
+        choice = _NUM_MAP[bare_num_match.group(1)]
+    else:
+        intent = await llm_extract(
+            "The customer was told water/tea/lemonade are included, then asked if they want coffee or bar service. "
+            "The options shown were: 1=Coffee Service, 2=Bar Service, 3=Both. "
+            "Map their reply to: coffee, bar, both, or none. "
+            "Number mapping: '1' → coffee, '2' → bar, '3' → both. "
+            "If they clearly decline (no/skip/nothing) → none. "
+            "If they said 'yes' or vague without specifying → 'ask'. "
+            "Return ONLY one of: coffee, bar, both, none, ask",
+            user_msg
+        )
+        choice = intent.strip().lower()
 
     if choice == "ask":
+        retry_slot = state["slots"].get("_retry_drinks", {})
+        retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
+        state["slots"]["_retry_drinks"] = {
+            "value": retries + 1, "filled": True,
+            "modified_at": None, "modification_history": [],
+        }
         drink_options = "1. Coffee Service\n2. Bar Service\n3. Both"
         intro = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nCustomer said yes but didn't specify. Acknowledge briefly, then ask which. "
-            "Do NOT list the options.",
+            f"{SYSTEM_PROMPT}\n\nCustomer said yes but didn't specify which drink service. "
+            "Acknowledge warmly, then ask which (coffee, bar, or both). Do NOT list the options. "
+            "One short line. DO NOT pick one for them.",
             f"Customer said: {user_msg}"
         )
         response = f"{intro}\n\n{drink_options}"
-        # Stay on this node
         state["messages"] = add_ai_message(state, response)
         return state
+    else:
+        state["slots"].pop("_retry_drinks", None)
 
     if choice == "bar" or choice == "both":
         # Route to bar service sub-flow
@@ -537,25 +668,45 @@ async def collect_drinks_node(state: ConversationState) -> ConversationState:
 
 async def collect_bar_service_node(state: ConversationState) -> ConversationState:
     """Bar service sub-flow — Beer & Wine, Signature, Full Open Bar."""
+    import re as _re
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    bar_choice = await llm_extract(
-        "The customer was shown bar options: 1=Beer & Wine, 2=Beer & Wine + Two Signature Drinks, 3=Full Open Bar. "
-        "They may type a number or name. Extract their selection. "
-        "Return ONLY: Beer & Wine, Beer & Wine + Two Signature Drinks, Full Open Bar, or unclear.",
-        user_msg
-    )
+    # Fast path: numeric choice
+    _NUM_MAP = {
+        "1": "Beer & Wine",
+        "2": "Beer & Wine + Two Signature Drinks",
+        "3": "Full Open Bar",
+    }
+    bare_num = _re.fullmatch(r'\s*([123])\s*\.?\s*', user_msg.strip())
+    if bare_num:
+        bar_choice = _NUM_MAP[bare_num.group(1)]
+    else:
+        bar_choice = await llm_extract(
+            "The customer was shown bar options: 1=Beer & Wine, 2=Beer & Wine + Two Signature Drinks, 3=Full Open Bar. "
+            "Map numbers: 1→Beer & Wine, 2→Beer & Wine + Two Signature Drinks, 3→Full Open Bar. "
+            "Return ONLY: Beer & Wine, Beer & Wine + Two Signature Drinks, Full Open Bar, or unclear.",
+            user_msg
+        )
     bar_choice = bar_choice.strip()
     if bar_choice.lower() == "unclear":
+        retry_slot = state["slots"].get("_retry_bar", {})
+        retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
+        state["slots"]["_retry_bar"] = {
+            "value": retries + 1, "filled": True,
+            "modified_at": None, "modification_history": [],
+        }
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer's answer didn't match the bar options. "
-            "Briefly explain you need to clarify, then re-ask with the 3 options: "
-            "1. Beer & Wine, 2. Beer & Wine + Two Signature Drinks, 3. Full Open Bar.",
+            "Acknowledge warmly, briefly clarify, then re-ask with the 3 options: "
+            "1. Beer & Wine, 2. Beer & Wine + Two Signature Drinks, 3. Full Open Bar. "
+            "One short line. DO NOT pick one for them.",
             f"Customer said: {user_msg}"
         )
         state["messages"] = add_ai_message(state, response)
         return state
+    else:
+        state["slots"].pop("_retry_bar", None)
 
     # Append bar choice to existing drinks
     existing = get_slot_value(state["slots"], "drinks") or ""

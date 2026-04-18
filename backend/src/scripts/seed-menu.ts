@@ -142,8 +142,8 @@ const menuData: MenuCategory[] = [
     ],
   },
   {
-    name: 'Themed Food Bars',
-    sort_order: 6,
+    name: 'BBQ Menus',
+    sort_order: 9,
     items: [
       {
         name: 'Beef Brisket & Chicken',
@@ -242,6 +242,9 @@ const menuData: MenuCategory[] = [
       { name: 'Fruit Tarts',                description: 'Available flavors: Raspberry, Strawberry, Blackberry, Lemon, Lime.',   unit_price: 5.25, price_type: 'per_person', tags: ['dessert', 'select-4'] },
     ],
   },
+
+  // ── III. Sweets & Wedding Cakes ────────────────────────────────────────
+
   {
     name: 'Coffee & Bar',
     sort_order: 14,
@@ -260,6 +263,13 @@ const menuData: MenuCategory[] = [
         name: 'Ice & Cooler Package',
         description: 'Ice (2 lbs per person @ $0.70/lb), Coolers included, Cups ($0.35 each).',
         unit_price: 1.75, price_type: 'per_person', tags: ['bar'],
+      },
+      {
+        name: 'Cupcakes',
+        description: 'Custom colors and flavors available.',
+        unit_price: 3.50,
+        price_type: 'per_unit',
+        tags: ['wedding'],
       },
     ],
   },

@@ -31,7 +31,7 @@ async def _extract_and_respond(state, slot_name, next_node, node_key):
     extracted = await llm_extract(prompt, user_msg)
     extracted = extracted.strip()
 
-    extraction_succeeded = not is_null_extraction(extracted)
+    extraction_succeeded = extracted and extracted.upper() != "NONE"
 
     if extraction_succeeded:
         # Normalize guest_count to int
@@ -58,103 +58,86 @@ async def _extract_and_respond(state, slot_name, next_node, node_key):
         )
         state["current_node"] = next_node
     else:
-        # Two-strike rule: after 2 failed extractions, accept raw input and move on
+        # Never accept raw text as a constrained-enum slot — keep re-asking instead.
         retry_key = f"_retry_{slot_name}"
         retry_slot = state["slots"].get(retry_key, {})
         retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
-
-        if retries >= 1:
-            fill_slot(state["slots"], slot_name, user_msg.strip())
-            context = (
-                f"Customer said: {user_msg}\nAccepted as {slot_name} (best effort).\n"
-                f"Slots so far: {slots_summary}"
-            )
-            response = await llm_respond(
-                f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS[node_key]}",
-                context,
-            )
-            state["current_node"] = next_node
-            state["slots"].pop(retry_key, None)
-        else:
-            state["slots"][retry_key] = {"value": retries + 1, "filled": True, "modified_at": None, "modification_history": []}
-            context = (
-                f"Customer said: {user_msg}\n"
-                f"Could NOT extract a clear value for '{slot_name}'.\n"
-                f"Slots so far: {slots_summary}"
-            )
-            response = await llm_respond(
-                f"{SYSTEM_PROMPT}\n\n"
-                f"Couldn't catch a clear answer for '{slot_name}'. "
-                f"First briefly explain why you're re-asking (e.g. 'I didn't quite catch that' or 'Just need to clarify'). "
-                f"Then re-ask the question in a different way. Keep it casual, one or two lines.",
-                context,
-            )
+        state["slots"][retry_key] = {"value": retries + 1, "filled": True, "modified_at": None, "modification_history": []}
+        context = (
+            f"Customer said: {user_msg}\n"
+            f"Could NOT extract a clear value for '{slot_name}'.\n"
+            f"Slots so far: {slots_summary}"
+        )
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n"
+            f"Couldn't catch a clear answer for '{slot_name}'. "
+            f"Acknowledge warmly, briefly explain you need a clear pick, then re-ask. "
+            f"One or two short lines. DO NOT move on without a valid answer.",
+            context,
+        )
 
     state["messages"] = add_ai_message(state, response)
     return state
 
 
 async def collect_name_node(state: ConversationState) -> ConversationState:
-    return await _extract_and_respond(state, "name", "collect_contact", "collect_name")
-
-
-async def collect_contact_node(state: ConversationState) -> ConversationState:
-    """Collect email and phone in one message."""
+    """Collect name, then go straight to event type (email/phone collected elsewhere)."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # Check what's already captured from previous turns
-    existing_email = get_slot_value(state["slots"], "email")
-    existing_phone = get_slot_value(state["slots"], "phone")
+    extracted = (await llm_extract(EXTRACTION_PROMPTS["name"], user_msg)).strip()
+    extraction_succeeded = extracted and extracted.upper() != "NONE"
 
-    email = await llm_extract(EXTRACTION_PROMPTS["email"], user_msg)
-    phone = await llm_extract(EXTRACTION_PROMPTS["phone"], user_msg)
-    email = email.strip()
-    phone = phone.strip()
+    retry_key = "_retry_name"
+    retry_slot = state["slots"].get(retry_key, {})
+    retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
 
-    got_email = (email and email.upper() != "NONE") or existing_email
-    got_phone = (phone and phone.upper() != "NONE") or existing_phone
-
-    if email and email.upper() != "NONE":
-        fill_slot(state["slots"], "email", email)
-    if phone and phone.upper() != "NONE":
-        fill_slot(state["slots"], "phone", phone)
-
-    # Use existing values if current extraction didn't find them
-    final_email = get_slot_value(state["slots"], "email")
-    final_phone = get_slot_value(state["slots"], "phone")
-
-    slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
-
-    event_type_list = "1. Wedding\n2. Birthday\n3. Corporate\n4. Social\n5. Custom"
-
-    if final_email and final_phone:
-        intro = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nGot email and phone. Confirm briefly, then ask what kind of event they're planning. "
-            "Do NOT list the event types — the list will be appended automatically.",
-            f"Email: {final_email}, Phone: {final_phone}\nSlots: {slots_summary}"
-        )
-        response = f"{intro}\n\n{event_type_list}"
-        state["current_node"] = "select_event_type"
-    elif final_email and not final_phone:
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nGot the email ({final_email}). Just need the phone number now.",
-            f"Email: {final_email}\nSlots: {slots_summary}"
-        )
-    elif final_phone and not final_email:
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nGot the phone ({final_phone}). Just need the email now.",
-            f"Phone: {final_phone}\nSlots: {slots_summary}"
-        )
+    if extraction_succeeded:
+        fill_slot(state["slots"], "name", extracted)
+        state["slots"].pop(retry_key, None)
     else:
+        state["slots"][retry_key] = {
+            "value": retries + 1, "filled": True,
+            "modified_at": None, "modification_history": [],
+        }
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_contact']}",
-            f"Couldn't extract email or phone from: {user_msg}"
+            f"{SYSTEM_PROMPT}\n\nThe customer didn't give a usable name (they said something like "
+            "'dunno' or 'idk'). Acknowledge warmly, then gently explain we need their name so our team "
+            "knows who the event is for. Sound natural, not robotic. One short line. "
+            "DO NOT move on without a name.",
+            f"Customer said: {user_msg}"
         )
-        # Stay on this node
+        state["messages"] = add_ai_message(state, response)
+        return state
 
+    # Successfully got name — confirm briefly AND ask event type (with list appended)
+    event_type_list = "1. Wedding\n2. Birthday\n3. Corporate\n4. Social\n5. Custom"
+    intro = await llm_respond(
+        f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_name']}",
+        f"Name captured: {extracted}"
+    )
+    response = f"{intro}\n\n{event_type_list}"
+    state["current_node"] = "select_event_type"
     state["messages"] = add_ai_message(state, response)
     return state
+
+
+# Phrases that mean "I don't know — decide later". Trigger deferral of
+# date/venue/guest_count to the end of the flow rather than blocking.
+_UNSURE_PHRASES = frozenset({
+    "idk", "i dont know", "i don't know", "dunno", "dont know", "don't know",
+    "not sure", "unsure", "no idea", "no clue", "have no clue", "not yet",
+    "tbd", "tba", "to be decided", "to be determined", "not decided",
+    "havent decided", "haven't decided", "will decide later", "decide later",
+    "later", "ask later", "ask me later", "skip for now", "skip",
+    "pata nahi", "pata nai", "nai malum", "nahi malum",
+})
+
+
+def _is_unsure(user_msg: str) -> bool:
+    """True when the user gave a stand-alone 'I don't know / decide later' reply."""
+    cleaned = user_msg.strip().lower().rstrip(".!?,")
+    return cleaned in _UNSURE_PHRASES
 
 
 _WEEKDAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
@@ -191,24 +174,16 @@ async def collect_fiance_name_node(state: ConversationState) -> ConversationStat
         state["slots"].pop("_retry_partner", None)
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_fiance_name']}\n\n"
-            f"Name captured: {extracted}. Confirm it casually, then ask: 'When's the big day?' "
-            "End with: 'Tip: type @AI anytime to update a previous answer.'",
+            f"Name captured: {extracted}. Confirm it casually, then ask: 'When's your wedding?'",
             f"Partner name captured: {extracted}",
-        )
-        state["current_node"] = "collect_event_date"
-    elif retries >= 1:
-        fill_slot(state["slots"], "partner_name", user_msg.strip())
-        state["slots"].pop("_retry_partner", None)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nPartner name: {user_msg.strip()}. Confirm, then ask: 'When's the big day?' "
-            "End with: 'Tip: type @AI anytime to update a previous answer.'",
-            f"Partner name: {user_msg.strip()}",
         )
         state["current_node"] = "collect_event_date"
     else:
         state["slots"]["_retry_partner"] = {"value": retries + 1, "filled": True, "modified_at": None, "modification_history": []}
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_fiance_name']}",
+            f"{SYSTEM_PROMPT}\n\nThe customer didn't give a partner/fiancé name. Acknowledge warmly, "
+            "then gently explain we need the partner's name for the wedding contract. Sound natural. "
+            "One short line. DO NOT move on without a name.",
             f"Need partner name. Customer said: {user_msg}",
         )
 
@@ -235,22 +210,16 @@ async def collect_birthday_person_node(state: ConversationState) -> Conversation
         fill_slot(state["slots"], "honoree_name", extracted)
         state["slots"].pop("_retry_honoree", None)
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nBirthday person is {extracted}. Confirm warmly, then ask: 'When's the big day?'",
+            f"{SYSTEM_PROMPT}\n\nBirthday person is {extracted}. Confirm warmly, then ask: 'When's the birthday?'",
             f"Birthday person: {extracted}",
-        )
-        state["current_node"] = "collect_event_date"
-    elif retries >= 1:
-        fill_slot(state["slots"], "honoree_name", user_msg.strip())
-        state["slots"].pop("_retry_honoree", None)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nBirthday person: {user_msg.strip()}. Confirm, then ask: 'When's the big day?'",
-            f"Birthday person: {user_msg.strip()}",
         )
         state["current_node"] = "collect_event_date"
     else:
         state["slots"]["_retry_honoree"] = {"value": retries + 1, "filled": True, "modified_at": None, "modification_history": []}
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_birthday_person']}",
+            f"{SYSTEM_PROMPT}\n\nThe customer didn't tell us whose birthday it is. Acknowledge warmly, "
+            "then gently explain we need a name so the team knows who we're celebrating. Sound natural. "
+            "One short line. DO NOT move on without a name.",
             f"Need to know whose birthday. Customer said: {user_msg}",
         )
 
@@ -274,22 +243,16 @@ async def collect_company_name_node(state: ConversationState) -> ConversationSta
         fill_slot(state["slots"], "company_name", extracted)
         state["slots"].pop("_retry_company", None)
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nCompany is {extracted}. Confirm it, then ask: 'What date are you planning for?'",
+            f"{SYSTEM_PROMPT}\n\nCompany is {extracted}. Confirm it, then ask: 'When is the corporate event?'",
             f"Company name: {extracted}",
-        )
-        state["current_node"] = "collect_event_date"
-    elif retries >= 1:
-        fill_slot(state["slots"], "company_name", user_msg.strip())
-        state["slots"].pop("_retry_company", None)
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nCompany is {user_msg.strip()}. Confirm it, then ask: 'What date are you planning for?'",
-            f"Company name: {user_msg.strip()}",
         )
         state["current_node"] = "collect_event_date"
     else:
         state["slots"]["_retry_company"] = {"value": retries + 1, "filled": True, "modified_at": None, "modification_history": []}
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_company_name']}",
+            f"{SYSTEM_PROMPT}\n\nThe customer didn't give a company name. Acknowledge warmly, then "
+            "gently explain we need the company name for the corporate event contract. Sound natural. "
+            "One short line. DO NOT move on without it.",
             f"Need company name. Customer said: {user_msg}",
         )
 
@@ -302,6 +265,20 @@ async def collect_event_date_node(state: ConversationState) -> ConversationState
     user_msg = get_last_human_message(state["messages"])
     today = datetime.now()
 
+    # Defer path — user explicitly says they don't know yet. Mark TBD and move on;
+    # we'll circle back at the end of the flow via collect_pending_details_node.
+    if _is_unsure(user_msg):
+        fill_slot(state["slots"], "event_date", "TBD")
+        state["slots"].pop("_retry_event_date", None)
+        from agent.nodes.helpers import add_ai_message
+        response = (
+            "No worries — we'll circle back to the date at the end. "
+            "For now, where are you thinking of hosting the event?"
+        )
+        state["current_node"] = "collect_venue"
+        state["messages"] = add_ai_message(state, response)
+        return state
+
     # Try Python-level day-of-week resolution first (100% accurate)
     resolved = _resolve_day_of_week(user_msg, today)
 
@@ -313,11 +290,21 @@ async def collect_event_date_node(state: ConversationState) -> ConversationState
     if resolved and resolved.upper() != "NONE":
         try:
             parsed = datetime.strptime(resolved, "%Y-%m-%d")
+            max_date = today + timedelta(days=213)  # ~7 months booking window
             if parsed.date() <= today.date():
-                # Past date — re-ask casually
                 from agent.nodes.helpers import add_ai_message
                 response = await llm_respond(
-                    f"{SYSTEM_PROMPT}\n\nThat date has already passed. Re-ask for the event date casually in one line.",
+                    f"{SYSTEM_PROMPT}\n\nSorry, that date is in the past. "
+                    "Re-ask for the event date casually in one line — mention we book events within the next 6-7 months.",
+                    f"Customer said: {user_msg}\nResolved date: {resolved}\nToday: {today.strftime('%Y-%m-%d')}"
+                )
+                state["messages"] = add_ai_message(state, response)
+                return state
+            if parsed.date() > max_date.date():
+                from agent.nodes.helpers import add_ai_message
+                response = await llm_respond(
+                    f"{SYSTEM_PROMPT}\n\nThat date is too far out — we only book events within the next 6-7 months. "
+                    f"Apologize briefly and ask for a date between {today.strftime('%b %d, %Y')} and {max_date.strftime('%b %d, %Y')}. One line.",
                     f"Customer said: {user_msg}\nResolved date: {resolved}"
                 )
                 state["messages"] = add_ai_message(state, response)
@@ -331,13 +318,25 @@ async def collect_event_date_node(state: ConversationState) -> ConversationState
     from prompts.system_prompts import NODE_PROMPTS
 
     if resolved and resolved.upper() != "NONE":
+        state["slots"].pop("_retry_event_date", None)
         context = f"Customer said: {user_msg}\nEVENT DATE = {resolved} — confirm THIS date exactly, do not recalculate.\nSlots: {slots_summary}"
         response = await llm_respond(f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_event_date']}", context)
         state["current_node"] = "collect_venue"
     else:
+        # Date is mandatory — never accept vague input. Keep re-asking until we get a real date.
+        retry_slot = state["slots"].get("_retry_event_date", {})
+        retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
+        state["slots"]["_retry_event_date"] = {
+            "value": retries + 1, "filled": True,
+            "modified_at": None, "modification_history": [],
+        }
         context = f"Customer said: {user_msg}\nCouldn't extract a date.\nSlots: {slots_summary}"
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nCouldn't catch the date. Re-ask casually in one short line — no examples, no formality.",
+            f"{SYSTEM_PROMPT}\n\nThe customer didn't give a real date (they said something like "
+            "'idk' or 'no idea'). Acknowledge warmly, then gently explain we NEED an event date to "
+            "confirm our team's availability — even a rough date works (e.g. 'next Saturday', "
+            "'May 15', 'end of June'). Sound natural, not robotic. One short, warm line. "
+            "DO NOT move on without a date. DO NOT ask any other question.",
             context
         )
 
@@ -346,55 +345,14 @@ async def collect_event_date_node(state: ConversationState) -> ConversationState
 
 
 async def select_service_type_node(state: ConversationState) -> ConversationState:
-    """Extract service type and move on. Custom handling to prevent re-asking loop."""
-    state = dict(state)
-    user_msg = get_last_human_message(state["messages"])
-
-    extracted = await llm_extract_enum(
-        EXTRACTION_PROMPTS["service_type"], user_msg,
-        ["Drop-off", "Full-Service Buffet", "Full-Service On-site"],
-    )
-    extracted = extracted.strip()
-
-    if not is_null_extraction(extracted):
-        fill_slot(state["slots"], "service_type", extracted)
-        slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
-        # Directly confirm and ask about rentals — do NOT mention service type options
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            f"The customer selected '{extracted}' as their service type. "
-            "Confirm this in ONE short sentence. "
-            "Then ask: Do you need any rentals for your event? "
-            "We offer linens, tables, and chairs — you can select multiple or none. "
-            "CRITICAL: Do NOT ask about service type again. It is already set.",
-            f"Service type: {extracted}\nSlots: {slots_summary}",
-        )
-        state["current_node"] = "ask_rentals"
-    else:
-        slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            "The customer's response was unclear for service type. "
-            "Ask them to choose one: Drop-off, Full-Service Buffet, or Full-Service On-site. "
-            "Briefly explain: Drop-off means we deliver and set up, "
-            "Full-Service Buffet means staff serves buffet-style, "
-            "Full-Service On-site means full plated/attended service.",
-            f"Customer said: {user_msg}\nSlots: {slots_summary}",
-        )
-        # Stay on same node
-
-    state["messages"] = add_ai_message(state, response)
-    return state
+    return await _extract_and_respond(state, "service_type", "ask_rentals", "select_service_type")
 
 
 async def select_event_type_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extracted = await llm_extract_enum(
-        EXTRACTION_PROMPTS["event_type"], user_msg,
-        ["Wedding", "Corporate", "Birthday", "Social", "Custom"],
-    )
+    extracted = await llm_extract(EXTRACTION_PROMPTS["event_type"], user_msg)
     extracted = extracted.strip()
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
@@ -426,10 +384,27 @@ async def select_event_type_node(state: ConversationState) -> ConversationState:
             "Return ONLY the event description, max 5 words.",
             user_msg,
         )
-        extracted = event_description.strip() if not is_null_extraction(event_description.strip()) else user_msg.strip()
+        extracted = event_description.strip() if event_description.strip().upper() != "NONE" else user_msg.strip()
 
-    if not is_null_extraction(extracted):
+    if extracted and extracted.upper() != "NONE":
         fill_slot(state["slots"], "event_type", extracted)
+    else:
+        # Can't extract a valid event type — re-ask (two-strike rule)
+        retry_key = "_retry_event_type"
+        retry_slot = state["slots"].get(retry_key, {})
+        retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
+
+        state["slots"][retry_key] = {"value": retries + 1, "filled": True, "modified_at": None, "modification_history": []}
+        event_type_list = "1. Wedding\n2. Birthday\n3. Corporate\n4. Social\n5. Custom"
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCouldn't catch the event type. Ask them warmly to pick one "
+            "(number or name). Do NOT list the options — the list is appended automatically. "
+            "DO NOT move on without a clear pick.",
+            f"Customer said: {user_msg}"
+        )
+        response = f"{response}\n\n{event_type_list}"
+        state["messages"] = add_ai_message(state, response)
+        return state
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
     context = (
@@ -443,8 +418,10 @@ async def select_event_type_node(state: ConversationState) -> ConversationState:
         state["current_node"] = "collect_fiance_name"
         confirmation = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCongrats on the wedding — one short warm line, "
-            "then immediately ask for the fiancé/partner's name in the SAME message. "
-            "Example: 'Congrats on the wedding! Who's the other half of this day?'",
+            "then immediately ask for the fiancé(e)'s name in the SAME message. "
+            "IMPORTANT: you MUST use the word 'fiancé' or 'fiancée' explicitly — do NOT say "
+            "'other half', 'partner', 'spouse', or anything else. "
+            "Example: 'Congrats on the wedding! Who's the lucky fiancé(e)?'",
             f"Event type: Wedding. Customer name: {get_slot_value(state['slots'], 'name')}"
         )
     elif "birthday" in event_lower:
@@ -485,7 +462,7 @@ async def wedding_message_node(state: ConversationState) -> ConversationState:
 
     # Try to extract venue if they gave it along with event type
     extracted = await llm_extract(EXTRACTION_PROMPTS["venue"], user_msg)
-    if not is_null_extraction(extracted.strip()):
+    if extracted and extracted.upper() != "NONE":
         fill_slot(state["slots"], "venue", extracted.strip())
         next_node = "collect_guest_count"
     else:
@@ -519,161 +496,90 @@ async def wedding_message_node(state: ConversationState) -> ConversationState:
     return state
 
 
-async def collect_venue_node(state: ConversationState) -> ConversationState:
-    """Collect venue — requires a proper venue name or address.
+# Venues too vague to use for catering logistics — need a real address or city+venue
+_VAGUE_VENUES = frozenset({
+    # Non-answers / ignorance phrasing
+    "idk", "dunno", "no idea", "i dont know", "i don't know", "dont know",
+    "don't know", "not sure", "unsure", "tbd", "tba", "to be decided",
+    "to be determined", "nai malum", "nahi malum", "pata nahi", "pata nai",
+    "nothing", "n/a", "na", "none", "no",
+    # Generic words
+    "home", "backyard", "my backyard", "my home", "house", "my house",
+    "my place", "place", "yard", "garden", "my garden", "somewhere",
+    "anywhere", "everywhere", "tbh idk",
+    # Country names
+    "india", "usa", "united states", "us", "uk", "united kingdom", "canada",
+    "australia", "germany", "france", "spain", "italy", "china", "japan",
+    "mexico", "brazil", "russia", "nigeria", "south africa", "egypt",
+    "pakistan", "bangladesh", "indonesia", "philippines", "vietnam",
+    "thailand", "malaysia", "singapore", "saudi arabia", "uae", "turkey",
+    "argentina", "colombia", "chile", "peru", "the us", "the uk", "the usa",
+    # Continents/regions
+    "africa", "europe", "asia", "america", "north america", "south america",
+    "middle east", "southeast asia",
+})
 
-    - Inappropriate venues (airport, bus stand, etc.) get a polite "not suitable" message.
-    - Informal/vague answers (my home, the park) trigger a followup echoing the word back:
-      "Could you please specify where your home is located?"
-    """
-    import re as _re
-    from prompts.system_prompts import EXTRACTION_PROMPTS
+
+async def collect_venue_node(state: ConversationState) -> ConversationState:
+    """Collect venue — rejects bare country names and vague words like 'home'/'backyard'."""
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
-    t = user_msg.strip().lower()
 
-    # --- 1. Inappropriate venue detection ---
-    _INAPPROPRIATE_VENUES = [
-        r'\b(airport|airfield|airstrip|air\s*port)\b',
-        r'\b(bus\s*(stand|station|stop|terminal|depot))\b',
-        r'\b(train\s*(station|terminal|depot)|railway\s*station|railroad)\b',
-        r'\b(subway\s*station|metro\s*station|underground\s*station)\b',
-        r'\b(highway|freeway|motorway|expressway|overpass|underpass)\b',
-        r'\b(gas\s*station|petrol\s*station|fuel\s*station|rest\s*stop|truck\s*stop)\b',
-    ]
-    is_inappropriate = any(_re.search(p, t) for p in _INAPPROPRIATE_VENUES)
-
-    if is_inappropriate:
-        slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n"
-            f"The customer suggested '{user_msg}' as their event venue. "
-            "This is not a suitable location for a catering event. "
-            "Politely explain that unfortunately we are unable to cater at that type of location. "
-            "Then kindly ask them to share a more appropriate venue — such as a home, "
-            "banquet hall, restaurant, park, event space, or any private/semi-private location. "
-            "Keep it warm and brief.",
-            f"Customer said: {user_msg}\nSlots: {slots_summary}",
+    # Defer path — explicit "idk / decide later" marks venue TBD and moves on.
+    if _is_unsure(user_msg):
+        fill_slot(state["slots"], "venue", "TBD")
+        state["slots"].pop("_retry_venue", None)
+        response = (
+            "Totally fine — we'll sort the venue at the end. "
+            "Roughly how many guests are you expecting?"
         )
-        state["current_node"] = "collect_venue"
+        state["current_node"] = "collect_guest_count"
         state["messages"] = add_ai_message(state, response)
         return state
 
-    # --- 2. Vague venue detection ---
-    # Category A: Informal/personal places (my home, backyard, etc.)
-    _VAGUE_PERSONAL = [
-        r'\b(my\s+)?(home|house|place|gome|hme|apartment|flat|condo)\b',
-        r'\b(my\s+)?(backyard|garden|yard|patio|garage|driveway|rooftop)\b',
-        r'\b(my\s+)?(office|workplace|work)\b',
-        r'\b(here|there|somewhere|tbd|not sure|undecided|idk|dunno)\b',
-    ]
-    # Category B: Generic place TYPES without a specific name/address
-    _GENERIC_PLACE_TYPES = [
-        r'\b(school|church|mosque|temple|synagogue)\b',
-        r'\b(park|beach|lake|field|playground|community center)\b',
-        r'\b(restaurant|hotel|motel|inn|lodge|resort)\b',
-        r'\b(hall|banquet|club|bar|pub|cafe|cafeteria)\b',
-        r'\b(library|museum|gallery|theater|theatre|stadium|arena)\b',
-    ]
-
-    is_vague_personal = any(_re.search(p, t) for p in _VAGUE_PERSONAL)
-    is_generic_type = any(_re.search(p, t) for p in _GENERIC_PLACE_TYPES)
-
-    has_address_detail = bool(_re.search(
-        r'(\d+\s+\w+\s+(st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|way|ct|court|pl|place))'
-        r'|(\b\d{5}\b)'
-        r'|(\w+,\s*\w+)',
-        t, _re.IGNORECASE
-    ))
-    _GENERIC_QUALIFIERS = r'^(a|an|the|my|our|some|local|public|private|nearby|big|small|old|new)\s+'
-    venue_stripped = _re.sub(_GENERIC_QUALIFIERS, '', user_msg.strip(), flags=_re.IGNORECASE).strip()
-    _PLACE_TYPE_WORDS = {'school', 'church', 'mosque', 'temple', 'park', 'beach', 'lake',
-                         'field', 'restaurant', 'hotel', 'motel', 'hall', 'banquet', 'club',
-                         'bar', 'pub', 'cafe', 'library', 'museum', 'gallery', 'theater',
-                         'theatre', 'stadium', 'arena', 'resort', 'inn', 'lodge', 'cafeteria',
-                         'playground', 'synagogue', 'community center'}
-    has_proper_name = (
-        is_generic_type
-        and venue_stripped.lower() not in _PLACE_TYPE_WORDS
-        and len(venue_stripped.split()) >= 2
-    )
-    is_descriptive_enough = len(user_msg.strip().split()) > 3
-
-    needs_clarification = False
-    clarification_reason = ""
-
-    if is_vague_personal and not has_address_detail:
-        needs_clarification = True
-        clarification_reason = "personal"
-    elif is_generic_type and not has_address_detail and not has_proper_name and not is_descriptive_enough:
-        needs_clarification = True
-        clarification_reason = "generic"
-
-    if needs_clarification:
-        slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
-        context = (
-            f"Customer said: {user_msg}\n"
-            f"Venue is too vague (reason: {clarification_reason}). Slots: {slots_summary}"
-        )
-        if clarification_reason == "personal":
-            prompt_detail = (
-                f"The customer said '{user_msg}' as their venue. "
-                "Find the exact informal word they used (e.g. 'home', 'backyard', 'office', 'place'). "
-                "Ask a short, warm follow-up question echoing that word back — for example: "
-                "'Could you please specify where your home is located? Could you share the address or city?' "
-                "Use the customer's exact word in the question (not a synonym). "
-                "Do NOT ask for a 'full address' in formal language — keep it conversational."
-            )
-        else:
-            prompt_detail = (
-                f"The customer said '{user_msg}' as their venue — it names a type of place but not a specific one. "
-                "Find the exact place word they used (e.g. 'park', 'church', 'restaurant', 'hall'). "
-                "Ask a short follow-up echoing that word: "
-                "'Could you please specify where the park is located? What\\'s the name or address?' "
-                "Use their exact word. Keep it brief and friendly."
-            )
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{prompt_detail}",
-            context,
-        )
-        state["current_node"] = "collect_venue"
-        state["messages"] = add_ai_message(state, response)
-        return state
-
-    # Try LLM extraction for proper venues
     extracted = (await llm_extract(EXTRACTION_PROMPTS["venue"], user_msg)).strip()
+    extraction_succeeded = extracted and extracted.upper() not in ("NONE",)
 
-    # Final fallback: if still NONE but message is short (1-5 words) and not a question,
-    # treat the message itself as the venue
-    if not extracted or extracted.upper() == "NONE":
-        words = user_msg.strip().split()
-        if 1 <= len(words) <= 8 and not user_msg.strip().endswith("?"):
-            extracted = user_msg.strip().title()
+    # Reject venues that are too vague to schedule a catering delivery
+    if extraction_succeeded and extracted.lower() in _VAGUE_VENUES:
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nThe customer gave a venue that's too vague for catering logistics. "
+            "Ask them for something more specific — a street address, city + venue name, or the name of the hall/hotel/restaurant. "
+            "Keep it friendly and brief, one line.",
+            f"Customer said: {user_msg}\nVague venue given: {extracted}"
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
 
-    if not is_null_extraction(extracted):
+    if extraction_succeeded:
         fill_slot(state["slots"], "venue", extracted)
+        context = (
+            f"Customer said: {user_msg}\nExtracted venue: {extracted}\n"
+            f"CURRENT slot values (use THESE): {slots_summary}"
+        )
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_venue']}", context
+        )
         state["current_node"] = "collect_guest_count"
-        context = (
-            f"Customer said: {user_msg}\n"
-            f"Venue set to: {extracted}\nSlots: {slots_summary}"
-        )
-        response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\n{NODE_PROMPTS['collect_venue']}",
-            context,
-        )
     else:
-        state["current_node"] = "collect_venue"
-        context = (
-            f"Customer said: {user_msg}\n"
-            f"Could not extract a venue. Slots: {slots_summary}"
-        )
+        retry_key = "_retry_venue"
+        retry_slot = state["slots"].get(retry_key, {})
+        retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
+        state["slots"][retry_key] = {
+            "value": retries + 1, "filled": True,
+            "modified_at": None, "modification_history": [],
+        }
+        context = f"Customer said: {user_msg}\nCouldn't extract a usable venue.\nSlots: {slots_summary}"
         response = await llm_respond(
-            f"{SYSTEM_PROMPT}\n\nThe customer's response was unclear for the 'venue' field. "
-            "Politely ask them to provide a specific venue name or full address. "
-            "For example: '123 Oak Street, Springfield' or 'The Grand Ballroom at Hilton Downtown'.",
-            context,
+            f"{SYSTEM_PROMPT}\n\nThe customer hasn't given a real venue yet (they said something vague like 'i dont know' "
+            "or 'not sure'). Acknowledge them warmly, then gently explain we NEED a venue to plan catering logistics — "
+            "even a rough one works (street address, venue/hall name, or city + neighborhood). "
+            "Sound natural and human, not robotic. Example tone: 'okay — but we do need a venue to serve you. "
+            "even a rough location works (city + hall name, or an address). share what you've got?' "
+            "One short, warm message.",
+            context
         )
 
     state["messages"] = add_ai_message(state, response)
@@ -685,24 +591,76 @@ async def collect_guest_count_node(state: ConversationState) -> ConversationStat
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extracted = await llm_extract_integer(EXTRACTION_PROMPTS["guest_count"], user_msg)
+    # Defer path — explicit "idk / decide later" marks guest count TBD and moves on.
+    if _is_unsure(user_msg):
+        fill_slot(state["slots"], "guest_count", "TBD")
+        state["slots"].pop("_retry_guest_count", None)
+        event_type = get_slot_value(state["slots"], "event_type")
+        is_wedding = event_type and "wedding" in str(event_type).lower()
+        if is_wedding:
+            response = (
+                "No problem — we'll nail down the final count later. "
+                "For now, are you thinking cocktail hour only, full reception, or both?"
+            )
+            state["current_node"] = "select_service_style"
+        else:
+            app_items = await get_appetizer_items()
+            app_list = build_numbered_list(app_items, show_price=True)
+            response = (
+                "No problem — we'll lock the guest count in at the end. "
+                "Meanwhile, let's pick some appetizers:\n\n"
+                f"{app_list}\n\nPick as many as you'd like! If you don't want appetizers, just say skip."
+            )
+            state["current_node"] = "select_appetizers"
+        state["messages"] = add_ai_message(state, response)
+        return state
+
+    extracted = await llm_extract(EXTRACTION_PROMPTS["guest_count"], user_msg)
     extracted = extracted.strip()
 
-    # llm_extract_integer guarantees the value is a valid integer string or "NONE".
-    # The digit-scraping fallback is no longer needed — a plain int() is safe here.
-    guest_extracted = False
-    invalid_count = False
-    if not is_null_extraction(extracted):
-        try:
-            count = int(extracted)
-            if count > 0:
-                extracted = count
-                fill_slot(state["slots"], "guest_count", extracted)
-                guest_extracted = True
-            else:
-                invalid_count = True
-        except ValueError:
-            pass
+    extraction_succeeded = extracted and extracted.upper() != "NONE"
+
+    if extraction_succeeded:
+        digits = "".join(c for c in str(extracted) if c.isdigit())
+        if not digits:
+            extraction_succeeded = False
+        else:
+            try:
+                extracted = int(digits)
+            except ValueError:
+                extraction_succeeded = False
+
+    if extraction_succeeded:
+        # Range check: 10-10000 guests
+        if isinstance(extracted, int) and (extracted < 10 or extracted > 10000):
+            response = await llm_respond(
+                f"{SYSTEM_PROMPT}\n\n"
+                f"Customer gave {extracted} guests — that's outside our range (10 to 10,000). "
+                "Politely explain our minimum is 10 and ask them for a revised guest count. One line.",
+                f"Customer said: {user_msg}"
+            )
+            state["messages"] = add_ai_message(state, response)
+            return state
+        fill_slot(state["slots"], "guest_count", extracted)
+        state["slots"].pop("_retry_guest_count", None)
+    else:
+        # Two-strike rule: after 2 failed extractions, accept raw input and move on
+        retry_slot = state["slots"].get("_retry_guest_count", {})
+        retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
+        state["slots"]["_retry_guest_count"] = {
+            "value": retries + 1, "filled": True,
+            "modified_at": None, "modification_history": [],
+        }
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nThe customer didn't give a usable number (they said something like "
+            "'i dont know' or gave non-numeric text). Acknowledge warmly, then gently explain we need "
+            "an APPROXIMATE GUEST COUNT — a number like 50, 100, 200 — so we can plan portions, pricing, "
+            "and staffing. Even a rough estimate is fine. Sound natural and human, not robotic. "
+            "One short, friendly line. DO NOT move on without a number.",
+            f"Customer said: {user_msg}"
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
 
     event_type = get_slot_value(state["slots"], "event_type")
     is_wedding = event_type and "wedding" in str(event_type).lower()
@@ -778,14 +736,28 @@ async def select_service_style_node(state: ConversationState) -> ConversationSta
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    extracted = await llm_extract_enum(
-        EXTRACTION_PROMPTS["service_style"], user_msg,
-        ["cocktail hour", "reception", "both"],
-    )
+    extracted = await llm_extract(EXTRACTION_PROMPTS["service_style"], user_msg)
     extracted = extracted.strip()
 
-    if not is_null_extraction(extracted):
+    # Ambiguous / unclear response — keep re-asking; never silently default.
+    if not extracted or extracted.upper() == "NONE":
+        retry_slot = state["slots"].get("_retry_service_style", {})
+        retries = retry_slot.get("value", 0) if retry_slot.get("filled") else 0
+        state["slots"]["_retry_service_style"] = {
+            "value": retries + 1, "filled": True,
+            "modified_at": None, "modification_history": [],
+        }
+        response = await llm_respond(
+            f"{SYSTEM_PROMPT}\n\nCustomer's answer wasn't clear — need to know the service style. "
+            "Acknowledge warmly, then ask again: cocktail hour only, full reception, or both? "
+            "One short line. DO NOT move on without a pick.",
+            f"Customer said: {user_msg}"
+        )
+        state["messages"] = add_ai_message(state, response)
+        return state
+    else:
         fill_slot(state["slots"], "service_style", extracted)
+        state["slots"].pop("_retry_service_style", None)
 
     slots_summary = {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
     context = (
@@ -808,5 +780,125 @@ async def select_service_style_node(state: ConversationState) -> ConversationSta
     response = f"{intro}\n\n{app_list}\n\nPick as many as you'd like!"
 
     state["current_node"] = "select_appetizers"
+    state["messages"] = add_ai_message(state, response)
+    return state
+
+
+_PENDING_SLOT_ORDER = ("event_date", "venue", "guest_count")
+_PENDING_SLOT_PROMPTS = {
+    "event_date": (
+        "Before we wrap up — do you have a date now, even a rough one? "
+        "(Day of the week or month works. Or say 'confirm on call' if you still need time.)"
+    ),
+    "venue": (
+        "Any venue update? Even a city or rough location helps. "
+        "(Or say 'confirm on call' if still undecided.)"
+    ),
+    "guest_count": (
+        "Any update on the guest count — even a rough number works. "
+        "(Or say 'confirm on call' if still undecided.)"
+    ),
+}
+
+
+def _find_next_pending(slots: dict) -> str | None:
+    """Return the first TBD slot name among date/venue/guest_count, or None."""
+    for name in _PENDING_SLOT_ORDER:
+        if get_slot_value(slots, name) == "TBD":
+            return name
+    return None
+
+
+async def collect_pending_details_node(state: ConversationState) -> ConversationState:
+    """Final-stage collection for date/venue/guest_count deferred earlier.
+
+    - On first entry (no `_pending_asking` set): ask the first TBD slot.
+    - On follow-up: try to parse the answer for the slot we just asked about.
+      * Valid input → fill the slot, advance to next TBD (or offer_followup).
+      * Still unsure / says "confirm on call" → mark as 'TBD — confirm on call', advance.
+      * Unparseable → re-ask the same slot.
+    """
+    state = dict(state)
+    user_msg = get_last_human_message(state["messages"])
+    asking = state.get("_pending_asking")
+    today = datetime.now()
+
+    # --- Process the answer for whatever we asked last turn ---
+    if asking:
+        msg_lower = user_msg.strip().lower()
+        wants_confirm_on_call = (
+            "confirm on call" in msg_lower
+            or "on a call" in msg_lower
+            or "on call" in msg_lower
+            or _is_unsure(user_msg)
+        )
+
+        resolved_ok = False
+
+        if asking == "event_date" and not wants_confirm_on_call:
+            resolved = _resolve_day_of_week(user_msg, today)
+            if not resolved:
+                prompt = EXTRACTION_PROMPTS["event_date"].format(today=today.strftime("%Y-%m-%d"))
+                resolved = (await llm_extract(prompt, user_msg)).strip()
+            if resolved and resolved.upper() != "NONE":
+                try:
+                    parsed = datetime.strptime(resolved, "%Y-%m-%d")
+                    max_date = today + timedelta(days=213)
+                    if today.date() < parsed.date() <= max_date.date():
+                        fill_slot(state["slots"], "event_date", resolved)
+                        resolved_ok = True
+                except ValueError:
+                    pass
+
+        elif asking == "venue" and not wants_confirm_on_call:
+            extracted = (await llm_extract(EXTRACTION_PROMPTS["venue"], user_msg)).strip()
+            if (
+                extracted and extracted.upper() != "NONE"
+                and extracted.lower() not in _VAGUE_VENUES
+            ):
+                fill_slot(state["slots"], "venue", extracted)
+                resolved_ok = True
+
+        elif asking == "guest_count" and not wants_confirm_on_call:
+            extracted = (await llm_extract(EXTRACTION_PROMPTS["guest_count"], user_msg)).strip()
+            digits = "".join(c for c in extracted if c.isdigit())
+            if digits:
+                try:
+                    count = int(digits)
+                    if 10 <= count <= 10000:
+                        fill_slot(state["slots"], "guest_count", count)
+                        resolved_ok = True
+                except ValueError:
+                    pass
+
+        if resolved_ok:
+            state.pop("_pending_asking", None)
+        elif wants_confirm_on_call:
+            fill_slot(state["slots"], asking, "TBD — confirm on call")
+            state.pop("_pending_asking", None)
+        else:
+            # Couldn't parse — re-ask the same slot, keep _pending_asking set.
+            response = (
+                f"Sorry, I didn't catch that. {_PENDING_SLOT_PROMPTS[asking]}"
+            )
+            state["current_node"] = "collect_pending_details"
+            state["messages"] = add_ai_message(state, response)
+            return state
+
+    # --- Find the next TBD slot to ask about ---
+    next_slot = _find_next_pending(state["slots"])
+    if next_slot:
+        state["_pending_asking"] = next_slot
+        state["current_node"] = "collect_pending_details"
+        state["messages"] = add_ai_message(state, _PENDING_SLOT_PROMPTS[next_slot])
+        return state
+
+    # Nothing left pending — go straight to contract generation.
+    state.pop("_pending_asking", None)
+    response = (
+        "Perfect — we've got everything we need. "
+        "Your summary is being prepared and our team will review it shortly. Thanks!"
+    )
+    state["current_node"] = "generate_contract"
     state["messages"] = add_ai_message(state, response)
     return state

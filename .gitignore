@@ -264,11 +264,6 @@ puppeteer/.local-chromium/
 !.gitkeep
 !.env.example
 !.vscode/settings.json
-# Python virtual environment
-venv/
-ml-agent/venv/
-*.pyc
-__pycache__/
 
-# Node modules (if applicable)
-node_modules/
+# dev scrips
+alpha_script/

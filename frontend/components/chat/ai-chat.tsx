@@ -401,7 +401,7 @@ const CONFIRM_PATTERNS = [
   /you('ve| have) (selected|picked|chosen|removed)/i,
   /confirming your/i,
   /here'?s? what you('ve| have) got/i,
-  /your (current|updated) (menu|selection|appetizer|dish)/i,
+  /your (current|updated) (menu|selection)/i,
   /noted.*here'?s/i,
 ];
 function isConfirmationMessage(intro: string): boolean {
@@ -1212,6 +1212,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
       if (frontendStep === 'contact_phone') {
         const phone = content.replace(/[^\d+]/g, '');
         onSlotsUpdate?.({ phone } as any);
+        setInput('');
         setState((prev) => ({
           ...prev,
           messages: [...prev.messages, userMsg, ...releaseDeferred()],
@@ -1399,12 +1400,15 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
       const phoneMatch = content.match(/\+?\d[\d\s()-]{8,}\d/);
       if (phoneMatch) onSlotsUpdate?.({ phone: phoneMatch[0].replace(/[\s()-]/g, '') } as any);
 
-      // Always fetch latest slots after every AI response to catch additions AND removals
+      // Always fetch latest slots after every AI response to catch additions AND removals.
+      // Small delay so the agent's save_conversation_state has time to commit before we read.
       if (onSlotsUpdate) {
         lastSlotsFilled.current = response.slots_filled;
-        chatAiApi.getConversation(response.thread_id)
-          .then((conv) => { if (conv.slots) onSlotsUpdate(conv.slots); })
-          .catch(() => {});
+        setTimeout(() => {
+          chatAiApi.getConversation(response.thread_id)
+            .then((conv) => { if (conv.slots) onSlotsUpdate(conv.slots); })
+            .catch(() => {});
+        }, 600);
       }
 
       // Detect completion from ML flag or summary message pattern
@@ -1621,7 +1625,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           const lastAiMsg = [...state.messages].reverse().find((m) => m.role === 'ai');
           const noMenu = activeMenuMsgIdx === null;
           const isNameMode = !state.isLoading && !!lastAiMsg && isAskingForName(lastAiMsg.content) && noMenu;
-          const isPhoneMode = !state.isLoading && !isNameMode && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && noMenu;
+          const isPhoneMode = !state.isLoading && !isNameMode && frontendStep === 'contact_phone' && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && noMenu;
           const isEmailMode = !state.isLoading && !isNameMode && !isPhoneMode && !!lastAiMsg && isAskingForEmail(lastAiMsg.content) && noMenu;
           const isDateMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !!lastAiMsg && isAskingForDate(lastAiMsg.content) && noMenu;
           const isGuestMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !isDateMode && !!lastAiMsg && isAskingForGuestCount(lastAiMsg.content) && noMenu;

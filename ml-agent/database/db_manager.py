@@ -215,12 +215,23 @@ async def save_message(
     if sender_type in ("client", "human"):
         sender_type = "user"
 
+    # Resolve author_id: AI messages use system user, user messages use provided
+    # UUID if valid, otherwise null (anonymous intake conversation)
+    import re as _re
+    _UUID_RE = _re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.I)
+    if sender_type == "ai":
+        resolved_author = SYSTEM_USER_ID
+    elif author_id and _UUID_RE.match(str(author_id)):
+        resolved_author = author_id
+    else:
+        resolved_author = None
+
     await client.messages.create(
         data={
             "id": msg_id,
             "thread_id": thread_id,
             "project_id": project_id,
-            "author_id": SYSTEM_USER_ID if sender_type == "ai" else None,
+            "author_id": resolved_author,
             "sender_type": sender_type,
             "content": content,
             "ai_conversation_state_id": ai_conversation_state_id,

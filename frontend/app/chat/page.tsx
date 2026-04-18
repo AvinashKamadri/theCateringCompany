@@ -338,10 +338,9 @@ function AiIntakeContent() {
   const titleUpdatedRef = useRef(false);
 
   const handleSlotsUpdate = async (slots: Partial<ContractData>) => {
-    // Full replace when slots look like a complete object from the API (has name or event_type),
-    // otherwise merge partial updates (email, phone from frontend)
-    const isFullUpdate = 'name' in slots || 'event_type' in slots || 'selected_dishes' in slots;
-    setCurrentSlots((prev) => isFullUpdate ? { ...slots } : { ...prev, ...slots });
+    // Always merge — API responses include all filled slots, frontend patches are single-field.
+    // Merging ensures frontend-captured fields (email, phone) aren't wiped by API responses.
+    setCurrentSlots((prev) => ({ ...prev, ...slots }));
 
     // Update project title (once only)
     if (draftProjectId && !titleUpdatedRef.current) {

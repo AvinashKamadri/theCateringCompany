@@ -397,6 +397,22 @@ async def _generate_fresh_question(node: str, state: dict) -> str:
     """
     if node in _NO_QUESTION_NODES:
         return ""
+
+    # Never re-ask basic-info questions (venue, date, guest count) once the menu
+    # stage has started — those slots are either filled or deferred to collect_pending_details.
+    _BASIC_INFO_NODES = {
+        "collect_venue", "collect_event_date", "collect_guest_count",
+        "collect_name", "select_event_type", "collect_fiance_name",
+        "collect_birthday_person", "collect_company_name",
+    }
+    _MENU_STARTED_SLOTS = {"selected_dishes", "appetizers", "meal_style", "appetizer_style"}
+    if node in _BASIC_INFO_NODES:
+        menu_started = any(
+            state["slots"].get(s, {}).get("filled") for s in _MENU_STARTED_SLOTS
+        )
+        if menu_started:
+            return ""
+
     from agent.nodes.helpers import llm_respond
     from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 

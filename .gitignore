@@ -150,6 +150,23 @@ out/
 .vim/
 
 # ==========================================
+# Python
+# ==========================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ==========================================
 # Temporary & Cache Files
 # ==========================================
 tmp/
@@ -264,11 +281,11 @@ puppeteer/.local-chromium/
 !.gitkeep
 !.env.example
 !.vscode/settings.json
-# Python virtual environment
-venv/
-ml-agent/venv/
-*.pyc
-__pycache__/
 
-# Node modules (if applicable)
-node_modules/
+# dev scrips
+alpha_script/
+# Local dev env files (contain secrets)
+ml-agent.env
+backend.env
+.env.pp1
+*.env.local

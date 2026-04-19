@@ -15,7 +15,7 @@ function SignInForm() {
   // If already authenticated (e.g. back-button after login), push forward
   useEffect(() => {
     if (isAuthenticated) {
-      router.replace(searchParams.get('redirect') || '/projects');
+      router.replace(searchParams?.get('redirect') || '/projects');
     }
   }, [isAuthenticated, router, searchParams]);
   const [showPassword, setShowPassword] = useState(false);
@@ -33,7 +33,7 @@ function SignInForm() {
         document.cookie = `app_jwt=${data.accessToken}; path=/; max-age=7200; SameSite=Lax`;
       }
       setUser(data.user);
-      const redirect = searchParams.get("redirect");
+      const redirect = searchParams?.get("redirect");
       router.replace(redirect || "/projects");
     } catch (err: any) {
       setError(err.message || "Invalid email or password.");
@@ -43,10 +43,10 @@ function SignInForm() {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-neutral-200 p-8 shadow-sm">
+    <div className="tc-glossy rounded-2xl p-8">
       <div className="mb-7">
         <h1 className="text-2xl font-bold text-black mb-1">Welcome back</h1>
-        <p className="text-sm text-neutral-500">Sign in to your account to continue.</p>
+        <p className="text-sm text-neutral-500">Sign in to continue planning your event.</p>
       </div>
 
       {error && (
@@ -101,7 +101,7 @@ function SignInForm() {
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-black text-white text-sm font-semibold hover:bg-neutral-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          className="tc-btn-glossy w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-semibold"
         >
           {isLoading ? (
             <>
@@ -126,7 +126,7 @@ function SignInForm() {
 
 export default function SignInPage() {
   return (
-    <Suspense fallback={<div className="bg-white rounded-2xl border border-neutral-200 p-8 shadow-sm" />}>
+    <Suspense fallback={<div className="tc-glossy rounded-2xl p-8" />}>
       <SignInForm />
     </Suspense>
   );

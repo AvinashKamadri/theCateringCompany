@@ -9,9 +9,10 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   Calendar, Users, MapPin, FileText, MessageSquare, Loader2,
-  ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield, Link2, Info,
+  ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield, Link2,
 } from 'lucide-react';
 import BentoInfoCard from '@/components/ui/BentoInfoCard';
+import AiHint from '@/components/ui/AiHint';
 
 interface Contract {
   id: string;
@@ -65,7 +66,7 @@ const ROLE_BADGE: Record<CollaboratorRole, string> = {
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const projectId = params.id as string;
+  const projectId = params?.id as string;
   const currentUser = useAuthStore((s) => s.user);
 
   const [project, setProject] = useState<Project | null>(null);
@@ -227,7 +228,7 @@ export default function ProjectDetailPage() {
     <div className="min-h-screen bg-neutral-50">
       {/* Header */}
       <div className="bg-white border-b border-neutral-200">
-        <div className="max-w-6xl mx-auto px-6 py-5">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-5">
           <button
             onClick={() => router.push('/projects')}
             className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-900 mb-4 transition-colors"
@@ -253,10 +254,10 @@ export default function ProjectDetailPage() {
               {summary.thread_id && (
                 <button
                   onClick={() => router.push(`/chat?thread=${summary.thread_id}`)}
-                  className="flex items-center gap-2 px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors"
+                  className="tc-btn-glossy flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg"
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
-                  {contract ? 'View Conversation' : 'Continue Intake'}
+                  {contract ? 'View Chat' : 'Continue Planning'}
                 </button>
               )}
               {myRole === 'owner' && (
@@ -273,104 +274,121 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Bento grid */}
-      <div className="max-w-6xl mx-auto px-6 py-6">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
 
-          {/* ── Event Details (with Status inside) ── spans 2 cols */}
+          {/* ── Event Details ── spans 2 cols */}
           <BentoInfoCard className="lg:col-span-2 p-6">
-            <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Event Details</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
-              {project.event_date && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</span>
-                  <span className="text-sm font-semibold text-neutral-900">
-                    {new Date(project.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Event Details</p>
+              {(() => {
+                const filled = [
+                  project.event_date, project.guest_count != null,
+                  (summary.venue_name || summary.venue), summary.event_type,
+                  summary.service_type, summary.dietary_concerns,
+                ].filter(Boolean).length;
+                return (
+                  <span className="text-[10px] font-medium text-neutral-400 tabular-nums">
+                    {filled}/6 fields
                   </span>
-                </div>
-              )}
-              {project.guest_count != null && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400 flex items-center gap-1"><Users className="h-3 w-3" /> Guests</span>
-                  <span className="text-sm font-semibold text-neutral-900">{project.guest_count}</span>
-                </div>
-              )}
-              {(summary.venue_name || summary.venue) && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400 flex items-center gap-1"><MapPin className="h-3 w-3" /> Venue</span>
-                  <span className="text-sm font-semibold text-neutral-900">{summary.venue_name || summary.venue}</span>
-                </div>
-              )}
-              {summary.event_type && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400">Event Type</span>
-                  <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.event_type}</span>
-                </div>
-              )}
-              {summary.service_type && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400">Service</span>
-                  <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.service_type}</span>
-                </div>
-              )}
-              {summary.dietary_concerns && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-neutral-400">Dietary</span>
-                  <span className="text-sm font-semibold text-neutral-900">{summary.dietary_concerns}</span>
-                </div>
-              )}
+                );
+              })()}
             </div>
+            {(() => {
+              const hasAny =
+                project.event_date || project.guest_count != null ||
+                summary.venue_name || summary.venue || summary.event_type ||
+                summary.service_type || summary.dietary_concerns;
+              if (!hasAny) {
+                return (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-neutral-100 flex items-center justify-center mb-3">
+                      <Calendar className="h-5 w-5 text-neutral-400" />
+                    </div>
+                    <p className="text-sm font-medium text-neutral-700">Details will appear here</p>
+                    <p className="text-xs text-neutral-500 mt-1 max-w-xs">
+                      {summary.thread_id
+                        ? 'Finish the AI intake and we\'ll populate the date, venue, guest count, and more.'
+                        : 'Start the AI intake to capture the event information.'}
+                    </p>
+                  </div>
+                );
+              }
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
+                  {project.event_date && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</span>
+                      <span className="text-sm font-semibold text-neutral-900">
+                        {new Date(project.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                    </div>
+                  )}
+                  {project.guest_count != null && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400 flex items-center gap-1"><Users className="h-3 w-3" /> Guests</span>
+                      <span className="text-sm font-semibold text-neutral-900">{project.guest_count}</span>
+                    </div>
+                  )}
+                  {(summary.venue_name || summary.venue) && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400 flex items-center gap-1"><MapPin className="h-3 w-3" /> Venue</span>
+                      <span className="text-sm font-semibold text-neutral-900">{summary.venue_name || summary.venue}</span>
+                    </div>
+                  )}
+                  {summary.event_type && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400">Event Type</span>
+                      <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.event_type}</span>
+                    </div>
+                  )}
+                  {summary.service_type && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400">Service</span>
+                      <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.service_type}</span>
+                    </div>
+                  )}
+                  {summary.dietary_concerns && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400">Dietary</span>
+                      <span className="text-sm font-semibold text-neutral-900">{summary.dietary_concerns}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {summary.special_requests && summary.special_requests !== 'none' && (
               <div className="mt-4 pt-4 border-t border-neutral-100">
                 <span className="text-xs text-neutral-400">Special Requests</span>
                 <p className="text-sm text-neutral-700 mt-1">{summary.special_requests}</p>
               </div>
             )}
-            {/* Status — moved inside Event Details */}
-            <div className="mt-4 pt-4 border-t border-neutral-100">
-              <span className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Status</span>
-              <div className="mt-2">
-                <span className={cn(
-                  'inline-flex px-3 py-1.5 rounded-xl text-xs font-semibold',
-                  project.status === 'confirmed' ? 'bg-neutral-900 text-white' :
-                  project.status === 'completed' ? 'bg-black text-white' :
-                  'bg-neutral-100 text-neutral-700'
-                )}>
-                  {project.status}
-                </span>
-              </div>
-            </div>
           </BentoInfoCard>
 
-          {/* ── Client + Contract ── right col (where Status used to be) */}
+          {/* ── Status + Contract ── 1 col */}
           <div className="flex flex-col gap-4">
-            {/* Client tile */}
-            {(summary.client_name || summary.contact_email || summary.contact_phone || summary.name) && (
-              <BentoInfoCard className="p-5">
-                <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Client</p>
-                <div className="space-y-3">
-                  {(summary.client_name || summary.name) && (
-                    <div>
-                      <p className="text-xs text-neutral-400">Name</p>
-                      <p className="text-sm font-semibold text-neutral-900 mt-0.5">{summary.client_name || summary.name}</p>
-                    </div>
-                  )}
-                  {summary.contact_email && (
-                    <div>
-                      <p className="text-xs text-neutral-400">Email</p>
-                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{summary.contact_email}</p>
-                    </div>
-                  )}
-                  {summary.contact_phone && (
-                    <div>
-                      <p className="text-xs text-neutral-400">Phone</p>
-                      <p className="text-sm font-medium text-neutral-900 mt-0.5">{summary.contact_phone}</p>
-                    </div>
-                  )}
-                </div>
-              </BentoInfoCard>
-            )}
+            {/* Status tile */}
+            <BentoInfoCard className="p-5">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Status</p>
+              <div className={cn(
+                'inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]',
+                project.status === 'confirmed' ? 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white' :
+                project.status === 'completed' ? 'bg-gradient-to-br from-neutral-800 to-black text-white' :
+                project.status === 'cancelled' ? 'bg-gradient-to-br from-red-500 to-red-700 text-white' :
+                'bg-gradient-to-br from-neutral-100 to-neutral-200 text-neutral-800 border border-neutral-300 shadow-none'
+              )}>
+                <span className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  project.status === 'confirmed' ? 'bg-emerald-200' :
+                  project.status === 'completed' ? 'bg-white' :
+                  project.status === 'cancelled' ? 'bg-red-200' :
+                  'bg-neutral-500'
+                )} />
+                <span className="capitalize">{project.status}</span>
+              </div>
+            </BentoInfoCard>
 
-            {/* Contract tile — Amount row removed */}
+            {/* Contract tile */}
             {contract ? (
               <BentoInfoCard className="p-5">
                 <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Contract</p>
@@ -385,10 +403,16 @@ export default function ProjectDetailPage() {
                     <span className="text-xs text-neutral-400">Version</span>
                     <span className="text-xs font-semibold text-neutral-700">v{contract.version_number}</span>
                   </div>
+                  {contract.total_amount != null && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-neutral-400">Amount</span>
+                      <span className="text-sm font-bold text-neutral-900">${contract.total_amount.toLocaleString()}</span>
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => router.push(`/contracts/${contract.id}`)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-white text-sm font-medium rounded-xl hover:bg-neutral-800 transition-colors"
+                  className="tc-btn-glossy w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl"
                 >
                   <FileText className="h-3.5 w-3.5" /> View Contract
                 </button>
@@ -404,17 +428,44 @@ export default function ProjectDetailPage() {
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-black text-sm font-semibold rounded-xl hover:bg-neutral-100 transition-colors"
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
-                  {summary.thread_id ? 'Continue Intake' : 'Start AI Intake'}
+                  {summary.thread_id ? 'Continue Planning' : 'Plan This Event'}
                 </button>
-              </BentoInfoCard>
+            </BentoInfoCard>
             )}
           </div>
 
-          {/* ── Menu ── full width for more prominence */}
+          {/* ── Client ── 1 col */}
+          {(summary.client_name || summary.contact_email || summary.contact_phone || summary.name) && (
+            <BentoInfoCard className="p-6">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Client</p>
+              <div className="space-y-3">
+                {(summary.client_name || summary.name) && (
+                  <div>
+                    <p className="text-xs text-neutral-400">Name</p>
+                    <p className="text-sm font-semibold text-neutral-900 mt-0.5">{summary.client_name || summary.name}</p>
+                  </div>
+                )}
+                {summary.contact_email && (
+                  <div>
+                    <p className="text-xs text-neutral-400">Email</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{summary.contact_email}</p>
+                  </div>
+                )}
+                {summary.contact_phone && (
+                  <div>
+                    <p className="text-xs text-neutral-400">Phone</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{summary.contact_phone}</p>
+                  </div>
+                )}
+              </div>
+            </BentoInfoCard>
+          )}
+
+          {/* ── Menu ── spans 2 cols */}
           {menuItems.length > 0 && (
-            <BentoInfoCard className="lg:col-span-3 p-6">
+            <BentoInfoCard className={cn('p-6', (summary.client_name || summary.name) ? 'lg:col-span-2' : 'lg:col-span-3')}>
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Menu</p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <div className="space-y-4">
                 {summary.appetizers?.length > 0 && (
                   <div>
                     <p className="text-xs text-neutral-400 mb-2">Appetizers</p>
@@ -463,40 +514,38 @@ export default function ProjectDetailPage() {
 
           {/* ── Collaborators ── spans full width */}
           <BentoInfoCard className="lg:col-span-3 p-6" enableTilt={false}>
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Collaborators</p>
-                <p className="text-sm text-neutral-500 mt-0.5">{collaborators.length} member{collaborators.length !== 1 ? 's' : ''}</p>
+            <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <div>
+                  <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Collaborators</p>
+                  <p className="text-sm text-neutral-500 mt-0.5">{collaborators.length} member{collaborators.length !== 1 ? 's' : ''}</p>
+                </div>
+                {canManage && (
+                  <AiHint
+                    placement="bottom-right"
+                    message="Click Generate Link to share a join URL, or Add Collaborator to invite someone by email and assign them a role."
+                  />
+                )}
               </div>
               {canManage && (
                 <div className="flex items-center gap-2">
-                    {/* Generate invite link button */}
-                    <button
-                      onClick={async () => { await loadJoinCode(); }}
-                      className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-700 border border-neutral-200 rounded-xl hover:bg-neutral-50 hover:border-neutral-400 transition-colors"
-                    >
-                      <Link2 className="h-3.5 w-3.5" />
-                      {joinUrl ? 'Invite Link' : 'Generate Link'}
-                    </button>
-                    {/* Add collaborator button */}
-                    <button
-                      onClick={() => { setShowAddForm(!showAddForm); loadJoinCode(); }}
-                      className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-black text-white rounded-xl hover:bg-neutral-800 transition-colors"
-                    >
-                      <UserPlus className="h-3.5 w-3.5" />
-                      Add Collaborator
-                    </button>
-                    {/* Info tooltip */}
-                    <div className="relative group">
-                      <div className="flex items-center justify-center w-7 h-7 rounded-full border border-neutral-200 text-neutral-400 hover:text-neutral-700 hover:border-neutral-400 transition-colors cursor-help">
-                        <Info className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="absolute right-0 top-full mt-2 w-56 px-3 py-2 bg-neutral-900 text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50 pointer-events-none">
-                        Click <span className="font-semibold">Generate Link</span> to invite collaborators or <span className="font-semibold">Add</span> through email
-                        <div className="absolute -top-1 right-3 w-2 h-2 bg-neutral-900 rotate-45" />
-                      </div>
-                    </div>
-                  </div>
+                  {/* Generate invite link button */}
+                  <button
+                    onClick={async () => { await loadJoinCode(); }}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-700 border border-neutral-200 rounded-xl hover:bg-neutral-50 hover:border-neutral-400 transition-colors"
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    {joinUrl ? 'Invite Link' : 'Generate Link'}
+                  </button>
+                  {/* Add collaborator button */}
+                  <button
+                    onClick={() => { setShowAddForm(!showAddForm); loadJoinCode(); }}
+                    className="tc-btn-glossy flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl"
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Add Collaborator
+                  </button>
+                </div>
               )}
             </div>
 

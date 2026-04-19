@@ -4,7 +4,7 @@ Shared LLM instances for all nodes.
 Two temperature modes:
 - llm_cold (temperature=0.0): deterministic extraction — intent classification,
   JSON parsing, slot filling. No variation allowed here.
-- llm_warm (temperature=0.7): conversational responses — friendly messages,
+- llm_warm (temperature=0.9): conversational responses — friendly messages,
   acknowledgments, questions. Natural variation without prompt hacks.
 """
 

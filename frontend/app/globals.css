@@ -45,3 +45,250 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #a3a3a3;
 }
+
+/* ── Subtle animations ───────────────────────────────────── */
+@keyframes tc-slide-in-right {
+  from { opacity: 0; transform: translate3d(14px, 4px, 0) scale(0.985); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes tc-slide-in-left {
+  from { opacity: 0; transform: translate3d(-10px, 4px, 0) scale(0.985); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes tc-fade-in-up {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes tc-pop-in {
+  0%   { opacity: 0; transform: scale(0.92); }
+  60%  { opacity: 1; transform: scale(1.01); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes tc-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.tc-msg-user    { animation: tc-slide-in-right 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.tc-msg-ai      { animation: tc-slide-in-left 280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.tc-page-enter  { animation: tc-fade-in-up 340ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.tc-pop-in      { animation: tc-pop-in 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.tc-fade-in     { animation: tc-fade-in 260ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tc-msg-user, .tc-msg-ai, .tc-page-enter, .tc-pop-in, .tc-fade-in { animation: none !important; }
+}
+
+/* ── Confetti ────────────────────────────────────────────── */
+.tc-confetti-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  overflow: hidden;
+}
+.tc-confetti-piece {
+  position: absolute;
+  top: -10px;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  will-change: transform, opacity;
+  animation: tc-confetti-fall var(--tc-dur, 2400ms) cubic-bezier(0.22, 0.7, 0.3, 1) forwards;
+}
+@keyframes tc-confetti-fall {
+  0%   { transform: translate3d(0, -10vh, 0) rotate(0deg); opacity: 0; }
+  8%   { opacity: 1; }
+  100% { transform: translate3d(var(--tc-dx, 0), 110vh, 0) rotate(var(--tc-rot, 720deg)); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tc-confetti-layer { display: none; }
+}
+
+/* ── Glossy / modern surface utilities ───────────────────── */
+/* Layered soft shadow — ambient + direct. Good for "floating" cards. */
+.tc-shadow-soft {
+  box-shadow:
+    0 1px 2px rgba(15, 15, 15, 0.04),
+    0 4px 12px -4px rgba(15, 15, 15, 0.08),
+    0 12px 32px -12px rgba(15, 15, 15, 0.12);
+}
+.tc-shadow-soft-hover {
+  transition: box-shadow 220ms ease, transform 220ms ease;
+}
+.tc-shadow-soft-hover:hover {
+  box-shadow:
+    0 2px 4px rgba(15, 15, 15, 0.05),
+    0 8px 20px -4px rgba(15, 15, 15, 0.10),
+    0 22px 44px -16px rgba(15, 15, 15, 0.18);
+  transform: translate3d(0, -2px, 0);
+}
+
+/* Glossy card — subtle top sheen, inner highlight, layered shadow.
+   Use on light surfaces (white / neutral-50). */
+.tc-glossy {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.55) 100%),
+    #ffffff;
+  border: 1px solid rgba(15, 15, 15, 0.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(15, 15, 15, 0.04),
+    0 8px 24px -8px rgba(15, 15, 15, 0.10),
+    0 20px 48px -20px rgba(15, 15, 15, 0.14);
+  backdrop-filter: saturate(1.2);
+  -webkit-backdrop-filter: saturate(1.2);
+}
+.tc-glossy::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 40%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Glass — translucent + blur. Good on busy backgrounds (DotGrid, hero art). */
+.tc-glass {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 8px 28px -12px rgba(15, 15, 15, 0.18);
+}
+
+/* Dark glossy — for the black pill/button surfaces. */
+.tc-glossy-dark {
+  background: linear-gradient(180deg, #1a1a1a 0%, #050505 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 10px 28px -8px rgba(0, 0, 0, 0.35);
+  color: #fafafa;
+}
+
+/* Glossy button (monochrome). Adds a moving sheen on hover. */
+.tc-btn-glossy {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(180deg, #1a1a1a, #000000);
+  color: #fafafa;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+    0 6px 16px -6px rgba(0, 0, 0, 0.4);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+.tc-btn-glossy:hover {
+  transform: translate3d(0, -1px, 0);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+    0 10px 24px -8px rgba(0, 0, 0, 0.5);
+}
+.tc-btn-glossy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, 0.22) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 650ms ease;
+  pointer-events: none;
+}
+.tc-btn-glossy:hover::after { transform: translateX(120%); }
+.tc-btn-glossy:disabled {
+  opacity: 0.5;
+  transform: none !important;
+  cursor: not-allowed;
+}
+.tc-btn-glossy:disabled::after { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tc-shadow-soft-hover, .tc-btn-glossy { transition: none !important; }
+  .tc-btn-glossy::after { display: none !important; }
+}
+
+/* Dark-panel inversion — flip common Tailwind neutral utilities when used
+   inside a dark frosted surface (e.g. chat sidebar over the dark chat bg). */
+.tc-dark-invert .text-neutral-900 { color: #fafafa !important; }
+.tc-dark-invert .text-neutral-800 { color: #f5f5f5 !important; }
+.tc-dark-invert .text-neutral-700 { color: #e5e5e5 !important; }
+.tc-dark-invert .text-neutral-500 { color: #d4d4d4 !important; }
+.tc-dark-invert .text-neutral-400 { color: #a3a3a3 !important; }
+.tc-dark-invert .text-neutral-300 { color: #a3a3a3 !important; }
+.tc-dark-invert .bg-neutral-100 { background-color: rgba(255, 255, 255, 0.08) !important; }
+.tc-dark-invert .bg-neutral-50  { background-color: rgba(255, 255, 255, 0.05) !important; }
+.tc-dark-invert .border-neutral-100 { border-color: rgba(255, 255, 255, 0.1) !important; }
+.tc-dark-invert .border-neutral-200 { border-color: rgba(255, 255, 255, 0.15) !important; }
+
+/* AI hint attention peek — gentle wiggle + glow halo. */
+/* ── Chat bubbles — subtle gloss + iMessage-style tail ───── */
+/* Each bubble uses a solid base color (so ::after can match cleanly) and a
+   transparent top-edge gradient for a hint of gloss. Tail = small triangle
+   made with CSS borders for a crisp anti-aliased attachment. */
+.tc-bubble-ai {
+  position: relative;
+  background-color: #f1f0ef;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 45%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 4px 12px -4px rgba(0, 0, 0, 0.12);
+}
+.tc-bubble-ai::after {
+  content: "";
+  position: absolute;
+  left: -6px;
+  bottom: 6px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 4px 10px 6px 0;
+  border-color: transparent #f1f0ef transparent transparent;
+  filter: drop-shadow(-1px 1px 1px rgba(0, 0, 0, 0.05));
+}
+
+.tc-bubble-user {
+  position: relative;
+  background-color: #0a0a0a;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 55%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 6px 16px -6px rgba(0, 0, 0, 0.5);
+}
+.tc-bubble-user::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  bottom: 6px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 4px 0 6px 10px;
+  border-color: transparent transparent transparent #0a0a0a;
+  filter: drop-shadow(1px 1px 1px rgba(0, 0, 0, 0.35));
+}
+
+@keyframes tc-ai-peek {
+  0%, 100% { transform: scale(1);     box-shadow: inset 0 1px 0 rgba(255,255,255,0.15), 0 4px 12px -4px rgba(0,0,0,0.4); }
+  15%      { transform: scale(1.18) rotate(-6deg); }
+  30%      { transform: scale(1.12) rotate(6deg); }
+  45%      { transform: scale(1.18) rotate(-4deg); }
+  60%      { transform: scale(1.08) rotate(0deg);  box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 0 0 6px rgba(99,102,241,0.18), 0 8px 18px -4px rgba(0,0,0,0.5); }
+}
+.tc-ai-peek { animation: tc-ai-peek 1.6s cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .tc-ai-peek { animation: none !important; }
+}

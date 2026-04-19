@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Calendar, Users, MapPin, FileText,
   Clock, CheckCircle2, AlertCircle, Loader2, Building2,
-  ThumbsUp, ThumbsDown, X, DollarSign, Calculator, Plus, Trash2,
+  ThumbsUp, ThumbsDown, X, Plus, Trash2, DollarSign, Calculator,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
@@ -41,39 +41,39 @@ const STATUS_CONFIG: Record<string, { label: string; icon: any; style: string }>
   pending_staff_approval: {
     label: 'Pending Staff Approval',
     icon: Clock,
-    style: 'bg-yellow-50 text-yellow-800 border-yellow-200',
+    style: 'bg-gradient-to-br from-amber-50 to-amber-100 text-amber-900 border-amber-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
   approved: {
     label: 'Approved — Sending to Client',
     icon: CheckCircle2,
-    style: 'bg-blue-50 text-blue-800 border-blue-200',
+    style: 'bg-gradient-to-br from-sky-50 to-sky-100 text-sky-900 border-sky-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
   sent: {
     label: 'Sent for Signature',
     icon: FileText,
-    style: 'bg-purple-50 text-purple-800 border-purple-200',
+    style: 'bg-gradient-to-br from-violet-50 to-violet-100 text-violet-900 border-violet-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
   signed: {
     label: 'Signed',
     icon: CheckCircle2,
-    style: 'bg-green-50 text-green-800 border-green-200',
+    style: 'bg-gradient-to-br from-emerald-50 to-emerald-100 text-emerald-900 border-emerald-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
   rejected: {
     label: 'Rejected',
     icon: AlertCircle,
-    style: 'bg-red-50 text-red-800 border-red-200',
+    style: 'bg-gradient-to-br from-red-50 to-red-100 text-red-900 border-red-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
   draft: {
     label: 'Draft',
     icon: FileText,
-    style: 'bg-gray-50 text-gray-700 border-gray-200',
+    style: 'bg-gradient-to-br from-neutral-50 to-neutral-100 text-neutral-800 border-neutral-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]',
   },
 };
 
 export default function ContractDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const contractId = params.id as string;
+  const contractId = params?.id as string;
   const { user } = useAuthStore();
 
   const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));
@@ -163,7 +163,6 @@ export default function ContractDetailPage() {
     }
   };
 
-  const hasPricingSaved = !!(contract?.body as any)?.pricing?.lineItems?.length;
   const pricingTotal        = lineItems.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
   const pricingTax          = Math.round(pricingTotal * (taxRate / 100) * 100) / 100;
   const pricingOnsiteSvc    = Math.round(pricingTotal * (onsiteServiceRate / 100) * 100) / 100;
@@ -338,6 +337,7 @@ export default function ContractDetailPage() {
   const specialRequests: string[] = body.additional?.modifications || [];
 
   const isPending = contract.status === 'pending_staff_approval';
+  const hasPricingSaved = !!(contract.total_amount && Number(contract.total_amount) > 0);
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -376,7 +376,7 @@ export default function ContractDetailPage() {
 
       {/* Header */}
       <div className="bg-white border-b border-neutral-200">
-        <div className="max-w-6xl mx-auto px-6 py-5">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-5">
           <button onClick={() => router.back()} className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-900 mb-4 transition-colors">
             <ArrowLeft className="h-3.5 w-3.5" /> Back
           </button>
@@ -397,7 +397,7 @@ export default function ContractDetailPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-6">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 py-6">
 
         {/* Staff review panel — full width */}
         {isStaff && isPending && (
@@ -418,7 +418,7 @@ export default function ContractDetailPage() {
                   {previewing ? 'Generating…' : contract.pdf_path ? 'Regenerate PDF' : 'Preview PDF'}
                 </button>
                 <button onClick={handleApprove} disabled={approving || !hasPricingSaved} title={!hasPricingSaved ? 'Save pricing first' : undefined}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-black text-white rounded-xl hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold transition-colors">
+                  className="tc-btn-glossy flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold">
                   {approving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsUp className="h-3.5 w-3.5" />}
                   Approve & Send
                 </button>
@@ -548,36 +548,36 @@ export default function ContractDetailPage() {
         {/* Bento grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
 
-          {/* ── Event Details ── 2 cols, compact */}
-          <BentoInfoCard className="lg:col-span-2 p-4">
-            <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Event Details</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {/* ── Event Details ── 2 cols */}
+          <BentoInfoCard className="lg:col-span-2 p-6">
+            <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Event Details</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
               {eventDate && (
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-1">
                   <span className="text-xs text-neutral-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</span>
                   <span className="text-sm font-semibold text-neutral-900">{eventDate}</span>
                 </div>
               )}
               {guestCount != null && (
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-1">
                   <span className="text-xs text-neutral-400 flex items-center gap-1"><Users className="h-3 w-3" /> Guests</span>
                   <span className="text-sm font-semibold text-neutral-900">{guestCount}</span>
                 </div>
               )}
               {eventType !== '—' && (
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-1">
                   <span className="text-xs text-neutral-400">Event Type</span>
                   <span className="text-sm font-semibold text-neutral-900 capitalize">{eventType}</span>
                 </div>
               )}
               {serviceType && (
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-1">
                   <span className="text-xs text-neutral-400">Service</span>
                   <span className="text-sm font-semibold text-neutral-900 capitalize">{serviceType}</span>
                 </div>
               )}
               {venueName && (
-                <div className="flex flex-col gap-0.5 sm:col-span-2">
+                <div className="flex flex-col gap-1 sm:col-span-2">
                   <span className="text-xs text-neutral-400 flex items-center gap-1"><MapPin className="h-3 w-3" /> Venue</span>
                   <span className="text-sm font-semibold text-neutral-900">{venueName}</span>
                   {venueAddress && <span className="text-xs text-neutral-400">{venueAddress}</span>}
@@ -585,7 +585,7 @@ export default function ContractDetailPage() {
               )}
             </div>
             {dietaryRestrictions.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-neutral-100">
+              <div className="mt-4 pt-4 border-t border-neutral-100">
                 <span className="text-xs text-neutral-400">Dietary</span>
                 <p className="text-sm text-neutral-700 mt-0.5">{dietaryRestrictions.join(', ')}</p>
               </div>
@@ -600,21 +600,31 @@ export default function ContractDetailPage() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-neutral-400">Version</span><span className="font-semibold">v{contract.version_number}</span></div>
                 <div className="flex justify-between"><span className="text-neutral-400">Created</span><span className="font-medium">{new Date(contract.created_at).toLocaleDateString()}</span></div>
-                {lineItems.length > 0 ? (
-                  <>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Subtotal</span><span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Tax ({taxRate}%)</span><span>${pricingTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Onsite Fee ({onsiteServiceRate}%)</span><span>${pricingOnsiteSvc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Gratuity ({gratuityRate}%)</span><span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between border-t border-neutral-100 pt-2"><span className="font-semibold text-neutral-900">Grand Total</span><span className="font-bold text-neutral-900">${pricingGrandTotal.toLocaleString()}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">50% Deposit</span><span>${pricingDeposit.toLocaleString()}</span></div>
-                  </>
-                ) : contract.total_amount != null ? (
-                  <div className="flex justify-between border-t border-neutral-100 pt-2">
-                    <span className="font-semibold text-neutral-900">Grand Total</span>
-                    <span className="font-bold text-neutral-900">${Number(contract.total_amount).toLocaleString()}</span>
+                {/* Pricing is staff-only until the client signs. Once signed,
+                    the commitment is made so the client can see the totals too. */}
+                {(isStaff || contract.status === 'signed') && (
+                  lineItems.length > 0 ? (
+                    <>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Subtotal</span><span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Tax ({taxRate}%)</span><span>${pricingTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Onsite Fee ({onsiteServiceRate}%)</span><span>${pricingOnsiteSvc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Gratuity ({gratuityRate}%)</span><span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between border-t border-neutral-100 pt-2"><span className="font-semibold text-neutral-900">Grand Total</span><span className="font-bold text-neutral-900">${pricingGrandTotal.toLocaleString()}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">50% Deposit</span><span>${pricingDeposit.toLocaleString()}</span></div>
+                    </>
+                  ) : contract.total_amount != null ? (
+                    <div className="flex justify-between border-t border-neutral-100 pt-2">
+                      <span className="font-semibold text-neutral-900">Grand Total</span>
+                      <span className="font-bold text-neutral-900">${Number(contract.total_amount).toLocaleString()}</span>
+                    </div>
+                  ) : null
+                )}
+                {!isStaff && contract.status !== 'signed' && (
+                  <div className="flex justify-between border-t border-neutral-100 pt-2 text-xs">
+                    <span className="text-neutral-400">Pricing</span>
+                    <span className="text-neutral-500 italic">Available after signing</span>
                   </div>
-                ) : null}
+                )}
                 <div className="flex justify-between pt-1"><span className="text-neutral-400 text-xs">Contract ID</span><span className="font-mono text-xs text-neutral-400 truncate max-w-[110px]">{contract.id}</span></div>
               </div>
             </BentoInfoCard>
@@ -636,7 +646,7 @@ export default function ContractDetailPage() {
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Actions</p>
               {isStaff && contract.pdf_path && (
                 <a href={`/api/contracts/${contract.id}/pdf`} target="_blank" rel="noopener noreferrer"
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-white rounded-xl hover:bg-neutral-800 transition text-sm font-medium">
+                  className="tc-btn-glossy w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium">
                   <FileText className="h-4 w-4" /> View PDF
                 </a>
               )}
@@ -677,43 +687,43 @@ export default function ContractDetailPage() {
             )}
           </div>
 
-          {/* ── Menu & Services ── full width, prominent */}
+          {/* ── Menu & Services ── 2 cols */}
           {(appetizers.length > 0 || mainDishes.length > 0 || desserts.length > 0 || utensils || rentals || florals) && (
-            <BentoInfoCard className="lg:col-span-3 p-8">
-              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-5">Menu & Services</p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
+            <BentoInfoCard className="lg:col-span-2 p-6">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Menu & Services</p>
+              <div className="space-y-5">
                 {appetizers.length > 0 && (
                   <div>
-                    <p className="text-xs text-neutral-400 mb-3">Appetizers / Hors d'Oeuvres</p>
-                    <div className="flex flex-wrap gap-2">
-                      {appetizers.map((item, i) => <span key={i} className="px-3 py-1.5 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>)}
+                    <p className="text-xs text-neutral-400 mb-2">Appetizers / Hors d'Oeuvres</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {appetizers.map((item, i) => <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>)}
                     </div>
                   </div>
                 )}
                 {mainDishes.length > 0 && (
                   <div>
-                    <p className="text-xs text-neutral-400 mb-3">Main Dishes</p>
-                    <div className="flex flex-wrap gap-2">
-                      {mainDishes.map((item, i) => <span key={i} className="px-3 py-1.5 bg-neutral-900 text-white rounded-lg text-xs font-medium">{item}</span>)}
+                    <p className="text-xs text-neutral-400 mb-2">Main Dishes</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {mainDishes.map((item, i) => <span key={i} className="px-2.5 py-1 bg-neutral-900 text-white rounded-lg text-xs font-medium">{item}</span>)}
                     </div>
                   </div>
                 )}
                 {desserts.length > 0 && (
                   <div>
-                    <p className="text-xs text-neutral-400 mb-3">Desserts</p>
-                    <div className="flex flex-wrap gap-2">
-                      {desserts.map((item, i) => <span key={i} className="px-3 py-1.5 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>)}
+                    <p className="text-xs text-neutral-400 mb-2">Desserts</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {desserts.map((item, i) => <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>)}
                     </div>
                   </div>
                 )}
+                {(utensils || rentals || florals) && (
+                  <div className="pt-3 border-t border-neutral-100 space-y-1 text-xs text-neutral-600">
+                    {utensils && <p><span className="font-medium text-neutral-400">Utensils: </span>{utensils}</p>}
+                    {rentals && <p><span className="font-medium text-neutral-400">Rentals: </span>{rentals}</p>}
+                    {florals && <p><span className="font-medium text-neutral-400">Florals: </span>{florals}</p>}
+                  </div>
+                )}
               </div>
-              {(utensils || rentals || florals) && (
-                <div className="mt-6 pt-5 border-t border-neutral-100 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-neutral-600">
-                  {utensils && <p><span className="font-medium text-neutral-400">Utensils: </span>{utensils}</p>}
-                  {rentals && <p><span className="font-medium text-neutral-400">Rentals: </span>{rentals}</p>}
-                  {florals && <p><span className="font-medium text-neutral-400">Florals: </span>{florals}</p>}
-                </div>
-              )}
             </BentoInfoCard>
           )}
 

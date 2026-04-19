@@ -403,28 +403,28 @@ export default function ContractDetailPage() {
         {isStaff && isPending && (
           <div className="bg-white border border-neutral-200 rounded-2xl mb-4 overflow-hidden">
             {/* Panel header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-100">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-6 py-5 border-b border-neutral-100">
               <div className="flex items-center gap-3">
                 <div className="w-2 h-2 rounded-full bg-black animate-pulse" />
                 <div>
-                  <p className="text-sm font-semibold text-neutral-900">Staff Review Required</p>
-                  <p className="text-xs text-neutral-400 mt-0.5">Set pricing, preview the PDF, then approve or reject.</p>
+                  <p className="text-base font-semibold text-neutral-900">Build the Quote</p>
+                  <p className="text-xs text-neutral-500 mt-0.5">Price the menu and staffing, preview the contract, then send it to the client for signature.</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button onClick={handlePreviewPdf} disabled={previewing}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-neutral-100 text-neutral-700 rounded-xl hover:bg-neutral-200 disabled:opacity-50 text-xs font-medium transition-colors">
-                  {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-                  {previewing ? 'Generating…' : contract.pdf_path ? 'Regenerate PDF' : 'Preview PDF'}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-neutral-100 text-neutral-700 rounded-xl hover:bg-neutral-200 disabled:opacity-50 text-sm font-semibold transition-colors">
+                  {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                  {previewing ? 'Generating…' : contract.pdf_path ? 'Regenerate Contract PDF' : 'Preview Contract PDF'}
                 </button>
                 <button onClick={handleApprove} disabled={approving || !hasPricingSaved} title={!hasPricingSaved ? 'Save pricing first' : undefined}
-                  className="tc-btn-glossy flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold">
-                  {approving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsUp className="h-3.5 w-3.5" />}
-                  Approve & Send
+                  className="tc-btn-glossy flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold">
+                  {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ThumbsUp className="h-4 w-4" />}
+                  Approve & Send to Client
                 </button>
                 <button onClick={() => setShowRejectModal(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 border border-neutral-200 text-neutral-700 rounded-xl hover:bg-neutral-50 text-xs font-semibold transition-colors">
-                  <ThumbsDown className="h-3.5 w-3.5" /> Reject
+                  className="flex items-center gap-2 px-4 py-2.5 border border-neutral-200 text-neutral-700 rounded-xl hover:bg-red-50 hover:border-red-200 hover:text-red-700 text-sm font-semibold transition-colors">
+                  <ThumbsDown className="h-4 w-4" /> Request Changes
                 </button>
               </div>
             </div>
@@ -432,84 +432,114 @@ export default function ContractDetailPage() {
             {/* Pricing editor */}
             <div className="px-6 py-5">
               {!hasPricingSaved && (
-                <p className="text-xs text-neutral-500 font-medium mb-4 flex items-center gap-1.5">
-                  <AlertCircle className="h-3.5 w-3.5 text-neutral-400" /> Save pricing below before approving.
+                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 font-medium mb-5 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-600" /> Save the quote below before sending to the client.
                 </p>
               )}
 
-              {/* Toolbar */}
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
-                  <DollarSign className="h-3.5 w-3.5 text-neutral-400" /> Line Items
-                </p>
-                <div className="flex items-center gap-1.5">
+              {/* Rate inputs */}
+              <div className="mb-5">
+                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Service Rates</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: 'Sales & Meals Tax', hint: 'applied to food & beverage', value: taxRate, setter: setTaxRate, step: 0.1 },
+                    { label: 'Onsite Service Fee', hint: 'covers setup & service labor', value: onsiteServiceRate, setter: setOnsiteServiceRate, step: 0.5 },
+                    { label: 'Gratuity', hint: 'shared with service staff', value: gratuityRate, setter: setGratuityRate, step: 0.5 },
+                  ].map(({ label, hint, value, setter, step }) => (
+                    <div key={label}>
+                      <label className="block text-sm font-semibold text-neutral-800 mb-1">{label}</label>
+                      <div className="relative">
+                        <input type="number" min={0} max={50} step={step} value={value}
+                          onChange={(e) => setter(Number(e.target.value) || 0)}
+                          className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black pr-8" />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400 font-medium">%</span>
+                      </div>
+                      <p className="text-xs text-neutral-400 mt-1">{hint}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Line items toolbar */}
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Menu & Service Charges</p>
+                  <p className="text-xs text-neutral-400 mt-0.5">Packages, menu items, staffing, and travel</p>
+                </div>
+                <div className="flex items-center gap-2">
                   <button onClick={handlePrefillStaffing}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-neutral-100 text-neutral-700 border border-neutral-200 rounded-lg hover:bg-neutral-200 text-xs font-medium transition-colors">
-                    <Users className="h-3 w-3" /> Pre-fill Staffing
+                    className="flex items-center gap-2 px-3.5 py-2 bg-white text-neutral-700 border border-neutral-200 rounded-lg hover:bg-neutral-50 text-sm font-semibold transition-colors">
+                    <Users className="h-4 w-4" /> Add Staffing Lines
                   </button>
                   <button onClick={handleAutoCalculate} disabled={calculatingPricing}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-black text-white rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-xs font-medium transition-colors">
-                    {calculatingPricing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Calculator className="h-3 w-3" />}
-                    {calculatingPricing ? 'Calculating…' : 'Auto-Calculate'}
+                    className="flex items-center gap-2 px-3.5 py-2 bg-black text-white rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm font-semibold transition-colors">
+                    {calculatingPricing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
+                    {calculatingPricing ? 'Calculating…' : 'Auto-Price from Menu'}
                   </button>
                 </div>
               </div>
 
-              {/* Rate inputs */}
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                {[
-                  { label: 'Sales & Meals Tax', value: taxRate, setter: setTaxRate, step: 0.1 },
-                  { label: 'Onsite Service Fee', value: onsiteServiceRate, setter: setOnsiteServiceRate, step: 0.5 },
-                  { label: 'Gratuity', value: gratuityRate, setter: setGratuityRate, step: 0.5 },
-                ].map(({ label, value, setter, step }) => (
-                  <div key={label}>
-                    <label className="block text-xs text-neutral-500 font-medium mb-1">{label}</label>
-                    <div className="relative">
-                      <input type="number" min={0} max={50} step={step} value={value}
-                        onChange={(e) => setter(Number(e.target.value) || 0)}
-                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-black pr-6" />
-                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-neutral-400">%</span>
+              {/* Line items table with headers */}
+              <div className="border border-neutral-200 rounded-xl overflow-hidden mb-4">
+                <div className="grid grid-cols-[1fr_100px_120px_120px_32px] gap-3 px-4 py-2.5 bg-neutral-50 border-b border-neutral-200 text-xs font-semibold text-neutral-600 uppercase tracking-wider">
+                  <span>Menu Item / Service</span>
+                  <span className="text-right">Quantity</span>
+                  <span className="text-right">Per Unit</span>
+                  <span className="text-right">Line Total</span>
+                  <span></span>
+                </div>
+                <div className="divide-y divide-neutral-100">
+                  {lineItems.length === 0 && (
+                    <div className="px-4 py-8 text-center text-sm text-neutral-400">
+                      No items yet — use <span className="font-semibold text-neutral-600">Auto-Price from Menu</span> or add items manually.
                     </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Line items table */}
-              <div className="space-y-1.5 mb-4">
-                {lineItems.map((item, idx) => (
-                  <div key={idx} className="flex gap-2 items-center">
-                    <input type="text" placeholder="Description" value={item.description}
-                      onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
-                      className="flex-1 border border-neutral-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-black" />
-                    <input type="number" placeholder="Qty" min={1} value={item.quantity}
-                      onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, quantity: Number(e.target.value) || 1 } : li))}
-                      className="w-14 border border-neutral-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-black" />
-                    <input type="number" placeholder="Price" min={0} value={item.unitPrice}
-                      onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, unitPrice: Number(e.target.value) || 0 } : li))}
-                      className="w-20 border border-neutral-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-black" />
-                    <button onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))} className="text-neutral-300 hover:text-red-500 transition-colors">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
+                  )}
+                  {lineItems.map((item, idx) => {
+                    const lineTotal = item.quantity * item.unitPrice;
+                    return (
+                      <div key={idx} className="grid grid-cols-[1fr_100px_120px_120px_32px] gap-3 px-4 py-2.5 items-center hover:bg-neutral-50/50 transition-colors">
+                        <input type="text" placeholder="e.g. Bronze Package, Antipasto Platter…" value={item.description}
+                          onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
+                          className="border border-neutral-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black" />
+                        <input type="number" placeholder="0" min={1} value={item.quantity}
+                          onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, quantity: Number(e.target.value) || 1 } : li))}
+                          className="border border-neutral-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black text-right tabular-nums" />
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">$</span>
+                          <input type="number" placeholder="0.00" min={0} step="0.01" value={item.unitPrice}
+                            onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, unitPrice: Number(e.target.value) || 0 } : li))}
+                            className="w-full border border-neutral-200 rounded-lg pl-6 pr-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black text-right tabular-nums" />
+                        </div>
+                        <span className="text-sm font-semibold text-neutral-900 text-right tabular-nums">
+                          ${lineTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <button onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))}
+                          title="Remove line"
+                          className="text-neutral-300 hover:text-red-500 transition-colors flex items-center justify-center">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
                 <button onClick={() => setLineItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }])}
-                  className="flex items-center gap-1 text-xs text-neutral-500 hover:text-black font-medium transition-colors mt-1">
-                  <Plus className="h-3.5 w-3.5" /> Add item
+                  className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm text-neutral-600 hover:text-black hover:bg-neutral-50 font-semibold transition-colors border-t border-neutral-100">
+                  <Plus className="h-4 w-4" /> Add Line Item
                 </button>
               </div>
 
               {/* Pricing summary */}
               {lineItems.length > 0 && (
-                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4 mb-4 text-xs space-y-1.5">
+                <div className="bg-gradient-to-br from-neutral-50 to-white border border-neutral-200 rounded-xl p-5 mb-4 text-sm space-y-2 tabular-nums">
                   {pricingBreakdown?.packageName && (
-                    <div className="flex justify-between text-neutral-500">
+                    <div className="flex justify-between text-neutral-500 text-xs pb-2 border-b border-neutral-100">
                       <span>Package</span>
                       <span>{pricingBreakdown.packageName} (${pricingBreakdown.packagePerPersonRate}/pp)</span>
                     </div>
                   )}
-                  <div className="flex justify-between text-neutral-600">
-                    <span>Subtotal</span>
-                    <span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <div className="flex justify-between text-neutral-700">
+                    <span className="font-medium">Food & Service Subtotal</span>
+                    <span className="font-semibold">${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                   <div className="flex justify-between text-neutral-500">
                     <span>Sales & Meals Tax ({taxRate}%)</span>
@@ -523,22 +553,28 @@ export default function ContractDetailPage() {
                     <span>Gratuity ({gratuityRate}%)</span>
                     <span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
-                  <div className="flex justify-between font-bold text-neutral-900 border-t border-neutral-200 pt-2">
+                  <div className="flex justify-between font-bold text-neutral-900 border-t border-neutral-200 pt-3 mt-1 text-base">
                     <span>Grand Total</span>
                     <span>${pricingGrandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
-                  <div className="flex justify-between text-neutral-400">
-                    <span>50% Deposit Due</span>
-                    <span>${pricingDeposit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <div className="flex justify-between text-neutral-500 text-xs">
+                    <span>50% Deposit Due at Signing</span>
+                    <span className="font-semibold">${pricingDeposit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
+                  {guestCount ? (
+                    <div className="flex justify-between text-neutral-400 text-xs pt-1 border-t border-neutral-100">
+                      <span>Effective Per-Guest Cost</span>
+                      <span>${(pricingGrandTotal / Number(guestCount)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/pp</span>
+                    </div>
+                  ) : null}
                 </div>
               )}
 
               {lineItems.length > 0 && (
                 <button onClick={handleSavePricing} disabled={savingPricing}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-black text-white rounded-xl hover:bg-neutral-800 disabled:opacity-50 text-xs font-semibold transition-colors">
-                  {savingPricing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DollarSign className="h-3.5 w-3.5" />}
-                  {savingPricing ? 'Saving…' : 'Save Pricing'}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-black text-white rounded-xl hover:bg-neutral-800 disabled:opacity-50 text-sm font-semibold transition-colors shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_6px_14px_-6px_rgba(0,0,0,0.3)]">
+                  {savingPricing ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
+                  {savingPricing ? 'Saving Quote…' : 'Save Quote'}
                 </button>
               )}
             </div>

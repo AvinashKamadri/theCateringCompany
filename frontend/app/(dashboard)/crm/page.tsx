@@ -32,6 +32,10 @@ import {
   Pie,
   Cell,
   Legend,
+  BarChart,
+  Bar,
+  ComposedChart,
+  Line,
 } from 'recharts';
 
 interface Lead {
@@ -96,6 +100,8 @@ export default function CRMPage() {
   const [pendingContracts, setPendingContracts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'overview' | 'pipeline' | 'list'>('overview');
+  const [pipelinePages, setPipelinePages] = useState<Record<string, number>>({});
+  const PIPELINE_PAGE_SIZE = 8;
 
   useEffect(() => {
     if (!isAuthenticated) { router.push('/signin'); return; }
@@ -209,36 +215,39 @@ export default function CRMPage() {
         {viewMode === 'overview' && (
           <div className="space-y-5">
 
-            {/* Charts row 1: Bookings trend + Pipeline funnel */}
+            {/* Charts row 1: Bookings+Guests trend (composed) + Pipeline funnel */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-              {/* Monthly bookings area chart */}
+              {/* Monthly bookings + guests composed chart */}
               <div className="lg:col-span-2 bg-white rounded-xl border border-neutral-200 p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="text-sm font-semibold text-black">Monthly Bookings</h3>
-                    <p className="text-xs text-neutral-400">New projects over last 12 months</p>
+                    <h3 className="text-sm font-semibold text-black">Monthly Bookings & Guests</h3>
+                    <p className="text-xs text-neutral-400">New projects and total guest volume, last 12 months</p>
                   </div>
                   <BarChart3 className="h-4 w-4 text-neutral-300" />
                 </div>
                 {analytics?.monthly_bookings && analytics.monthly_bookings.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={200}>
-                    <AreaChart data={analytics.monthly_bookings} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <ComposedChart data={analytics.monthly_bookings} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
                       <defs>
                         <linearGradient id="bookGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#111" stopOpacity={0.15} />
+                          <stop offset="5%" stopColor="#111" stopOpacity={0.2} />
                           <stop offset="95%" stopColor="#111" stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#aaa' }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fontSize: 10, fill: '#aaa' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#888' }} tickLine={false} axisLine={{ stroke: '#eee' }} />
+                      <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#888' }} tickLine={false} axisLine={false} allowDecimals={false} label={{ value: 'Bookings', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: '#aaa' }, offset: 16 }} />
+                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#888' }} tickLine={false} axisLine={false} allowDecimals={false} label={{ value: 'Guests', angle: 90, position: 'insideRight', style: { fontSize: 10, fill: '#aaa' }, offset: 16 }} />
                       <Tooltip content={<CustomTooltip />} />
-                      <Area type="monotone" dataKey="bookings" name="Bookings" stroke="#111" strokeWidth={2} fill="url(#bookGrad)" dot={{ fill: '#111', r: 3 }} activeDot={{ r: 5 }} />
-                    </AreaChart>
+                      <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                      <Area yAxisId="left" type="monotone" dataKey="bookings" name="Bookings" stroke="#111" strokeWidth={2} fill="url(#bookGrad)" dot={{ fill: '#111', r: 3 }} activeDot={{ r: 5 }} />
+                      <Line yAxisId="right" type="monotone" dataKey="total_guests" name="Total Guests" stroke="#888" strokeWidth={1.5} strokeDasharray="4 3" dot={{ fill: '#888', r: 2 }} />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-[200px] flex items-center justify-center text-xs text-neutral-300">
+                  <div className="h-[220px] flex items-center justify-center text-xs text-neutral-300">
                     No booking data yet
                   </div>
                 )}
@@ -251,7 +260,7 @@ export default function CRMPage() {
                   <p className="text-xs text-neutral-400">Projects by stage</p>
                 </div>
                 {pipelineData.some((d) => d.value > 0) ? (
-                  <ResponsiveContainer width="100%" height={200}>
+                  <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
                       <Pie
                         data={pipelineData.filter((d) => d.value > 0)}
@@ -261,6 +270,7 @@ export default function CRMPage() {
                         outerRadius={72}
                         paddingAngle={3}
                         dataKey="value"
+                        label={{ fontSize: 10, fill: '#666' }}
                       >
                         {pipelineData.filter((d) => d.value > 0).map((_, i) => (
                           <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
@@ -271,14 +281,39 @@ export default function CRMPage() {
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-[200px] flex items-center justify-center text-xs text-neutral-300">
+                  <div className="h-[220px] flex items-center justify-center text-xs text-neutral-300">
                     No pipeline data yet
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Row 2: Pending approval queue + Upcoming events */}
+            {/* Charts row 2: Guest size distribution */}
+            <div className="grid grid-cols-1 gap-5">
+              <div className="bg-white rounded-xl border border-neutral-200 p-5">
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-black">Event Size Mix</h3>
+                  <p className="text-xs text-neutral-400">Projects by guest-count bucket</p>
+                </div>
+                {analytics?.guest_buckets && analytics.guest_buckets.length > 0 && analytics.guest_buckets.some(b => b.count > 0) ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={analytics.guest_buckets} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                      <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: '#888' }} tickLine={false} axisLine={{ stroke: '#eee' }} />
+                      <YAxis tick={{ fontSize: 10, fill: '#888' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Bar dataKey="count" name="Projects" fill="#111" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-[220px] flex items-center justify-center text-xs text-neutral-300">
+                    No guest data yet
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Row 3: Awaiting Review + Confirmed Contracts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
               {/* Contracts pending staff review */}
@@ -346,75 +381,172 @@ export default function CRMPage() {
                 )}
               </div>
 
-              {/* Upcoming events (next 60 days) */}
-              <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
-                <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-neutral-400" />
-                    <h3 className="text-sm font-semibold text-black">Upcoming Events</h3>
-                  </div>
-                  <span className="text-xs text-neutral-400">Next 60 days</span>
-                </div>
-                {(() => {
-                  const now = new Date();
-                  const cutoff = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
-                  const upcoming = leads
-                    .filter((l) => l.event_date && new Date(l.event_date) >= now && new Date(l.event_date) <= cutoff)
-                    .sort((a, b) => new Date(a.event_date!).getTime() - new Date(b.event_date!).getTime());
-
-                  if (upcoming.length === 0) return (
-                    <div className="px-5 py-10 text-center">
-                      <Calendar className="h-6 w-6 text-neutral-200 mx-auto mb-2" />
-                      <p className="text-xs text-neutral-400">No events in the next 60 days</p>
+              {/* Confirmed projects (book-of-business) */}
+              {(() => {
+                const confirmed = leads
+                  .filter((l) => l.status === 'confirmed')
+                  .sort((a, b) => {
+                    const ad = a.event_date ? new Date(a.event_date).getTime() : Infinity;
+                    const bd = b.event_date ? new Date(b.event_date).getTime() : Infinity;
+                    return ad - bd;
+                  });
+                return (
+                  <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+                    <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                        <h3 className="text-sm font-semibold text-black">Confirmed Events</h3>
+                        {confirmed.length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-emerald-500 text-white text-[10px] font-bold rounded-full">
+                            {confirmed.length}
+                          </span>
+                        )}
+                      </div>
+                      <button onClick={() => setViewMode('list')} className="text-xs text-neutral-400 hover:text-black transition-colors">
+                        View all →
+                      </button>
                     </div>
-                  );
-
-                  return (
-                    <div className="divide-y divide-neutral-50">
-                      {upcoming.slice(0, 5).map((lead) => {
-                        const eventDate = new Date(lead.event_date!);
-                        const daysUntil = Math.ceil((eventDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-                        return (
+                    {confirmed.length === 0 ? (
+                      <div className="px-5 py-10 text-center">
+                        <FileText className="h-6 w-6 text-neutral-200 mx-auto mb-2" />
+                        <p className="text-xs text-neutral-400">No confirmed events yet</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-neutral-50">
+                        {confirmed.slice(0, 5).map((lead) => (
                           <Link
                             key={lead.id}
                             href={`/projects/${lead.id}`}
                             className="flex items-center justify-between px-5 py-3 hover:bg-neutral-50 transition-colors group"
                           >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className="shrink-0 w-10 text-center">
-                                <p className="text-[10px] text-neutral-400 uppercase leading-none">
-                                  {eventDate.toLocaleDateString('en-US', { month: 'short' })}
-                                </p>
-                                <p className="text-lg font-bold text-black leading-tight">
-                                  {eventDate.getDate()}
-                                </p>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium text-black truncate group-hover:underline">
-                                  {lead.title}
-                                </p>
-                                <div className="flex items-center gap-2 mt-0.5">
-                                  <span className="text-xs text-neutral-400">{lead.client_name || lead.client_email}</span>
-                                  {lead.guest_count && (
-                                    <span className="text-xs text-neutral-300">· {lead.guest_count} guests</span>
-                                  )}
-                                </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-black truncate group-hover:underline">{lead.title}</p>
+                              <div className="flex items-center gap-3 mt-0.5">
+                                {lead.event_date && (
+                                  <span className="text-xs text-neutral-400 flex items-center gap-1">
+                                    <Calendar className="h-3 w-3" />
+                                    {new Date(lead.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </span>
+                                )}
+                                {lead.guest_count != null && (
+                                  <span className="text-xs text-neutral-400 flex items-center gap-1">
+                                    <Users className="h-3 w-3" />{lead.guest_count}
+                                  </span>
+                                )}
+                                {lead.paid_amount > 0 && (
+                                  <span className="text-xs text-emerald-600 font-medium">
+                                    ${lead.paid_amount.toLocaleString()} paid
+                                  </span>
+                                )}
                               </div>
                             </div>
-                            <span className={cn(
-                              'shrink-0 ml-3 text-[10px] font-semibold px-2 py-0.5 rounded-full',
-                              daysUntil <= 7 ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-600'
-                            )}>
-                              {daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil}d`}
-                            </span>
+                            <span className="text-xs text-neutral-300 group-hover:text-black transition-colors shrink-0 ml-3">→</span>
                           </Link>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-              </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
+
+            {/* Row 4: Upcoming events split — confirmed at top, tentative at bottom */}
+            {(() => {
+              const now = new Date();
+              const cutoff = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
+              const upcoming = leads
+                .filter((l) => l.event_date && new Date(l.event_date) >= now && new Date(l.event_date) <= cutoff)
+                .sort((a, b) => new Date(a.event_date!).getTime() - new Date(b.event_date!).getTime());
+
+              const confirmedUp = upcoming.filter((l) => l.status === 'confirmed' || l.status === 'completed');
+              const tentativeUp = upcoming.filter((l) => l.status !== 'confirmed' && l.status !== 'completed');
+
+              const renderRow = (lead: Lead, tentative = false) => {
+                const eventDate = new Date(lead.event_date!);
+                const daysUntil = Math.ceil((eventDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                return (
+                  <Link
+                    key={lead.id}
+                    href={`/projects/${lead.id}`}
+                    className="flex items-center justify-between px-5 py-3 hover:bg-neutral-50 transition-colors group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={cn('shrink-0 w-10 text-center', tentative && 'opacity-60')}>
+                        <p className="text-[10px] text-neutral-400 uppercase leading-none">
+                          {eventDate.toLocaleDateString('en-US', { month: 'short' })}
+                        </p>
+                        <p className="text-lg font-bold text-black leading-tight">{eventDate.getDate()}</p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-black truncate group-hover:underline">{lead.title}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs text-neutral-400">{lead.client_name || lead.client_email}</span>
+                          {lead.guest_count && (
+                            <span className="text-xs text-neutral-300">· {lead.guest_count} guests</span>
+                          )}
+                          {tentative && (
+                            <span className="text-xs text-amber-600 font-medium">· {STATUS_CONFIG[lead.status]?.label ?? lead.status}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <span className={cn(
+                      'shrink-0 ml-3 text-[10px] font-semibold px-2 py-0.5 rounded-full',
+                      daysUntil <= 7
+                        ? tentative ? 'bg-amber-500 text-white' : 'bg-black text-white'
+                        : tentative ? 'bg-amber-50 text-amber-700' : 'bg-neutral-100 text-neutral-600'
+                    )}>
+                      {daysUntil === 0 ? 'Today' : daysUntil === 1 ? 'Tomorrow' : `${daysUntil}d`}
+                    </span>
+                  </Link>
+                );
+              };
+
+              return (
+                <>
+                  {/* Confirmed upcoming */}
+                  <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+                    <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-emerald-500" />
+                        <h3 className="text-sm font-semibold text-black">Upcoming Confirmed Events</h3>
+                        {confirmedUp.length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-emerald-500 text-white text-[10px] font-bold rounded-full">
+                            {confirmedUp.length}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-neutral-400">Next 60 days</span>
+                    </div>
+                    {confirmedUp.length === 0 ? (
+                      <div className="px-5 py-8 text-center">
+                        <Calendar className="h-6 w-6 text-neutral-200 mx-auto mb-2" />
+                        <p className="text-xs text-neutral-400">No confirmed events in the next 60 days</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-neutral-50">{confirmedUp.slice(0, 6).map((l) => renderRow(l, false))}</div>
+                    )}
+                  </div>
+
+                  {/* Tentative / unconfirmed — at the bottom */}
+                  {tentativeUp.length > 0 && (
+                    <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+                      <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="h-4 w-4 text-amber-500" />
+                          <h3 className="text-sm font-semibold text-black">Tentative / Unconfirmed</h3>
+                          <span className="px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">
+                            {tentativeUp.length}
+                          </span>
+                        </div>
+                        <span className="text-xs text-neutral-400">Needs follow-up</span>
+                      </div>
+                      <div className="divide-y divide-neutral-50">{tentativeUp.slice(0, 6).map((l) => renderRow(l, true))}</div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {/* Summary totals — Items / Guests / Prices across all events */}
             {(() => {
@@ -458,19 +590,25 @@ export default function CRMPage() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {stages.map(([status, { label }]) => {
               const stageLeads = byStage(status);
+              const page = pipelinePages[status] ?? 0;
+              const totalPages = Math.max(1, Math.ceil(stageLeads.length / PIPELINE_PAGE_SIZE));
+              const currentPage = Math.min(page, totalPages - 1);
+              const start = currentPage * PIPELINE_PAGE_SIZE;
+              const visible = stageLeads.slice(start, start + PIPELINE_PAGE_SIZE);
+              const setPage = (p: number) => setPipelinePages((prev) => ({ ...prev, [status]: p }));
               return (
-                <div key={status} className="bg-white rounded-xl border border-neutral-200 p-4">
+                <div key={status} className="bg-white rounded-xl border border-neutral-200 p-4 flex flex-col">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-semibold text-black">{label}</h3>
                     <span className="text-xs text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-full">
                       {stageLeads.length}
                     </span>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 flex-1">
                     {stageLeads.length === 0 && (
                       <p className="text-xs text-neutral-300 text-center py-4">Empty</p>
                     )}
-                    {stageLeads.map((lead) => (
+                    {visible.map((lead) => (
                       <Link
                         key={lead.id}
                         href={`/projects/${lead.id}`}
@@ -506,6 +644,27 @@ export default function CRMPage() {
                       </Link>
                     ))}
                   </div>
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-neutral-100">
+                      <button
+                        onClick={() => setPage(Math.max(0, currentPage - 1))}
+                        disabled={currentPage === 0}
+                        className="px-2 py-1 text-xs text-neutral-500 hover:text-black disabled:opacity-30 disabled:hover:text-neutral-500 transition-colors"
+                      >
+                        ← Prev
+                      </button>
+                      <span className="text-xs text-neutral-400 tabular-nums">
+                        {currentPage + 1} / {totalPages}
+                      </span>
+                      <button
+                        onClick={() => setPage(Math.min(totalPages - 1, currentPage + 1))}
+                        disabled={currentPage >= totalPages - 1}
+                        className="px-2 py-1 text-xs text-neutral-500 hover:text-black disabled:opacity-30 disabled:hover:text-neutral-500 transition-colors"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -28,7 +28,7 @@ export function AppNav() {
   const { user, logout } = useAuthStore();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  const isStaff = user?.email?.endsWith('@catering-company.com') ?? false;
+  const isStaff = user?.email?.toLowerCase().endsWith('@catering-company.com') ?? false;
   const navItems = isStaff ? staffNavigation : hostNavigation;
 
   const handleLogout = async () => {

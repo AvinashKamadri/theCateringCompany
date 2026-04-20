@@ -66,13 +66,13 @@ interface Analytics {
   guest_buckets: { bucket: string; count: number }[];
 }
 
-const STATUS_CONFIG: Record<string, { label: string; order: number }> = {
-  draft:     { label: 'Draft',     order: 0 },
-  active:    { label: 'Active',    order: 1 },
-  confirmed: { label: 'Confirmed', order: 2 },
-  completed: { label: 'Completed', order: 3 },
-  cancelled: { label: 'Cancelled', order: 4 },
-  rejected:  { label: 'Rejected',  order: 5 },
+const STATUS_CONFIG: Record<string, { label: string; order: number; color: string }> = {
+  draft:     { label: 'Draft',     order: 0, color: '#aaa' },
+  active:    { label: 'Active',    order: 1, color: '#111' },
+  confirmed: { label: 'Confirmed', order: 2, color: '#555' },
+  completed: { label: 'Completed', order: 3, color: '#888' },
+  cancelled: { label: 'Cancelled', order: 4, color: '#ddd' },
+  rejected:  { label: 'Rejected',  order: 5, color: '#e5e5e5' },
 };
 
 const PIE_COLORS = ['#111', '#555', '#888', '#aaa', '#ddd'];
@@ -97,7 +97,7 @@ export default function CRMPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [pendingContracts, setPendingContracts] = useState<any[]>([]);
+  const [pendingContracts, setanys] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'overview' | 'pipeline' | 'list'>('overview');
   const [pipelinePages, setPipelinePages] = useState<Record<string, number>>({});
@@ -118,7 +118,7 @@ export default function CRMPage() {
         setLeads(leadsData);
         setStats(statsData);
         if (analyticsData) setAnalytics(analyticsData);
-        setPendingContracts(pendingData?.contracts ?? []);
+        setanys(pendingData?.contracts ?? []);
       } catch (err) {
         console.error('Failed to load CRM data', err);
       } finally {
@@ -588,7 +588,7 @@ export default function CRMPage() {
         {/* ── PIPELINE ── */}
         {viewMode === 'pipeline' && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            {stages.map(([status, { label }]) => {
+            {stages.map(([status, { label, color }]) => {
               const stageLeads = byStage(status);
               const page = pipelinePages[status] ?? 0;
               const totalPages = Math.max(1, Math.ceil(stageLeads.length / PIPELINE_PAGE_SIZE));

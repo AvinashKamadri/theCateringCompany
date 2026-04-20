@@ -521,6 +521,7 @@ model menu_items {
   order_items               order_items[]
   project_portion_estimates project_portion_estimates[]
   project_upsell_items      project_upsell_items[]
+  menu_item_dishes          menu_item_dishes[]
 
   @@index([active], map: "ix_menu_items_active")
   @@index([category_id], map: "ix_menu_items_category")
@@ -1276,4 +1277,74 @@ enum webhook_status {
   processed
   failed
   duplicate
+}
+
+model ingredients {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                 String                 @unique
+  calories_per_100g    Decimal?               @db.Decimal(10, 2)
+  carbs_g_per_100g     Decimal?               @db.Decimal(10, 2)
+  protein_g_per_100g   Decimal?               @db.Decimal(10, 2)
+  fat_g_per_100g       Decimal?               @db.Decimal(10, 2)
+  allergens            String[]
+  default_unit         String                 @default("g")
+  default_price        Decimal?               @db.Decimal(10, 2)
+  created_by_user_id   String?                @db.Uuid
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  dish_ingredients     dish_ingredients[]
+  ingredient_stock_log ingredient_stock_log[]
+
+  @@index([name], map: "ix_ingredients_name")
+}
+
+model dishes {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String             @unique
+  description      String?
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime           @default(now()) @db.Timestamptz(6)
+  menu_item_dishes menu_item_dishes[]
+  dish_ingredients dish_ingredients[]
+}
+
+model menu_item_dishes {
+  menu_item_id String     @db.Uuid
+  dish_id      String     @db.Uuid
+  sort_order   Int        @default(0)
+  menu_items   menu_items @relation(fields: [menu_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  dishes       dishes     @relation(fields: [dish_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([menu_item_id, dish_id])
+  @@index([dish_id], map: "ix_menu_item_dishes_dish")
+}
+
+model dish_ingredients {
+  dish_id       String      @db.Uuid
+  ingredient_id String      @db.Uuid
+  weight_g      Decimal?    @db.Decimal(10, 2)
+  volume_ml     Decimal?    @db.Decimal(10, 2)
+  notes         String?
+  dishes        dishes      @relation(fields: [dish_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  ingredients   ingredients @relation(fields: [ingredient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([dish_id, ingredient_id])
+  @@index([ingredient_id], map: "ix_dish_ingredients_ingredient")
+}
+
+model ingredient_stock_log {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ingredient_id String      @db.Uuid
+  delta_g       Decimal?    @db.Decimal(10, 2)
+  delta_ml      Decimal?    @db.Decimal(10, 2)
+  unit_price    Decimal?    @db.Decimal(10, 2)
+  source        String
+  logged_by     String?     @db.Uuid
+  project_id    String?     @db.Uuid
+  notes         String?
+  created_at    DateTime    @default(now()) @db.Timestamptz(6)
+  ingredients   ingredients @relation(fields: [ingredient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([ingredient_id, created_at(sort: Desc)], map: "ix_ingredient_stock_log_ingredient")
+  @@index([project_id], map: "ix_ingredient_stock_log_project")
 }

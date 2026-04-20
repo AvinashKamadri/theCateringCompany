@@ -402,6 +402,77 @@ async function seedPricingPackages() {
   console.log(`\nCreated ${packagesCreated}/${packages.length} pricing packages\n`);
 }
 
+function parseDescriptionIntoDishNames(description: string): string[] {
+  // Descriptions are comma-separated lists like:
+  //   "Carved Prime Rib w/ Horseradish Cream & Au Jus, Roasted Salmon w/ Dill Cream Sauce, Roasted Potatoes, Wild Rice, ..."
+  // Some also embed sub-sections separated by periods:
+  //   "Proteins: Chicken Souvlaki, Pork Souvlaki. Sides/Toppings: Roasted Greek Potatoes, ..."
+  // We split on commas + periods, strip leading "Proteins:" / "Sides:" / "Toppings:" / "(Pick N)" prefixes,
+  // drop empty fragments, and cap name length to keep the dishes table sane.
+  return description
+    .split(/[.,]/)
+    .map((chunk) => chunk.trim())
+    .map((chunk) => chunk.replace(/^(Proteins?|Sides?\/Toppings?|Sides?|Toppings?|Sandwich\/Wrap|Soup|Salad|Sandwich|Includes|Dessert|Fillings?|Buttercreams?|Cake Flavors?|Available flavors?|Toppings Bar|Full Toppings Bar)\s*[:(]/i, ''))
+    .map((chunk) => chunk.replace(/\(Pick \d+\)/gi, ''))
+    .map((chunk) => chunk.replace(/\s*\(.*?\)\s*/g, ' ').trim())
+    .map((chunk) => chunk.replace(/^[-–—]\s*/, ''))
+    .filter((chunk) => chunk.length > 1 && chunk.length < 120);
+}
+
+async function seedDishes() {
+  console.log('\nSeeding dishes from menu_items descriptions...\n');
+
+  const itemsWithDescriptions = await prisma.menu_items.findMany({
+    where: { description: { not: null } },
+    select: { id: true, name: true, description: true },
+  });
+
+  let dishesCreated = 0;
+  let linksCreated = 0;
+  let skipped = 0;
+
+  for (const item of itemsWithDescriptions) {
+    if (!item.description) continue;
+
+    const dishNames = parseDescriptionIntoDishNames(item.description);
+    if (dishNames.length === 0) {
+      skipped++;
+      continue;
+    }
+
+    for (let i = 0; i < dishNames.length; i++) {
+      const dishName = dishNames[i];
+      try {
+        const dish = await prisma.dishes.upsert({
+          where: { name: dishName },
+          create: { name: dishName },
+          update: {},
+        });
+        dishesCreated++;
+
+        await prisma.menu_item_dishes
+          .upsert({
+            where: {
+              menu_item_id_dish_id: { menu_item_id: item.id, dish_id: dish.id },
+            },
+            create: { menu_item_id: item.id, dish_id: dish.id, sort_order: i },
+            update: { sort_order: i },
+          })
+          .then(() => linksCreated++)
+          .catch(() => {});
+      } catch (error) {
+        console.error(`  Error upserting dish "${dishName}":`, (error as Error).message);
+      }
+    }
+  }
+
+  console.log('='.repeat(50));
+  console.log(`Dishes upserted: ${dishesCreated}`);
+  console.log(`Menu-item ↔ dish links: ${linksCreated}`);
+  console.log(`Items with no parseable description: ${skipped}`);
+  console.log('='.repeat(50));
+}
+
 async function main() {
   try {
     console.log('FlashBack Catering - Menu & Pricing Seeder\n');
@@ -418,6 +489,7 @@ async function main() {
 
     await seedMenu();
     await seedPricingPackages();
+    await seedDishes();
 
     console.log('='.repeat(50));
     console.log('Seeding completed successfully!');
@@ -426,11 +498,15 @@ async function main() {
     const totalCategories = await prisma.menu_categories.count();
     const totalItems = await prisma.menu_items.count();
     const totalPackages = await prisma.pricing_packages.count();
+    const totalDishes = await prisma.dishes.count();
+    const totalLinks = await prisma.menu_item_dishes.count();
 
     console.log(`\nDatabase totals:`);
     console.log(`   Menu Categories: ${totalCategories}`);
     console.log(`   Menu Items: ${totalItems}`);
-    console.log(`   Pricing Packages: ${totalPackages}\n`);
+    console.log(`   Pricing Packages: ${totalPackages}`);
+    console.log(`   Dishes: ${totalDishes}`);
+    console.log(`   Menu-item ↔ dish links: ${totalLinks}\n`);
 
   } catch (error) {
     console.error('Seeding failed:', error);

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { FolderKanban, Users, FileText, LogOut, Menu, X, Sparkles } from 'lucide-react';
+import { FolderKanban, Users, FileText, LogOut, Menu, X, Sparkles, Package } from 'lucide-react';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { apiClient } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
@@ -15,9 +15,10 @@ const hostNavigation = [
 ];
 
 const staffNavigation = [
-  { name: 'All Events',   href: '/projects',   icon: FolderKanban },
-  { name: 'Contracts',    href: '/contracts',  icon: FileText },
-  { name: 'CRM Dashboard',      href: '/crm',        icon: Users },
+  { name: 'All Events',     href: '/projects',   icon: FolderKanban },
+  { name: 'Contracts',      href: '/contracts',  icon: FileText },
+  { name: 'CRM Dashboard',  href: '/crm',        icon: Users },
+  { name: 'Inventory',      href: '/inventory',  icon: Package },
 ];
 
 export function AppNav() {

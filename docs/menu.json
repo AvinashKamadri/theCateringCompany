@@ -1,297 +1,282 @@
 {
-  "menu_name": "Catering Menu",
-  "sections": [
+  "_comment": "Canonical menu reference — mirrors the DB schema (menu_categories → menu_items → dishes → dish_ingredients). Edit seed-menu.ts to re-seed.",
+  "schema_version": 2,
+  "menu_categories": [
     {
-      "section": "Hors D'oeuvres",
-      "groups": [
-        {
-          "name": "Chicken",
-          "price": 3.50,
-          "price_unit": "pp/option",
-          "items": [
-            "Maple Bacon Chicken Pops",
-            "Chicken Tikka Skewers",
-            "Adobo Lime Chicken Bites",
-            "Chicken Satay",
-            "Chicken Banh Mi Slider w/ Jalapeno Slaw",
-            "BBQ Chicken Slider"
-          ]
-        },
-        {
-          "name": "Pork",
-          "price": 3.50,
-          "price_unit": "pp/option",
-          "items": [
-            "Smoked Pork Belly Dippers",
-            "Bacon Bourbon Meatballs",
-            "Pulled Pork Sliders",
-            "Chorizo Stuffed Baby Peppers",
-            "Twice Baked Potato Bites"
-          ]
-        },
-        {
-          "name": "Beef",
-          "price": 3.50,
-          "price_unit": "pp/option",
-          "note": "Filet Tip Crostini +$1 (total $4.50)",
-          "items": [
-            "Asian Roast Beef Crostini w/ Wasabi Aioli",
-            "Adobo Steak Skewers",
-            "Meatballs (BBQ, Swedish, Sweet and Sour)",
-            "Mexican Stuffed Peppers w/ Cojito Cheese",
-            "Filet Tip Crostini (+$1)"
-          ]
-        },
-        {
-          "name": "Seafood",
-          "items": [
-            { "name": "Grilled Shrimp Cocktail",    "price": 4.75 },
-            { "name": "Crab Stuffed Cucumbers",     "price": 3.50 },
-            { "name": "South West Shrimp Crostini", "price": 3.50 },
-            { "name": "Shrimp and Mango Bites",     "price": 3.50 },
-            { "name": "Firecracker Shrimp",         "price": 4.75 },
-            { "name": "Crab Cakes",                 "price": 4.75 },
-            { "name": "Crab Dip",                   "price": 3.75 },
-            { "name": "Ahi Tuna Bites",             "price": 3.50 }
-          ]
-        },
-        {
-          "name": "Canapes",
-          "items": [
-            { "name": "Smoked Salmon Phyllo Cups",  "price": 3.80 },
-            { "name": "Tropical Cucumber Cups",     "price": 2.00 },
-            { "name": "Deviled Egg",                "price": 3.00 },
-            { "name": "Caviar Egg",                 "price": 3.50 },
-            { "name": "Caviar and Cream Crisp",     "price": 4.00 },
-            { "name": "Charred Tomato and Pesto",   "price": 2.75 }
-          ]
-        },
-        {
-          "name": "Vegetarian",
-          "items": [
-            { "name": "Bruschetta",                        "price": 1.75 },
-            { "name": "Hummus and Pita",                   "price": 1.95 },
-            { "name": "Chips and Salsa",                   "price": 1.75 },
-            { "name": "Chips & Guacamole",                 "price": 1.75 },
-            { "name": "White Bean Tapenade w/ Crostini",   "price": 1.75 },
-            { "name": "Artichoke Tapenade w/ Crostini",    "price": 1.75 },
-            { "name": "Caprese Skewers",                   "price": 2.75 },
-            { "name": "Parmesan Artichoke Dip",            "price": 3.00 },
-            { "name": "Spanakopita",                       "price": 3.25 },
-            { "name": "Soft Pretzel Bites w/ Beer Cheese", "price": 3.25 },
-            { "name": "Mac & Cheese Shooters",             "price": 3.25 },
-            { "name": "Brie Bites",                        "price": 3.00 },
-            { "name": "Double Stuffed Mushrooms",          "price": 2.75 },
-            { "name": "Gazpacho Shooters",                 "price": 2.25 }
-          ]
-        }
+      "name": "Hors D'oeuvres - Chicken",
+      "sort_order": 1,
+      "menu_items": [
+        { "name": "Maple Bacon Chicken Pops",                 "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Chicken Tikka Skewers",                    "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Adobo Lime Chicken Bites",                 "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Chicken Satay",                            "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Chicken Banh Mi Slider w/ Jalapeno Slaw", "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "BBQ Chicken Slider",                       "unit_price": 3.50, "price_type": "per_person" }
       ]
     },
     {
-      "section": "Platters",
-      "price_unit": "pp",
-      "items": [
-        { "name": "Vegetable Platter",          "price": 2.25 },
-        { "name": "Fruit Platter",              "price": 2.50 },
-        { "name": "Assorted Finger Sandwiches", "price": 4.00 },
-        { "name": "Cheese Platter",             "price": 3.50 },
-        { "name": "Antipasto Platter",          "price": 3.35 },
-        { "name": "Charcuterie Boards",         "price": 4.25 }
+      "name": "Hors D'oeuvres - Pork",
+      "sort_order": 2,
+      "menu_items": [
+        { "name": "Smoked Pork Belly Dippers",    "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Bacon Bourbon Meatballs",      "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Pulled Pork Sliders",          "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Chorizo Stuffed Baby Peppers", "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Twice Baked Potato Bites",     "unit_price": 3.50, "price_type": "per_person" }
       ]
     },
     {
-      "section": "Signature Combinations",
-      "note": "These preselected menus are starting points and can be customized later.",
-      "items": [
+      "name": "Hors D'oeuvres - Beef",
+      "sort_order": 3,
+      "menu_items": [
+        { "name": "Asian Roast Beef Crostini w/ Wasabi Aioli", "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Adobo Steak Skewers",                       "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Meatballs (BBQ, Swedish, Sweet and Sour)",  "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Mexican Stuffed Peppers w/ Cojito Cheese",  "unit_price": 3.50, "price_type": "per_person" },
+        { "name": "Filet Tip Crostini",                        "unit_price": 4.50, "price_type": "per_person", "tags": ["premium"], "is_upsell": true }
+      ]
+    },
+    {
+      "name": "Hors D'oeuvres - Seafood",
+      "sort_order": 4,
+      "menu_items": [
+        { "name": "Grilled Shrimp Cocktail",    "unit_price": 4.75, "price_type": "per_person", "allergens": ["shellfish"] },
+        { "name": "Crab Stuffed Cucumbers",     "unit_price": 3.50, "price_type": "per_person", "allergens": ["shellfish"] },
+        { "name": "South West Shrimp Crostini", "unit_price": 3.50, "price_type": "per_person", "allergens": ["shellfish", "gluten"] },
+        { "name": "Shrimp and Mango Bites",     "unit_price": 3.50, "price_type": "per_person", "allergens": ["shellfish"] },
+        { "name": "Firecracker Shrimp",         "unit_price": 4.75, "price_type": "per_person", "allergens": ["shellfish"] },
+        { "name": "Crab Cakes",                 "unit_price": 4.75, "price_type": "per_person", "allergens": ["shellfish", "gluten"] },
+        { "name": "Crab Dip",                   "unit_price": 3.75, "price_type": "per_person", "allergens": ["shellfish", "dairy"] },
+        { "name": "Ahi Tuna Bites",             "unit_price": 3.50, "price_type": "per_person", "allergens": ["fish"] }
+      ]
+    },
+    {
+      "name": "Hors D'oeuvres - Canapes",
+      "sort_order": 5,
+      "menu_items": [
+        { "name": "Smoked Salmon Phyllo Cups",  "unit_price": 3.80, "price_type": "per_person", "allergens": ["fish", "gluten"] },
+        { "name": "Tropical Cucumber Cups",     "unit_price": 2.00, "price_type": "per_person", "tags": ["vegetarian"] },
+        { "name": "Deviled Egg",                "unit_price": 3.00, "price_type": "per_person", "allergens": ["eggs"], "tags": ["vegetarian"] },
+        { "name": "Caviar Egg",                 "unit_price": 3.50, "price_type": "per_person", "allergens": ["fish", "eggs"], "tags": ["premium"], "is_upsell": true },
+        { "name": "Caviar and Cream Crisp",     "unit_price": 4.00, "price_type": "per_person", "allergens": ["fish", "dairy", "gluten"], "tags": ["premium"], "is_upsell": true },
+        { "name": "Charred Tomato and Pesto",   "unit_price": 2.75, "price_type": "per_person", "tags": ["vegetarian"] }
+      ]
+    },
+    {
+      "name": "Hors D'oeuvres - Vegetarian",
+      "sort_order": 6,
+      "menu_items": [
+        { "name": "Bruschetta",                        "unit_price": 1.75, "price_type": "per_person", "allergens": ["gluten"], "tags": ["vegetarian"] },
+        { "name": "Hummus and Pita",                   "unit_price": 1.95, "price_type": "per_person", "allergens": ["gluten", "sesame"], "tags": ["vegetarian"] },
+        { "name": "Chips and Salsa",                   "unit_price": 1.75, "price_type": "per_person", "tags": ["vegetarian", "vegan", "gluten-free"] },
+        { "name": "Chips & Guacamole",                 "unit_price": 1.75, "price_type": "per_person", "tags": ["vegetarian", "vegan", "gluten-free"] },
+        { "name": "White Bean Tapenade w/ Crostini",   "unit_price": 1.75, "price_type": "per_person", "allergens": ["gluten"], "tags": ["vegetarian"] },
+        { "name": "Artichoke Tapenade w/ Crostini",    "unit_price": 1.75, "price_type": "per_person", "allergens": ["gluten"], "tags": ["vegetarian"] },
+        { "name": "Caprese Skewers",                   "unit_price": 2.75, "price_type": "per_person", "allergens": ["dairy"], "tags": ["vegetarian", "gluten-free"] },
+        { "name": "Parmesan Artichoke Dip",            "unit_price": 3.00, "price_type": "per_person", "allergens": ["dairy"], "tags": ["vegetarian"] },
+        { "name": "Spanakopita",                       "unit_price": 3.25, "price_type": "per_person", "allergens": ["gluten", "dairy", "eggs"], "tags": ["vegetarian"] },
+        { "name": "Soft Pretzel Bites w/ Beer Cheese", "unit_price": 3.25, "price_type": "per_person", "allergens": ["gluten", "dairy"], "tags": ["vegetarian"] },
+        { "name": "Mac & Cheese Shooters",             "unit_price": 3.25, "price_type": "per_person", "allergens": ["gluten", "dairy"], "tags": ["vegetarian"] },
+        { "name": "Brie Bites",                        "unit_price": 3.00, "price_type": "per_person", "allergens": ["dairy", "gluten"], "tags": ["vegetarian"] },
+        { "name": "Double Stuffed Mushrooms",          "unit_price": 2.75, "price_type": "per_person", "allergens": ["dairy"], "tags": ["vegetarian"] },
+        { "name": "Gazpacho Shooters",                 "unit_price": 2.25, "price_type": "per_person", "tags": ["vegetarian", "vegan", "gluten-free"] }
+      ]
+    },
+    {
+      "name": "Platters",
+      "sort_order": 7,
+      "menu_items": [
+        { "name": "Vegetable Platter",          "unit_price": 2.25, "price_type": "per_person", "tags": ["vegetarian", "vegan", "gluten-free"] },
+        { "name": "Fruit Platter",              "unit_price": 2.50, "price_type": "per_person", "tags": ["vegetarian", "vegan", "gluten-free"] },
+        { "name": "Assorted Finger Sandwiches", "unit_price": 4.00, "price_type": "per_person", "allergens": ["gluten"] },
+        { "name": "Cheese Platter",             "unit_price": 3.50, "price_type": "per_person", "allergens": ["dairy"], "tags": ["vegetarian"] },
+        { "name": "Antipasto Platter",          "unit_price": 3.35, "price_type": "per_person", "allergens": ["gluten"] },
+        { "name": "Charcuterie Boards",         "unit_price": 4.25, "price_type": "per_person", "allergens": ["dairy", "gluten"] }
+      ]
+    },
+    {
+      "name": "Signature Combinations",
+      "sort_order": 8,
+      "menu_items": [
         {
           "name": "Prime Rib & Salmon",
-          "price": 39.99,
-          "price_unit": "pp",
-          "description": "Carved Prime Rib w/ Horseradish Cream & Au Jus, Roasted Salmon w/ Dill Cream Sauce, Roasted Potatoes, Wild Rice, Glazed Carrots, Grilled Asparagus, Dinner Rolls."
+          "unit_price": 39.99, "price_type": "per_person",
+          "tags": ["premium"], "is_upsell": true, "allergens": ["fish"],
+          "description": "Carved Prime Rib w/ Horseradish Cream & Au Jus, Roasted Salmon w/ Dill Cream Sauce, Roasted Potatoes, Wild Rice, Glazed Carrots, Grilled Asparagus, Dinner Rolls.",
+          "dishes": ["Carved Prime Rib", "Roasted Salmon", "Roasted Potatoes", "Wild Rice", "Glazed Carrots", "Grilled Asparagus", "Dinner Rolls"]
         },
         {
           "name": "Chicken & Ham",
-          "price": 27.99,
-          "price_unit": "pp",
-          "description": "Grilled Chicken Breast, Mango Glazed Ham Carved, Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, Dinner Rolls."
+          "unit_price": 27.99, "price_type": "per_person",
+          "description": "Grilled Chicken Breast, Mango Glazed Ham Carved, Mashed Potatoes, Rice Pilaf, Buttered Corn, Green Beans, Dinner Rolls.",
+          "dishes": ["Grilled Chicken Breast", "Mango Glazed Ham", "Mashed Potatoes", "Rice Pilaf", "Buttered Corn", "Green Beans", "Dinner Rolls"]
         },
         {
           "name": "Chicken Piccata",
-          "price": 29.49,
-          "price_unit": "pp",
-          "description": "Chicken Piccata, Red Wine Braised Beef Roast, Vegetable Farfalle, Long Grain Buttered Rice, Roasted Mixed Veggies, Green Beans, Dinner Rolls."
+          "unit_price": 29.49, "price_type": "per_person",
+          "description": "Chicken Piccata, Red Wine Braised Beef Roast, Vegetable Farfalle, Long Grain Buttered Rice, Roasted Mixed Veggies, Green Beans, Dinner Rolls.",
+          "dishes": ["Chicken Piccata", "Red Wine Braised Beef Roast", "Vegetable Farfalle", "Long Grain Buttered Rice", "Roasted Mixed Veggies", "Green Beans", "Dinner Rolls"]
         }
       ]
     },
     {
-      "section": "BBQ Menus",
-      "sides": "Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad",
-      "items": [
+      "name": "BBQ Menus",
+      "sort_order": 9,
+      "menu_items": [
         {
           "name": "Beef Brisket & Chicken",
-          "price": 25.99,
-          "price_unit": "pp",
-          "description": "BBQ Beef Brisket (sliced), Beer Can Chicken."
+          "unit_price": 25.99, "price_type": "per_person",
+          "description": "BBQ Beef Brisket (sliced), Beer Can Chicken. Includes Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad.",
+          "dishes": ["BBQ Beef Brisket", "Beer Can Chicken", "Mac & Cheese", "Baked Beans", "Coleslaw", "Pasta Salad", "Potato Salad"]
         },
         {
           "name": "Pork & Chicken",
-          "price": 23.99,
-          "price_unit": "pp",
-          "description": "Pulled BBQ Pork, Pulled BBQ Chicken."
+          "unit_price": 23.99, "price_type": "per_person",
+          "description": "Pulled BBQ Pork, Pulled BBQ Chicken. Includes Mac & Cheese, Baked Beans, Coleslaw, Pasta Salad, Potato Salad.",
+          "dishes": ["Pulled BBQ Pork", "Pulled BBQ Chicken", "Mac & Cheese", "Baked Beans", "Coleslaw", "Pasta Salad", "Potato Salad"]
         }
       ]
     },
     {
-      "section": "Tasty & Casual",
-      "items": [
+      "name": "Tasty & Casual",
+      "sort_order": 10,
+      "menu_items": [
         {
           "name": "Burger Bar",
-          "price": 23.99,
-          "price_unit": "pp",
-          "description": "Burgers (handmade) w/ Brioche Buns, Beer Can Chicken Breast. Toppings Bar: Mushrooms, Grilled Onions, Pickled Red Onion, Pickles, Lettuce, Tomato, Bacon, Assorted Sauces and Cheeses. Sides: Mac & Cheese, Roasted Red Potato (Herb and Balsamic), Seasonal Spring Greens Salad (Choice of 2 Dressings), Caprese Platter (Sliced Tomato, Fresh Mozzarella, Basil, Balsamic Glaze), Watermelon Salad (Mint, Lime Juice)."
+          "unit_price": 23.99, "price_type": "per_person",
+          "allergens": ["gluten", "dairy"],
+          "description": "Burgers (handmade) w/ Brioche Buns, Beer Can Chicken Breast. Toppings Bar: Mushrooms, Grilled Onions, Pickled Red Onion, Pickles, Lettuce, Tomato, Bacon, Assorted Sauces and Cheeses. Sides: Mac & Cheese, Roasted Red Potato, Seasonal Spring Greens Salad, Caprese Platter, Watermelon Salad.",
+          "dishes": ["Handmade Burgers", "Beer Can Chicken Breast", "Mac & Cheese", "Roasted Red Potato", "Seasonal Spring Greens Salad", "Caprese Platter", "Watermelon Salad"]
         },
         {
           "name": "Southern Comfort",
-          "price": 27.95,
-          "price_unit": "pp",
-          "description": "Garden Salad, Crispy Fried Chicken, Smoked Sausage, Mac and Cheese, Mashed Potatoes, Southern Style Green Beans, Buttered Corn Kernel, Corn Bread w/ Butter."
+          "unit_price": 27.95, "price_type": "per_person",
+          "allergens": ["gluten", "dairy"],
+          "description": "Garden Salad, Crispy Fried Chicken, Smoked Sausage, Mac and Cheese, Mashed Potatoes, Southern Style Green Beans, Buttered Corn Kernel, Corn Bread w/ Butter.",
+          "dishes": ["Garden Salad", "Crispy Fried Chicken", "Smoked Sausage", "Mac and Cheese", "Mashed Potatoes", "Southern Style Green Beans", "Buttered Corn Kernel", "Corn Bread"]
         }
       ]
     },
     {
-      "section": "Global Inspirations",
-      "items": [
+      "name": "Global Inspirations",
+      "sort_order": 11,
+      "menu_items": [
         {
           "name": "Mexican Char Grilled",
-          "price": 27.99,
-          "price_unit": "pp",
-          "description": "Carne Asada, Chili Lime Chicken, Spanish Rice, Bandito Black Beans, Peppers & Onions, Pico De Gallo, Sour Cream, Tortilla Shells."
+          "unit_price": 27.99, "price_type": "per_person",
+          "tags": ["gluten-free-option"],
+          "description": "Carne Asada, Chili Lime Chicken, Spanish Rice, Bandito Black Beans, Peppers & Onions, Pico De Gallo, Sour Cream, Tortilla Shells.",
+          "dishes": ["Carne Asada", "Chili Lime Chicken", "Spanish Rice", "Bandito Black Beans", "Peppers & Onions", "Pico De Gallo"]
         },
         {
           "name": "Fiesta Taco Bar",
-          "price": 23.99,
-          "price_unit": "pp",
-          "description": "Braised Spanish Beef, Braised Chili Chicken, Pinto Beans, Cilantro Lime Rice, Full Toppings Bar."
+          "unit_price": 23.99, "price_type": "per_person",
+          "description": "Braised Spanish Beef, Braised Chili Chicken, Pinto Beans, Cilantro Lime Rice, Full Toppings Bar.",
+          "dishes": ["Braised Spanish Beef", "Braised Chili Chicken", "Pinto Beans", "Cilantro Lime Rice"]
         },
         {
           "name": "Mediterranean Bar",
-          "price": 23.49,
-          "price_unit": "pp",
-          "description": "Hummus Bar (all homemade): Roasted Garlic, Sundried Tomato, Original. Toppings: Ground Lamb (hot), Grilled Mediterranean Chicken (hot), Roasted Vegetables (hot), Feta Cheese, Roasted Chickpeas, Olives, Fresh Diced Tomato, Pickled Onions, Caramelized Onions, Shredded Lettuce, Pita Bread."
+          "unit_price": 23.49, "price_type": "per_person",
+          "allergens": ["sesame", "gluten"],
+          "description": "Hummus Bar (all homemade): Roasted Garlic, Sundried Tomato, Original. Toppings: Ground Lamb, Grilled Mediterranean Chicken, Roasted Vegetables, Feta Cheese, Roasted Chickpeas, Olives, Pita Bread.",
+          "dishes": ["Hummus Bar", "Ground Lamb", "Grilled Mediterranean Chicken", "Roasted Vegetables", "Pita Bread"]
         },
         {
           "name": "Souvlaki Bar",
-          "price": 21.49,
-          "price_unit": "pp",
-          "description": "Proteins: Chicken Souvlaki, Pork Souvlaki. Sides/Toppings: Roasted Greek Potatoes, Roasted Mixed Vegetables, Green Beans, Pita Bread, Fresh Diced Tomatoes, Diced Onions, Shredded Lettuce, Tzatziki, Feta Cheese, Fresh Cilantro."
+          "unit_price": 21.49, "price_type": "per_person",
+          "allergens": ["gluten", "dairy"],
+          "description": "Proteins: Chicken Souvlaki, Pork Souvlaki. Sides/Toppings: Roasted Greek Potatoes, Roasted Mixed Vegetables, Green Beans, Pita Bread, Tzatziki, Feta Cheese.",
+          "dishes": ["Chicken Souvlaki", "Pork Souvlaki", "Roasted Greek Potatoes", "Roasted Mixed Vegetables", "Green Beans", "Pita Bread", "Tzatziki"]
         },
         {
           "name": "Marsala Menu",
-          "price": 25.99,
-          "price_unit": "pp",
-          "description": "Chicken Marsala, Roasted Cod in Peperonata Sauce, Vegetable Farfalle, Fettuccini, Roasted Mixed Veggies, Green Beans, Dinner Rolls."
+          "unit_price": 25.99, "price_type": "per_person",
+          "allergens": ["gluten"],
+          "description": "Chicken Marsala, Roasted Cod in Peperonata Sauce, Vegetable Farfalle, Fettuccini, Roasted Mixed Veggies, Green Beans, Dinner Rolls.",
+          "dishes": ["Chicken Marsala", "Roasted Cod", "Vegetable Farfalle", "Fettuccini", "Roasted Mixed Veggies", "Green Beans", "Dinner Rolls"]
         },
         {
           "name": "Ravioli Menu",
-          "price": 31.99,
-          "price_unit": "pp",
-          "description": "Garden Salad, Grilled Chicken with Wild Mushroom Beurre Blanc, Roasted Salmon w/ Lemon Butter Sauce, Truffle Ravioli, Wild Rice, Sauteed Zucchini and Tomatoes, Roasted Asparagus, Dinner Rolls."
+          "unit_price": 31.99, "price_type": "per_person",
+          "allergens": ["gluten", "fish", "dairy"],
+          "tags": ["premium"], "is_upsell": true,
+          "description": "Garden Salad, Grilled Chicken with Wild Mushroom Beurre Blanc, Roasted Salmon w/ Lemon Butter Sauce, Truffle Ravioli, Wild Rice, Sauteed Zucchini and Tomatoes, Roasted Asparagus, Dinner Rolls.",
+          "dishes": ["Garden Salad", "Grilled Chicken with Wild Mushroom Beurre Blanc", "Roasted Salmon", "Truffle Ravioli", "Wild Rice", "Sauteed Zucchini and Tomatoes", "Roasted Asparagus", "Dinner Rolls"]
         },
         {
           "name": "Grilled Pasta Menu",
-          "price": 21.49,
-          "price_unit": "pp",
-          "description": "Caesar Salad w/ Croutons on side, Grilled Chicken Breast, Sliced Italian Sausage, Pesto Penne Alfredo, Green Beans, Honey Glazed Carrots, Dinner Rolls."
+          "unit_price": 21.49, "price_type": "per_person",
+          "allergens": ["gluten", "dairy"],
+          "description": "Caesar Salad w/ Croutons, Grilled Chicken Breast, Sliced Italian Sausage, Pesto Penne Alfredo, Green Beans, Honey Glazed Carrots, Dinner Rolls.",
+          "dishes": ["Caesar Salad", "Grilled Chicken Breast", "Sliced Italian Sausage", "Pesto Penne Alfredo", "Green Beans", "Honey Glazed Carrots", "Dinner Rolls"]
         }
       ]
     },
     {
-      "section": "Soup / Salad / Sandwich",
-      "price": 21.95,
-      "price_unit": "pp",
-      "groups": {
-        "Soup": [
-          "Broccoli Cheddar", "Loaded Potato", "Tomato Basil Bisque", "Chicken Tortilla",
-          "Vegetable Minestrone", "Clam Chowder", "French Onion", "Chicken Noodle",
-          "Traditional Chili", "Chicken Chili"
-        ],
-        "Salad": [
-          "Caesar Salad", "Cobb Salad", "Greek Salad", "Southwest Salad",
-          "Potato Salad", "Coleslaw", "Seasonal Greens Salad", "Bacon and Blue Cheese Salad",
-          "Pasta Salad", "Sweet Kale Salad w/ Bacon and Cranberries", "Design Your Own"
-        ],
-        "Sandwich / Wrap": [
-          "Gourmet Grilled Cheese", "Corned Beef Reuben", "Pulled Pork Cuban",
-          "Avocado BLT", "Pesto Chicken", "Turkey Club",
-          "Roasted Vegetable and Hummus Wrap", "Philly Cheese Steak", "Build Your Own"
-        ]
-      }
+      "name": "Soup / Salad / Sandwich",
+      "sort_order": 12,
+      "menu_items": [
+        {
+          "name": "Soup / Salad / Sandwich Menu",
+          "unit_price": 21.95, "price_type": "per_person",
+          "description": "Pick 2 soups, 2 salads, and 2 sandwiches/wraps from our full selection.",
+          "options": {
+            "Soup (Pick 2)": ["Broccoli Cheddar", "Loaded Potato", "Tomato Basil Bisque", "Chicken Tortilla", "Vegetable Minestrone", "Clam Chowder", "French Onion", "Chicken Noodle", "Traditional Chili", "Chicken Chili"],
+            "Salad (Pick 2)": ["Caesar Salad", "Cobb Salad", "Greek Salad", "Southwest Salad", "Potato Salad", "Coleslaw", "Seasonal Greens Salad", "Bacon and Blue Cheese Salad", "Pasta Salad", "Sweet Kale Salad w/ Bacon and Cranberries", "Design Your Own"],
+            "Sandwich / Wrap (Pick 2)": ["Gourmet Grilled Cheese", "Corned Beef Reuben", "Pulled Pork Cuban", "Avocado BLT", "Pesto Chicken", "Turkey Club", "Roasted Vegetable and Hummus Wrap", "Philly Cheese Steak", "Build Your Own"]
+          }
+        }
+      ]
     },
     {
-      "section": "Coffee and Desserts",
-      "items": [
-        {
-          "name": "Mini Desserts",
-          "price": 5.25,
-          "price_unit": "pp",
-          "note": "Select 4",
-          "items": [
-            "Flavored Mousse Cup (Chocolate, White Chocolate, Raspberry, Kahlua)",
-            "Lemon Bars",
-            "Blondies",
-            "7-Layer Bars",
-            "Brownies",
-            "Chocolate Chip Cookie Bars",
-            "Mini Assorted Cheesecakes",
-            "Fruit Tarts (Raspberry, Strawberry, Blackberry, Lemon, Lime)"
-          ]
-        },
+      "name": "Mini Desserts - Select 4",
+      "sort_order": 13,
+      "menu_items": [
+        { "name": "Flavored Mousse Cup",        "unit_price": 5.25, "price_type": "per_person", "tags": ["dessert", "select-4"], "description": "Chocolate, White Chocolate, Raspberry, or Kahlua" },
+        { "name": "Lemon Bars",                 "unit_price": 5.25, "price_type": "per_person", "tags": ["dessert", "select-4"], "allergens": ["gluten", "eggs"] },
+        { "name": "Blondies",                   "unit_price": 5.25, "price_type": "per_person", "tags": ["dessert", "select-4"], "allergens": ["gluten", "dairy", "eggs"] },
+        { "name": "7-Layer Bars",               "unit_price": 5.25, "price_type": "per_person", "tags": ["dessert", "select-4"], "allergens": ["gluten", "dairy", "eggs", "tree_nuts"] },
+        { "name": "Brownies",                   "unit_price": 5.25, "price_type": "per_person", "tags": ["dessert", "select-4"], "allergens": ["gluten", "dairy", "eggs"] },
+        { "name": "Chocolate Chip Cookie Bars", "unit_price": 5.25, "price_type": "per_person", "tags": ["dessert", "select-4"], "allergens": ["gluten", "dairy", "eggs"] },
+        { "name": "Mini Assorted Cheesecakes",  "unit_price": 5.25, "price_type": "per_person", "tags": ["dessert", "select-4"], "allergens": ["gluten", "dairy", "eggs"] },
+        { "name": "Fruit Tarts",                "unit_price": 5.25, "price_type": "per_person", "tags": ["dessert", "select-4"], "allergens": ["gluten", "dairy", "eggs"], "description": "Raspberry, Strawberry, Blackberry, Lemon, or Lime" }
+      ]
+    },
+    {
+      "name": "Coffee & Bar",
+      "sort_order": 14,
+      "menu_items": [
         {
           "name": "Coffee Bar",
-          "price": 2.75,
-          "price_unit": "pp",
-          "description": "Brewed In House Dunkin Donuts Coffee served with Sugar, Half & Half, Flavor Shots (Caramel, Hazelnut, French Vanilla). Set out with dessert."
+          "unit_price": 2.75, "price_type": "per_person", "allergens": ["dairy"],
+          "description": "Brewed In House Dunkin Donuts Coffee — Sugar, Half & Half, Flavor Shots (Caramel, Hazelnut, French Vanilla). Set out with dessert."
         },
         {
           "name": "Barback Package",
-          "price": 8.50,
-          "price_unit": "pp",
-          "description": "Diet Coke, Coke, Sprite, Ginger Ale, Club Soda, Tonic Water, Bitters, OJ, Cranberry and Pineapple Juices, Lemons, Limes and Oranges, Cherries, Ice, Clear Plastic Cups, Coolers."
+          "unit_price": 8.50, "price_type": "per_person", "tags": ["bar"],
+          "description": "Diet Coke, Coke, Sprite, Ginger Ale, Club Soda, Tonic Water, Bitters, OJ, Cranberry & Pineapple Juices, Lemons, Limes, Oranges, Cherries, Ice, Plastic Cups, Coolers."
         },
         {
           "name": "Ice & Cooler Package",
-          "price": 1.75,
-          "price_unit": "pp",
+          "unit_price": 1.75, "price_type": "per_person", "tags": ["bar"],
           "description": "Ice (2 lbs per person @ $0.70/lb), Coolers included, Cups ($0.35 each)."
         }
       ]
     },
     {
-      "section": "Wedding / Tiered Cakes",
-      "items": [
+      "name": "Wedding / Tiered Cakes",
+      "sort_order": 15,
+      "menu_items": [
         {
           "name": "2 Tier 6\" & 8\" (Serves 25)",
-          "price": 275.00,
-          "price_unit": "flat",
-          "note": "Starts at $275. For additional sizing, please send an inquiry.",
-          "cake_flavors": [
-            "Yellow", "White", "Almond", "Chocolate", "Carrot", "Red Velvet",
-            "Bananas Foster", "Whiskey Caramel", "Lemon", "Spice", "Funfetti",
-            "Pumpkin Spice", "Cookies and Cream", "Strawberry", "Coconut"
-          ],
-          "fillings": [
-            "Butter Cream", "Lemon Curd", "Raspberry Jam", "Strawberry Jam",
-            "Cream Cheese Icing", "Peanut Butter Cream", "Mocha Buttercream",
-            "Salted Caramel Buttercream", "Cinnamon Butter Cream"
-          ],
-          "buttercreams": [
-            "Signature Buttercream", "Chocolate Buttercream", "Cream Cheese Frosting"
-          ]
+          "unit_price": 275.00, "price_type": "flat",
+          "tags": ["wedding"], "allergens": ["gluten", "dairy", "eggs"],
+          "description": "Starts at $275. Cake Flavors: Yellow, White, Almond, Chocolate, Carrot, Red Velvet, Bananas Foster, Whiskey Caramel, Lemon, Spice, Funfetti, Pumpkin Spice, Cookies and Cream, Strawberry, Coconut. Fillings: Butter Cream, Lemon Curd, Raspberry Jam, Strawberry Jam, Cream Cheese Icing, Peanut Butter Cream, Mocha Buttercream, Salted Caramel Buttercream, Cinnamon Butter Cream. For additional sizing, send an inquiry."
         },
         {
           "name": "Cupcakes",
-          "price": 3.50,
-          "price_unit": "per unit",
+          "unit_price": 3.50, "price_type": "per_unit",
+          "tags": ["wedding"], "allergens": ["gluten", "dairy", "eggs"],
           "description": "Choice of two flavors. Custom colors available."
         }
       ]

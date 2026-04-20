@@ -1,13 +1,7 @@
 """
-AI tools for slot extraction, validation, and business logic
+tools/ — financial + business calculators only (post-overhaul).
+
+Legacy extraction helpers (slot_extraction, slot_validation,
+modification_detection) were removed — domain Tools live under
+`agent/tools/` and use Instructor schemas instead.
 """
-
-from tools.slot_extraction import extract_slot_value
-from tools.slot_validation import validate_slot
-from tools.modification_detection import detect_slot_modification
-
-__all__ = [
-    "extract_slot_value",
-    "validate_slot",
-    "detect_slot_modification",
-]

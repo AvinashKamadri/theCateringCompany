@@ -15,6 +15,10 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from orchestrator import AgentOrchestrator
+from agent.instructor_client import warmup as warmup_instructor
+from agent.logging_config import configure_logging
+
+configure_logging()
 from tools.pricing import calculate_event_pricing
 from database.db_manager import (
     init_db, close_client,
@@ -35,6 +39,10 @@ async def lifespan(app: FastAPI):
     print(f"  SERVER CODE VERSION: {_CODE_VERSION}")
     print(f"{'='*50}\n")
     await init_db()
+    try:
+        await warmup_instructor()
+    except Exception as e:
+        print(f"[WARN] Instructor warmup failed: {e}")
     yield
     await close_client()
 
@@ -129,19 +137,19 @@ async def chat(req: ChatRequest):
 
         project_id = result.get("project_id", "")
 
-        # Build contract body as JSONB
+        # `contract_data` here is the pricing breakdown from FinalizationTool.
         body = {
-            "summary": contract_data.get("summary", ""),
             "slots": slot_vals,
-            "contract_text": contract_data.get("contract_text", ""),
+            "pricing": contract_data,
         }
+        total_amount = contract_data.get("grand_total") or contract_data.get("total_amount")
 
         contract_id = await save_contract(
             project_id=project_id,
             client_name=slot_vals.get("name", "Unknown"),
             event_date=slot_vals.get("event_date", ""),
             body=body,
-            total_amount=contract_data.get("total_amount"),
+            total_amount=total_amount,
         )
 
         # Update project with event details

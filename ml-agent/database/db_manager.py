@@ -19,12 +19,28 @@ _client: Prisma | None = None
 SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 
+async def _ensure_system_user(client: Prisma) -> None:
+    """Ensure the system user exists (needed for AI-authored messages FK)."""
+    existing = await client.users.find_unique(where={"id": SYSTEM_USER_ID})
+    if not existing:
+        await client.users.create(
+            data={
+                "id": SYSTEM_USER_ID,
+                "email": "system@catering-agent.internal",
+                "password_hash": "!disabled",
+                "status": "active",
+            }
+        )
+        logger.info("Created system user %s", SYSTEM_USER_ID)
+
+
 async def init_db():
     """Connect Prisma client."""
     global _client
     if _client is None:
         _client = Prisma()
         await _client.connect()
+        await _ensure_system_user(_client)
         logger.info("Prisma client connected")
 
 
@@ -222,7 +238,9 @@ async def save_message(
     if sender_type == "ai":
         resolved_author = SYSTEM_USER_ID
     elif author_id and _UUID_RE.match(str(author_id)):
-        resolved_author = author_id
+        # Verify user exists locally — prod users may not exist in dev DB
+        user_exists = await client.users.find_unique(where={"id": str(author_id)})
+        resolved_author = str(author_id) if user_exists else None
     else:
         resolved_author = None
 

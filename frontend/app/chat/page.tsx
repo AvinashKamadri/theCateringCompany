@@ -85,6 +85,16 @@ function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
   const hasVenue    = !!slots.venue;
   const hasEventType = !!slots.event_type;
   const hasName     = !!slots.name;
+  const slotList = (val?: string | string[]) => {
+    if (!val || val === 'none' || val === 'no') return [];
+    if (Array.isArray(val)) return val.filter(Boolean);
+    return String(val).split(',').map((v) => v.trim()).filter(Boolean);
+  };
+  const slotYesNo = (val?: boolean | string | null) => {
+    if (val === true || val === 'true' || val === 'True') return 'Yes';
+    if (val === false || val === 'false' || val === 'False') return 'No';
+    return null;
+  };
 
   // Collect food items
   const foodItems: string[] = [];
@@ -233,6 +243,29 @@ function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
               <p className="text-sm text-neutral-800">{slots.special_requests}</p>
             </div>
           )}
+          <div className="pt-1 border-t border-neutral-100">
+            <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-2">Full Intake Snapshot</p>
+            <div className="space-y-1.5 text-sm">
+              {slots.partner_name && <p className="text-neutral-700"><span className="text-neutral-400">Partner:</span> {slots.partner_name}</p>}
+              {slots.company_name && <p className="text-neutral-700"><span className="text-neutral-400">Company:</span> {slots.company_name}</p>}
+              {slots.honoree_name && <p className="text-neutral-700"><span className="text-neutral-400">Honoree:</span> {slots.honoree_name}</p>}
+              {slots.email && <p className="text-neutral-700"><span className="text-neutral-400">Email:</span> {slots.email}</p>}
+              {slots.phone && <p className="text-neutral-700"><span className="text-neutral-400">Phone:</span> {slots.phone}</p>}
+              {slots.wedding_cake && slots.wedding_cake !== 'none' && <p className="text-neutral-700"><span className="text-neutral-400">Wedding cake:</span> {slots.wedding_cake}</p>}
+              {slots.meal_style && <p className="text-neutral-700"><span className="text-neutral-400">Meal style:</span> {slots.meal_style}</p>}
+              {slots.appetizer_style && <p className="text-neutral-700"><span className="text-neutral-400">Appetizer style:</span> {slots.appetizer_style}</p>}
+              {slots.tableware && <p className="text-neutral-700"><span className="text-neutral-400">Tableware:</span> {slots.tableware}</p>}
+              {slots.utensils && <p className="text-neutral-700"><span className="text-neutral-400">Utensils:</span> {slots.utensils}</p>}
+              {slotYesNo(slots.drinks) && <p className="text-neutral-700"><span className="text-neutral-400">Drinks:</span> {slotYesNo(slots.drinks)}</p>}
+              {slotYesNo(slots.bar_service) && <p className="text-neutral-700"><span className="text-neutral-400">Bar service:</span> {slotYesNo(slots.bar_service)}</p>}
+              {slots.bar_package && <p className="text-neutral-700"><span className="text-neutral-400">Bar package:</span> {slots.bar_package}</p>}
+              {slotYesNo(slots.coffee_service) && <p className="text-neutral-700"><span className="text-neutral-400">Coffee service:</span> {slotYesNo(slots.coffee_service)}</p>}
+              {slotYesNo(slots.linens) && <p className="text-neutral-700"><span className="text-neutral-400">Linens:</span> {slotYesNo(slots.linens)}</p>}
+              {slotList(slots.rentals).length > 0 && <p className="text-neutral-700"><span className="text-neutral-400">Rentals:</span> {slotList(slots.rentals).join(', ')}</p>}
+              {slots.additional_notes && slots.additional_notes !== 'none' && <p className="text-neutral-700"><span className="text-neutral-400">Additional notes:</span> {slots.additional_notes}</p>}
+              {slotYesNo(slots.followup_call_requested) && <p className="text-neutral-700"><span className="text-neutral-400">Follow-up call:</span> {slotYesNo(slots.followup_call_requested)}</p>}
+            </div>
+          </div>
         </>
       )}
     </div>

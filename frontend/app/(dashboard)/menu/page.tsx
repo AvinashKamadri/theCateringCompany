@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, UtensilsCrossed, ChevronRight, AlertCircle, Leaf } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
+import { RoleGuard } from '@/components/auth/RoleGuard';
 
 interface DishIngredient {
   ingredient_id: string;
@@ -47,6 +48,14 @@ function price(item: MenuItem): string {
 }
 
 export default function MenuPage() {
+  return (
+    <RoleGuard role="staff">
+      <MenuPageContent />
+    </RoleGuard>
+  );
+}
+
+function MenuPageContent() {
   const [items, setItems] = useState<MenuItem[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 

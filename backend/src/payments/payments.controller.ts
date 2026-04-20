@@ -1,11 +1,25 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, ForbiddenException, Post, Body } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
+import { PaymentRemindersService } from './payment-reminders.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly reminders: PaymentRemindersService,
+  ) {}
+
+  /** Staff-only manual trigger for the reminder sweep (also runs on daily cron). */
+  @Post('reminders/run')
+  async runReminders(@CurrentUser() user: JwtPayload) {
+    const email = (user as unknown as { email?: string }).email || '';
+    if (!email.endsWith('@catering-company.com')) {
+      throw new ForbiddenException('Staff only');
+    }
+    return this.reminders.scanAndNotify();
+  }
 
   @Post('create-intent')
   async createPaymentIntent(

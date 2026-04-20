@@ -6,6 +6,7 @@ import {
   ArrowLeft, Calendar, Users, MapPin, FileText,
   Clock, CheckCircle2, AlertCircle, Loader2, Building2,
   ThumbsUp, ThumbsDown, X, Plus, Trash2, DollarSign, Calculator,
+  ShieldAlert, Leaf, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
@@ -94,6 +95,17 @@ export default function ContractDetailPage() {
   const [onsiteServiceRate, setOnsiteServiceRate] = useState(6.5);
   const [gratuityRate, setGratuityRate] = useState(15);
 
+  interface LineItemBreakdown {
+    description: string;
+    matched_menu_item_id: string | null;
+    matched_name: string | null;
+    dishes: Array<{ id: string; name: string; ingredients: Array<{ id: string; name: string; allergens: string[] }> }>;
+    menu_item_allergens: string[];
+    warnings: string[];
+  }
+  const [breakdowns, setBreakdowns] = useState<Record<string, LineItemBreakdown>>({});
+  const [expandedLines, setExpandedLines] = useState<Record<number, boolean>>({});
+
   useEffect(() => {
     const controller = new AbortController();
     apiClient.get(`/contracts/${contractId}`, { signal: controller.signal })
@@ -113,6 +125,33 @@ export default function ContractDetailPage() {
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [contractId]);
+
+  // Resolve line items → dishes + ingredients + allergen warnings (debounced)
+  useEffect(() => {
+    if (!contract) return;
+    const body = (contract.body as any) || {};
+    const menu = body.menu || {};
+    const slots = body.slots || {};
+    const diets: string[] = menu.dietary_restrictions || (slots.dietary_concerns ? [slots.dietary_concerns] : []);
+    const descriptions = lineItems.map((li) => li.description).filter(Boolean);
+    if (descriptions.length === 0) {
+      setBreakdowns({});
+      return;
+    }
+    const t = setTimeout(() => {
+      apiClient
+        .post('/inventory/resolve-line-items', { descriptions, dietary_restrictions: diets })
+        .then((res: any) => {
+          const map: Record<string, LineItemBreakdown> = {};
+          for (const b of res.items || []) map[b.description] = b;
+          setBreakdowns(map);
+        })
+        .catch(() => {
+          // silent — inventory integration is supplemental
+        });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [contract, lineItems]);
 
   const handlePreviewPdf = async () => {
     setPreviewing(true);
@@ -460,6 +499,32 @@ export default function ContractDetailPage() {
                 </div>
               </div>
 
+              {/* Allergen warnings banner */}
+              {(() => {
+                const allWarnings = new Set<string>();
+                for (const b of Object.values(breakdowns)) for (const w of b.warnings) allWarnings.add(w);
+                if (allWarnings.size === 0 || dietaryRestrictions.length === 0) return null;
+                return (
+                  <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3">
+                    <ShieldAlert className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+                    <div className="text-sm">
+                      <div className="font-semibold text-red-900">Allergen conflict detected</div>
+                      <div className="text-red-800 mt-1">
+                        Guest restrictions: <span className="font-medium">{dietaryRestrictions.join(', ')}</span>
+                      </div>
+                      <div className="text-red-700 mt-1">
+                        Flagged allergens across selected menu items:{' '}
+                        {Array.from(allWarnings).map((w) => (
+                          <span key={w} className="inline-block ml-1 px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-xs font-medium">
+                            {w}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Line items toolbar */}
               <div className="flex items-center justify-between mb-3">
                 <div>
@@ -496,8 +561,12 @@ export default function ContractDetailPage() {
                   )}
                   {lineItems.map((item, idx) => {
                     const lineTotal = item.quantity * item.unitPrice;
+                    const breakdown = breakdowns[item.description];
+                    const hasBreakdown = !!breakdown && (breakdown.dishes.length > 0 || breakdown.warnings.length > 0);
+                    const expanded = !!expandedLines[idx];
                     return (
-                      <div key={idx} className="grid grid-cols-[1fr_100px_120px_120px_32px] gap-3 px-4 py-2.5 items-center hover:bg-neutral-50/50 transition-colors">
+                      <div key={idx}>
+                      <div className="grid grid-cols-[1fr_100px_120px_120px_32px] gap-3 px-4 py-2.5 items-center hover:bg-neutral-50/50 transition-colors">
                         <input type="text" placeholder="e.g. Bronze Package, Antipasto Platter…" value={item.description}
                           onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
                           className="border border-neutral-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black" />
@@ -518,6 +587,71 @@ export default function ContractDetailPage() {
                           className="text-neutral-300 hover:text-red-500 transition-colors flex items-center justify-center">
                           <Trash2 className="h-4 w-4" />
                         </button>
+                      </div>
+                      {hasBreakdown && (
+                        <div className="px-4 pb-2 -mt-1">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedLines((prev) => ({ ...prev, [idx]: !prev[idx] }))}
+                            className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-900"
+                          >
+                            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                            {breakdown.matched_name
+                              ? `Matches: ${breakdown.matched_name} — ${breakdown.dishes.length} dish${breakdown.dishes.length === 1 ? '' : 'es'}`
+                              : 'No menu match'}
+                            {breakdown.warnings.length > 0 && (
+                              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-semibold">
+                                <ShieldAlert className="h-3 w-3" />
+                                {breakdown.warnings.length} allergen warning{breakdown.warnings.length === 1 ? '' : 's'}
+                              </span>
+                            )}
+                          </button>
+                          {expanded && (
+                            <div className="mt-2 ml-4 space-y-2">
+                              {breakdown.warnings.length > 0 && (
+                                <div className="text-xs text-red-700">
+                                  Contains:{' '}
+                                  {breakdown.warnings.map((w) => (
+                                    <span key={w} className="inline-block ml-1 px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-medium">
+                                      ⚠ {w}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {breakdown.dishes.length === 0 ? (
+                                <div className="text-xs text-neutral-400">No dishes linked yet — add them in Inventory.</div>
+                              ) : (
+                                <ul className="space-y-1">
+                                  {breakdown.dishes.map((dish) => (
+                                    <li key={dish.id} className="text-xs">
+                                      <div className="font-medium text-neutral-700">{dish.name}</div>
+                                      {dish.ingredients.length > 0 && (
+                                        <div className="mt-0.5 flex flex-wrap gap-1">
+                                          {dish.ingredients.map((ing) => (
+                                            <span
+                                              key={ing.id}
+                                              className={cn(
+                                                'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px]',
+                                                ing.allergens.length > 0
+                                                  ? 'bg-amber-50 text-amber-800'
+                                                  : 'bg-emerald-50 text-emerald-700',
+                                              )}
+                                            >
+                                              <Leaf className="h-2.5 w-2.5" />
+                                              {ing.name}
+                                              {ing.allergens.length > 0 && <span className="opacity-70"> · {ing.allergens.join(', ')}</span>}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       </div>
                     );
                   })}

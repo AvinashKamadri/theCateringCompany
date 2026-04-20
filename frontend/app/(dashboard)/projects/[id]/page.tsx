@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   Calendar, Users, MapPin, FileText, MessageSquare, Loader2,
-  ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield, Link2,
+  ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield, Link2, Flame, X,
 } from 'lucide-react';
 import BentoInfoCard from '@/components/ui/BentoInfoCard';
 import AiHint from '@/components/ui/AiHint';
@@ -81,6 +81,7 @@ export default function ProjectDetailPage() {
   const [addRole, setAddRole] = useState<CollaboratorRole>('collaborator');
   const [addingCollaborator, setAddingCollaborator] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [wasteOpen, setWasteOpen] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   useEffect(() => {
@@ -196,6 +197,7 @@ export default function ProjectDetailPage() {
   };
 
   const canManage = myRole === 'owner' || myRole === 'manager';
+  const isStaff = currentUser?.email?.endsWith('@catering-company.com') ?? false;
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-[60vh]">
@@ -432,6 +434,19 @@ export default function ProjectDetailPage() {
                 </button>
             </BentoInfoCard>
             )}
+
+            {isStaff && (
+              <BentoInfoCard className="p-5">
+                <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Food Waste</p>
+                <p className="text-xs text-neutral-500 mb-3">Log ingredients discarded or over-prepped for this event.</p>
+                <button
+                  onClick={() => setWasteOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border border-neutral-200 hover:border-neutral-400 text-neutral-800 transition-colors"
+                >
+                  <Flame className="h-3.5 w-3.5" /> Log waste
+                </button>
+              </BentoInfoCard>
+            )}
           </div>
 
           {/* ── Client ── 1 col */}
@@ -653,6 +668,150 @@ export default function ProjectDetailPage() {
           </BentoInfoCard>
 
         </div>
+      </div>
+
+      {wasteOpen && (
+        <LogWasteModal
+          projectId={projectId}
+          onClose={() => setWasteOpen(false)}
+          onSaved={() => { setWasteOpen(false); toast.success('Waste logged'); }}
+        />
+      )}
+    </div>
+  );
+}
+
+interface Ingredient { id: string; name: string; default_unit: string }
+
+function LogWasteModal({
+  projectId,
+  onClose,
+  onSaved,
+}: {
+  projectId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [ingredientId, setIngredientId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [unit, setUnit] = useState<'g' | 'ml'>('g');
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiClient.get('/inventory/ingredients')
+      .then((data: any) => {
+        const list = Array.isArray(data) ? data : [];
+        setIngredients(list);
+        if (list.length > 0) {
+          setIngredientId(list[0].id);
+          setUnit((list[0].default_unit === 'ml' ? 'ml' : 'g') as 'g' | 'ml');
+        }
+      })
+      .catch(() => toast.error('Failed to load ingredients'));
+  }, []);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ingredientId || !amount) return;
+    const qty = Math.abs(Number(amount));
+    if (!Number.isFinite(qty) || qty <= 0) { toast.error('Enter a valid amount'); return; }
+    setSaving(true);
+    try {
+      await apiClient.post('/inventory/stock-log', {
+        ingredient_id: ingredientId,
+        delta_g: unit === 'g' ? -qty : null,
+        delta_ml: unit === 'ml' ? -qty : null,
+        source: 'waste',
+        project_id: projectId,
+        notes: notes.trim() || null,
+      });
+      onSaved();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to log waste');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-neutral-200">
+        <div className="flex items-center justify-between p-5 border-b border-neutral-100">
+          <h3 className="text-base font-semibold text-neutral-900">Log food waste</h3>
+          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-900">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <form onSubmit={submit} className="p-5 space-y-4">
+          <div>
+            <label className="text-xs font-medium text-neutral-600 mb-1 block">Ingredient</label>
+            <select
+              value={ingredientId}
+              onChange={(e) => {
+                setIngredientId(e.target.value);
+                const ing = ingredients.find((i) => i.id === e.target.value);
+                if (ing) setUnit((ing.default_unit === 'ml' ? 'ml' : 'g') as 'g' | 'ml');
+              }}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-neutral-200 focus:border-neutral-900 focus:outline-none"
+              required
+            >
+              {ingredients.length === 0 && <option value="">No ingredients available</option>}
+              {ingredients.map((i) => (
+                <option key={i.id} value={i.id}>{i.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-[1fr_auto] gap-2">
+            <div>
+              <label className="text-xs font-medium text-neutral-600 mb-1 block">Amount</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-neutral-200 focus:border-neutral-900 focus:outline-none"
+                placeholder="e.g. 250"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-neutral-600 mb-1 block">Unit</label>
+              <select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value as 'g' | 'ml')}
+                className="px-3 py-2 text-sm rounded-lg border border-neutral-200 focus:border-neutral-900 focus:outline-none"
+              >
+                <option value="g">g</option>
+                <option value="ml">ml</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-neutral-600 mb-1 block">Notes <span className="text-neutral-400">(optional)</span></label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-neutral-200 focus:border-neutral-900 focus:outline-none resize-none"
+              placeholder="Over-prepped, spoiled, dropped..."
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-neutral-600 hover:bg-neutral-100">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !ingredientId || !amount}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-neutral-900 text-white hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Logging…' : 'Log waste'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -77,6 +77,23 @@ export class ContractsService {
   }
 
   /**
+   * Enqueue an LLM conversation summary job for a project at contract creation.
+   * A worker pulls project messages + ai_conversation_states.slots, summarizes,
+   * and writes to projects.conversation_summary + project_summaries.
+   */
+  async enqueueConversationSummary(projectId: string, contractId: string) {
+    try {
+      await this.jobQueue.send('project_summary_generation', {
+        projectId,
+        contractId,
+      });
+    } catch (err) {
+      // Non-fatal — contract creation shouldn't fail if the queue write fails.
+      console.warn('[contracts] failed to enqueue summary job', err);
+    }
+  }
+
+  /**
    * Send contract to SignWell for e-signature
    */
   // Renamed from sendToSignWell - now uses OpenSign

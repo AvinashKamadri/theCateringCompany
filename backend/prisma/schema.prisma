@@ -670,6 +670,8 @@ model payment_schedule_items {
   status                    payment_status    @default(pending)
   gateway_payment_intent_id String?
   paid_at                   DateTime?         @db.Timestamptz(6)
+  last_reminder_sent_at     DateTime?         @db.Timestamptz(6)
+  overdue_notified_at       DateTime?         @db.Timestamptz(6)
   created_at                DateTime          @default(now()) @db.Timestamptz(6)
   payment_schedules         payment_schedules @relation(fields: [schedule_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   payments                  payments[]
@@ -861,6 +863,7 @@ model projects {
   guest_count                                                                      Int?
   status                                                                           project_status               @default(draft)
   ai_event_summary                                                                 String?
+  conversation_summary                                                             String?
   created_via_ai_intake                                                            Boolean                      @default(false)
   ai_conversation_state_id                                                         String?                      @db.Uuid
   signed_contract_id                                                               String?                      @db.Uuid
@@ -894,6 +897,7 @@ model projects {
   project_portion_estimates                                                        project_portion_estimates[]
   project_pricing                                                                  project_pricing[]
   project_staff_requirements                                                       project_staff_requirements[]
+  project_summaries                                                                project_summaries[]
   project_upsell_items                                                             project_upsell_items[]
   ai_conversation_states_projects_ai_conversation_state_idToai_conversation_states ai_conversation_states?      @relation("projects_ai_conversation_state_idToai_conversation_states", fields: [ai_conversation_state_id], references: [id], onUpdate: NoAction, map: "fk_projects_ai_conv_state")
   contracts_projects_signed_contract_idTocontracts                                 contracts?                   @relation("projects_signed_contract_idTocontracts", fields: [signed_contract_id], references: [id], onUpdate: NoAction, map: "fk_projects_signed_contract")
@@ -1347,4 +1351,16 @@ model ingredient_stock_log {
 
   @@index([ingredient_id, created_at(sort: Desc)], map: "ix_ingredient_stock_log_ingredient")
   @@index([project_id], map: "ix_ingredient_stock_log_project")
+}
+
+
+model project_summaries {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id    String   @db.Uuid
+  contract_id   String?  @db.Uuid
+  summary       String
+  generated_at  DateTime @default(now()) @db.Timestamptz(6)
+  projects      projects @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([project_id, generated_at(sort: Desc)], map: "ix_project_summaries_project")
 }

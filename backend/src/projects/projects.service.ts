@@ -662,6 +662,11 @@ export class ProjectsService {
         userId,
       );
 
+      await this.contractsService.enqueueConversationSummary(
+        result.project.id,
+        result.contract.id,
+      );
+
       console.log(`✅ [Contract] Contract ${result.contract.id} created and queued for PDF generation`);
       console.log(`⏳ [Contract] Status: ${result.contract.status} - Awaiting staff approval`);
       console.log(`📧 [Contract] Client email: ${dto.contact_email}`);

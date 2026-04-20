@@ -117,7 +117,9 @@ export class ContractsController {
       contractGroupId?: string;
     },
   ) {
-    return this.contractsService.createVersion(userId, projectId, body);
+    const contract = await this.contractsService.createVersion(userId, projectId, body);
+    await this.contractsService.enqueueConversationSummary(projectId, contract.id);
+    return contract;
   }
 
   @Post('contracts/:id/generate-pdf')

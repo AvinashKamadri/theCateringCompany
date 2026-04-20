@@ -18,7 +18,6 @@ import {
   UpsertIngredientDto,
 } from './inventory.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Public } from '../common/decorators/public.decorator';
 
 type Caller = { userId: string; email: string };
 
@@ -114,10 +113,22 @@ export class InventoryController {
     return this.inventory.listStockLog(user.email, ingredientId);
   }
 
-  // public menu feed — used by the customer-facing menu page
-  @Public()
+  // staff-only menu feed — consumed by the staff /menu page
   @Get('menu-feed')
-  menuFeed() {
-    return this.inventory.listMenuItemsWithDishes();
+  menuFeed(@CurrentUser() user: Caller) {
+    return this.inventory.listMenuItemsWithDishes(user.email);
+  }
+
+  // resolve contract line items → dishes + ingredients + allergen warnings
+  @Post('resolve-line-items')
+  resolveLineItems(
+    @CurrentUser() user: Caller,
+    @Body() dto: { descriptions: string[]; dietary_restrictions?: string[] },
+  ) {
+    return this.inventory.resolveLineItems(
+      user.email,
+      dto.descriptions || [],
+      dto.dietary_restrictions || [],
+    );
   }
 }

@@ -145,15 +145,6 @@ export function ChatSidebar({ contractData, slotsFilled, totalSlots }: ChatSideb
           <div className="p-4 border-b border-gray-200">
             <h4 className="text-sm font-semibold text-gray-900 mb-3">Quick Actions</h4>
             <div className="space-y-2">
-              <Link
-                href="/menu"
-                className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition text-sm group"
-              >
-                <UtensilsCrossed className="w-4 h-4 text-gray-600 group-hover:text-blue-600" />
-                <span className="text-gray-700 group-hover:text-blue-600 font-medium">
-                  Browse Menu
-                </span>
-              </Link>
               <button
                 className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition text-sm group"
                 onClick={() => {

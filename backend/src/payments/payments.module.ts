@@ -6,12 +6,15 @@ import { PAYMENT_PROVIDER } from './payment-provider.interface';
 import { StripeProvider } from './stripe.provider';
 import { MockPaymentProvider } from './mock.provider';
 import { PrismaService } from '../prisma.service';
+import { PaymentRemindersService } from './payment-reminders.service';
+import { JobQueueModule } from '../job_queue/job-queue.module';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, JobQueueModule],
   controllers: [PaymentsController],
   providers: [
     PaymentsService,
+    PaymentRemindersService,
     PrismaService,
     {
       provide: PAYMENT_PROVIDER,

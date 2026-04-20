@@ -211,8 +211,106 @@ export class InventoryService {
 
   // ─── menu_items with dishes (for menu page) ───────────────────────────────
 
-  async listMenuItemsWithDishes() {
-    // public — no staff guard, so the menu page can render it
+  // ─── line-item breakdown (allergen + dish expansion for contract page) ───
+
+  async resolveLineItems(
+    callerEmail: string,
+    descriptions: string[],
+    dietaryRestrictions: string[],
+  ) {
+    this.assertStaff(callerEmail);
+
+    const normalize = (s: string) => s.toLowerCase().trim();
+    const dietSet = new Set(dietaryRestrictions.map(normalize).filter(Boolean));
+
+    // Pull all active menu items with their dish graph once, then match in memory.
+    const allItems = await this.prisma.menu_items.findMany({
+      where: { active: true },
+      include: {
+        menu_item_dishes: {
+          include: {
+            dishes: {
+              include: { dish_ingredients: { include: { ingredients: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    const findMatch = (description: string) => {
+      const d = normalize(description);
+      if (!d) return null;
+      // 1. exact name match
+      let m = allItems.find((it) => normalize(it.name) === d);
+      if (m) return m;
+      // 2. description contains menu item name OR vice versa
+      m = allItems.find((it) => d.includes(normalize(it.name)) || normalize(it.name).includes(d));
+      return m ?? null;
+    };
+
+    const results = descriptions.map((description) => {
+      const match = findMatch(description);
+      if (!match) {
+        return {
+          description,
+          matched_menu_item_id: null as string | null,
+          matched_name: null as string | null,
+          dishes: [] as Array<{
+            id: string;
+            name: string;
+            ingredients: Array<{ id: string; name: string; allergens: string[] }>;
+          }>,
+          menu_item_allergens: [] as string[],
+          warnings: [] as string[],
+        };
+      }
+
+      const dishes = match.menu_item_dishes
+        .slice()
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((mid) => ({
+          id: mid.dishes.id,
+          name: mid.dishes.name,
+          ingredients: mid.dishes.dish_ingredients.map((di) => ({
+            id: di.ingredients.id,
+            name: di.ingredients.name,
+            allergens: di.ingredients.allergens,
+          })),
+        }));
+
+      const allAllergens = new Set<string>();
+      for (const a of match.allergens) allAllergens.add(normalize(a));
+      for (const d of dishes) {
+        for (const i of d.ingredients) {
+          for (const a of i.allergens) allAllergens.add(normalize(a));
+        }
+      }
+
+      const warnings: string[] = [];
+      for (const a of allAllergens) {
+        for (const d of dietSet) {
+          if (a === d || a.includes(d) || d.includes(a)) {
+            warnings.push(a);
+            break;
+          }
+        }
+      }
+
+      return {
+        description,
+        matched_menu_item_id: match.id,
+        matched_name: match.name,
+        dishes,
+        menu_item_allergens: match.allergens,
+        warnings: Array.from(new Set(warnings)),
+      };
+    });
+
+    return { items: results, dietary_restrictions: Array.from(dietSet) };
+  }
+
+  async listMenuItemsWithDishes(callerEmail: string) {
+    this.assertStaff(callerEmail);
     return this.prisma.menu_items.findMany({
       where: { active: true },
       orderBy: [{ menu_categories: { sort_order: 'asc' } }, { name: 'asc' }],

@@ -10,30 +10,10 @@ from agent.nodes.helpers import (
 from prompts.system_prompts import SYSTEM_PROMPT, NODE_PROMPTS
 from agent.nodes.menu import get_dessert_context, _resolve_to_db_items
 from database.db_manager import load_menu_by_category
-from tools.modification_detection import _format_recent_messages
-
-
-_DONE_PHRASES = frozenset({
-    "no", "nope", "nah", "nah thanks", "no thanks", "none", "nothing",
-    "im good", "i'm good", "good", "all good", "all set", "i'm set", "im set",
-    "that's it", "thats it", "that's all", "thats all", "done", "finish",
-    "finished", "finalize", "move on", "next", "skip", "ok", "okay",
-    "yes good", "looks good", "sounds good", "perfect", "great",
-})
-
-
-def _is_done(msg: str) -> bool:
-    return msg.strip().lower().rstrip("!.?,") in _DONE_PHRASES
 
 
 def _slots_context(state):
-    return {k: v["value"] for k, v in state["slots"].items() if v.get("filled") and not k.startswith("__")}
-
-
-def _recent_ctx(state, n: int = 6) -> str:
-    """Compact recent conversation block for injecting into LLM classifier prompts."""
-    msgs = list(state.get("messages", []))
-    return _format_recent_messages(msgs, n=n) if msgs else ""
+    return {k: v["value"] for k, v in state["slots"].items() if v.get("filled")}
 
 
 async def ask_utensils_node(state: ConversationState) -> ConversationState:
@@ -41,16 +21,13 @@ async def ask_utensils_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if _is_done(user_msg):
-        intent_norm = "no"
-    else:
-        wants_utensils = await llm_extract(
-            "The customer was asked if they want utensils for their event. "
-            "Classify their answer. 'unclear' is for ambiguous like 'maybe', 'not sure', 'idk', "
-            "'what do you recommend'.\n\nReturn ONLY: yes, no, or unclear",
-            user_msg
-        )
-        intent_norm = norm_llm(wants_utensils)
+    wants_utensils = await llm_extract(
+        "The customer was asked if they want utensils for their event. "
+        "Classify their answer. 'unclear' is for ambiguous like 'maybe', 'not sure', 'idk', "
+        "'what do you recommend'.\n\nReturn ONLY: yes, no, or unclear",
+        user_msg
+    )
+    intent_norm = norm_llm(wants_utensils)
     if intent_norm == "unclear":
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer gave an ambiguous answer about utensils. "
@@ -144,18 +121,15 @@ async def ask_desserts_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    # Short-circuit: unambiguous done phrases mean no desserts
-    if _is_done(user_msg):
-        wants_desserts = False
-    else:
-        intent = await llm_extract(
-            "Does this message mean the person wants desserts, or are they declining/skipping desserts? "
-            "Consider any form of enthusiasm, excitement, or affirmation as 'yes'. "
-            "Only return 'no' if they clearly decline (e.g. 'no thanks', 'skip', 'pass', 'none', 'im good'). "
-            "Return ONLY: yes or no",
-            user_msg
-        )
-        wants_desserts = norm_llm(intent) != "no"
+    # Use LLM to detect intent — handles slang, hype, enthusiasm naturally
+    intent = await llm_extract(
+        "Does this message mean the person wants desserts, or are they declining/skipping desserts? "
+        "Consider any form of enthusiasm, excitement, or affirmation as 'yes'. "
+        "Only return 'no' if they clearly decline (e.g. 'no thanks', 'skip', 'pass', 'none'). "
+        "Return ONLY: yes or no",
+        user_msg
+    )
+    wants_desserts = norm_llm(intent) != "no"
 
     if wants_desserts:
         # Python builds the dessert list — LLM only generates intro
@@ -192,19 +166,13 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
     user_msg = get_last_human_message(state["messages"])
 
     # If user wants to skip, move on
-    ctx = _recent_ctx(state)
-    if _is_done(user_msg):
-        skip_result = "skip"
-    else:
-        skip_check = await llm_extract(
-            "The customer was shown a dessert menu and asked to pick items. "
-            "Are they skipping/declining desserts, or making selections?\n\n"
-            f"Recent conversation:\n{ctx}\n\n"
-            "Return ONLY: skip or selecting",
-            user_msg
-        )
-        skip_result = norm_llm(skip_check)
-    if skip_result == "skip":
+    skip_check = await llm_extract(
+        "The customer was shown a dessert menu and asked to pick items. "
+        "Are they skipping/declining desserts, or making selections?\n\n"
+        "Return ONLY: skip or selecting",
+        user_msg
+    )
+    if norm_llm(skip_check) == "skip":
         fill_slot(state["slots"], "desserts", "no")
         context = f"No desserts. Slots: {_slots_context(state)}"
         response = await llm_respond(
@@ -215,23 +183,30 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
         state["messages"] = add_ai_message(state, response)
         return state
 
-    # Use get_dessert_items() which expands bundle sub-items into individual named items.
-    # This ensures "Lemon Bars", "Fruit Tarts" etc. are resolvable even though they live
-    # in a bundle description in the DB rather than as standalone rows.
-    from agent.nodes.menu import get_dessert_items as _get_dessert_items
-    event_type_val = (get_slot_value(state["slots"], "event_type") or "").lower()
-    expanded_items = await _get_dessert_items(is_wedding="wedding" in event_type_val)
-
-    # Build numbered list from expanded items for extraction context
-    numbered_lines = [f"{i+1}. {item['name']}" for i, item in enumerate(expanded_items)]
-    numbered_str = "\n".join(numbered_lines)
-
-    # Build a flat lookup: name_lower → item dict (for resolution)
-    expanded_lookup = {item["name"].lower(): item for item in expanded_items}
-
-    # Also keep the raw dessert_menu for DB-resolution fallback
+    # Load dessert-only menu for resolution (so "Coffee Bar" etc. match correctly)
     menu = await load_menu_by_category()
-    dessert_menu = {k: v for k, v in menu.items() if any(kw in k.lower() for kw in ["dessert", "cake"])}
+    dessert_menu = {}
+    for cat_name, items in menu.items():
+        cat_lower = cat_name.lower()
+        if any(kw in cat_lower for kw in ["dessert", "cake"]):
+            dessert_menu[cat_name] = items
+
+    # Build numbered list — expand mini dessert bundle into individual items from description
+    numbered_lines = []
+    item_num = 1
+    for items in dessert_menu.values():
+        for item in items:
+            if "mini desserts" in item["name"].lower() and item.get("description"):
+                # Expand bundle: show each sub-item individually
+                for sub in item["description"].split(","):
+                    sub = sub.strip()
+                    if sub:
+                        numbered_lines.append(f"{item_num}. {sub}")
+                        item_num += 1
+            else:
+                numbered_lines.append(f"{item_num}. {item['name']}")
+                item_num += 1
+    numbered_str = "\n".join(numbered_lines)
 
     extraction = await llm_extract(
         "Extract the dessert selections from this customer message. "
@@ -242,39 +217,8 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
         user_msg
     )
 
-    # Resolve against expanded items first (handles sub-items like Lemon Bars, Fruit Tarts),
-    # then fall back to raw DB resolution for bundle-level items.
-    extracted_names = [n.strip() for n in extraction.split(",") if n.strip()]
-    matched_items = []
-    resolved_names = []
-    for name in extracted_names:
-        name_lower = name.lower()
-        if name_lower in expanded_lookup:
-            matched_items.append(expanded_lookup[name_lower])
-            resolved_names.append(expanded_lookup[name_lower]["name"])
-        else:
-            # Partial match fallback
-            for key, item in expanded_lookup.items():
-                if name_lower in key or key in name_lower:
-                    if item["name"] not in resolved_names:
-                        matched_items.append(item)
-                        resolved_names.append(item["name"])
-                    break
-
-    if resolved_names:
-        # Format with prices for display
-        parts = []
-        for item in matched_items:
-            if item.get("unit_price"):
-                parts.append(f"{item['name']} (${item['unit_price']:.2f}/{item.get('price_type','pp')})")
-            else:
-                parts.append(item["name"])
-        resolved_text = ", ".join(p.split(" ($")[0] for p in parts)  # store names only, prices added by build
-        # Store as plain names for slot value
-        resolved_text = ", ".join(resolved_names)
-    else:
-        # Fall back to original DB resolution for bundle-level names
-        matched_items, resolved_text = await _resolve_to_db_items(extraction, dessert_menu)
+    # Try DB resolution first
+    matched_items, resolved_text = await _resolve_to_db_items(extraction, dessert_menu)
 
     # Check if extraction matches mini dessert sub-items (from description, not standalone DB items).
     # Robust detection: any dessert item whose NAME contains "mini" contributes its description
@@ -413,8 +357,7 @@ async def select_desserts_node(state: ConversationState) -> ConversationState:
 
     # Resume-after-mod: if we entered here via a mid-conversation @AI edit,
     # just acknowledge and jump back to where the user was — don't run ask_more_desserts.
-    resume_slot = state["slots"].pop("__resume_after_mod__", None)
-    resume_node = resume_slot["value"] if resume_slot and resume_slot.get("filled") else None
+    resume_node = state.pop("_resume_after_mod", None)
     if resume_node:
         response = await llm_respond(
             f"{SYSTEM_PROMPT}\n\nCustomer just updated desserts to: {new_val}. "
@@ -455,27 +398,19 @@ async def ask_more_desserts_node(state: ConversationState) -> ConversationState:
             last_ai_msg = msg.content
             break
 
-    # Short-circuit: unambiguous "done" phrases bypass the LLM entirely
-    if _is_done(user_msg):
-        intent_val = "done"
-    else:
-        ctx = _recent_ctx(state)
-        raw = await llm_extract(
-            "The AI just asked the customer if they want to add more desserts or if they're done. "
-            "Based on the exact question + customer reply, determine their intent.\n\n"
-            "Rules:\n"
-            "- 'yes', 'yeah', 'yep', 'sure' → more (they want to add more)\n"
-            "- 'no', 'nope', 'that's it', 'nothing else', 'all good', 'done', 'im good', 'i'm good' → done\n"
-            "- Naming specific dessert items → more\n"
-            "- Ambiguous one-word replies → lean 'done' unless the question was 'want more?' style\n\n"
-            f"Recent conversation:\n{ctx}\n\n"
-            f"AI asked: {last_ai_msg}\n"
-            f"Customer replied: {user_msg}\n\n"
-            "Return ONLY: more or done",
-            user_msg
-        )
-        intent_val = raw.strip().lower()
-    intent = intent_val
+    intent = await llm_extract(
+        "The AI just asked the customer if they want to add more desserts or if they're done. "
+        "Based on the exact question + customer reply, determine their intent.\n\n"
+        "Rules:\n"
+        "- 'yes', 'yeah', 'yep', 'sure' → more (they want to add more)\n"
+        "- 'no', 'nope', 'that's it', 'nothing else', 'all good', 'done' → done\n"
+        "- Naming specific dessert items → more\n"
+        "- Ambiguous one-word replies → lean 'more' if question was 'anything else?' (positive framing)\n\n"
+        f"AI asked: {last_ai_msg}\n"
+        f"Customer replied: {user_msg}\n\n"
+        "Return ONLY: more or done",
+        user_msg
+    )
     if intent.strip().lower() != "more":
         context = f"Desserts finalized. Slots: {_slots_context(state)}"
         response = await llm_respond(
@@ -507,18 +442,15 @@ async def ask_rentals_node(state: ConversationState) -> ConversationState:
     state = dict(state)
     user_msg = get_last_human_message(state["messages"])
 
-    if _is_done(user_msg):
-        extraction = "NONE"
-    else:
-        extraction = await llm_extract(
-            "The customer was asked about rentals. Available options: 1=Linens, 2=Tables, 3=Chairs. "
-            "The customer may type numbers, names, or both. "
-            "Map: 1/linens → Linens, 2/tables → Tables, 3/chairs → Chairs. "
-            "Return ONLY a comma-separated list (e.g. 'Linens, Tables'). "
-            "If they gave a vague answer like 'yes', 'sure', 'okay' WITHOUT specifying which ones, return ASK. "
-            "Return NONE if they clearly don't want any.",
-            user_msg
-        )
+    extraction = await llm_extract(
+        "The customer was asked about rentals. Available options: 1=Linens, 2=Tables, 3=Chairs. "
+        "The customer may type numbers, names, or both. "
+        "Map: 1/linens → Linens, 2/tables → Tables, 3/chairs → Chairs. "
+        "Return ONLY a comma-separated list (e.g. 'Linens, Tables'). "
+        "If they gave a vague answer like 'yes', 'sure', 'okay' WITHOUT specifying which ones, return ASK. "
+        "Return NONE if they clearly don't want any.",
+        user_msg
+    )
     if extraction.strip().upper() == "NONE":
         fill_slot(state["slots"], "rentals", "no")
     elif extraction.strip().upper() == "ASK":

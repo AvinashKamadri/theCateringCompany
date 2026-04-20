@@ -7,9 +7,8 @@ Two-layer routing:
 """
 
 import re
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage
 from agent.state import ConversationState
-from agent.llm import llm_cold
 
 # Maps each node to the slot it is currently collecting.
 # Used to detect when the user is talking about a DIFFERENT slot than the current one.
@@ -63,16 +62,16 @@ _CORRECTION_SIGNALS = re.compile(
     r'correction|oh wait|no wait|sorry,?\s+i|i made a mistake|'
     r'i forgot to|i need to (change|update|fix|edit|add|remove|delete)|'
     r'make that|scratch that|instead of|rather than|replace .+ with|'
-    r'revise|modify|clear|wipe|drop(?!.?off)|skip)\b',
+    r'revise|modify|clear|wipe|drop)\b',
     re.IGNORECASE,
 )
 
 # Bare modify/action verbs — no leading "actually/wait" needed, since users can't rely on @AI.
 # Pair this with a slot keyword to be safe. Covers: change, update, edit, fix, modify, revise,
-# correct, switch, add, remove, delete, append, insert, drop, clear, wipe, skip.
+# correct, switch, add, remove, delete, append, insert, drop, clear, wipe.
 _MODIFY_VERB = re.compile(
     r'\b(change|update|edit|fix|modify|revise|correct|switch|add|remove|delete|'
-    r'append|insert|drop|clear|wipe|skip)\b',
+    r'append|insert|drop|clear|wipe)\b',
     re.IGNORECASE,
 )
 
@@ -85,17 +84,9 @@ _SLOT_KEYWORDS: dict[str, list[str]] = {
     "service_type":  [r'\bdrop.?off\b', r'\bon.?site\b', r'\bservice type\b'],
     "event_type":    [r'\bwedding\b', r'\bcorporate\b', r'\bbirthday\b', r'\bevent type\b'],
     "dietary_concerns": [r'\bdiet\b', r'\ballerg\b', r'\bvegan\b', r'\bvegetarian\b', r'\bhalal\b', r'\bkosher\b'],
-    "special_requests": [r'\bspecial requests?\b', r'\bdietary\b', r'\bnote\b', r'\brestriction\b', r'\bintoleranc\b', r'\ballerg\b'],
-    "additional_notes": [r'\binstructions?\b', r'\badditional (note|info|detail)\b', r'\bnote for\b', r'\bleave (a )?note\b', r'\banything else\b', r'\bremind\b'],
-    "appetizer_style":  [r'\bpassed\s+around\b', r'\bpassing\b', r'\bset\s+up\s+at\s+(a\s+)?station\b', r'\bappetizer\s+style\b', r'\bserved\s+(by\s+)?servers?\b'],
-    "meal_style":       [r'\bplated\b', r'\bbuffet\b', r'\bmeal\s+style\b', r'\bserving\s+style\b'],
-    "service_style":    [r'\bcocktail\s+hour\b', r'\bfull\s+reception\b', r'\bservice\s+style\b'],
+    "special_requests": [r'\bspecial request\b', r'\bnote\b'],
     "appetizers":       [r'appetizers?', r'hors\s*d\'?oeuvres?', r'starters?'],
-    "selected_dishes":  [r'\bdishes?\b', r'\bentr[eé]es?\b', r'\bmain\s+courses?\b', r'\bfood\s+selection\b', r'\bthe menu\b', r'\bmain menu\b'],
-    "desserts":         [r'\bdesserts?\b', r'\bcakes?\b', r'\bcupcakes?\b', r'\bbrownie\b', r'\bmousse\b', r'\bcheesecake\b'],
-    "drinks":           [r'\bdrinks?\b', r'\bbeverages?\b', r'\bcoffee\s+service\b', r'\bbar\s+(service|package|setup)\b', r'\bopen\s+bar\b', r'\bbeer\b', r'\bwine\b'],
-    "utensils":         [r'\butensils?\b', r'\bflatware\b', r'\bsilverware\b', r'\bbamboo\b', r'\bplastic\b', r'\beco.?friendly\b'],
-    "rentals":          [r'\brentals?\b', r'\blinens?\b', r'\btable\s+rental\b', r'\bchair\s+rental\b'],
+    "selected_dishes":  [r'\bdishes?\b', r'\bentr[eé]es?\b', r'\bmain\s+courses?\b', r'\bfood\s+selection\b'],
 }
 
 
@@ -114,19 +105,15 @@ _ADDITIVE_SIGNALS = re.compile(
 )
 
 
-_REMOVE_ADD_VERB = re.compile(r'\b(remove|delete|drop|add|include)\b', re.IGNORECASE)
-_MENU_SLOTS = {"appetizers", "selected_dishes", "desserts", "drinks"}
-
-
-def _detect_off_topic_correction(msg: str, current_slot: str | None, filled_slots: set[str], slots: dict | None = None) -> bool:
+def _detect_off_topic_correction(msg: str, current_slot: str | None, filled_slots: set[str]) -> bool:
     """Return True if the message looks like a correction targeting a slot OTHER than the current one.
 
-    Criteria (A, B, C, D):
+    Criteria (A, B, or C):
     A) Contains a correction signal + a slot keyword for a different slot
     B) Contains a correction signal + an explicit "add to previous" phrase
-    C) Contains an additive signal ("i also need", "also need")
-    D) Contains remove/add verb + a substring that appears in any filled menu slot value
-       (catches "remove Crab Dip" without requiring the word "appetizers")
+       (e.g. "wait let me also add X to the appetizers" — even if slot keyword is missing)
+    C) Contains an additive signal ("i also need", "also need") — always routes to check_modifications
+       so the agent can figure out which slot to append to
     """
     msg_lower = msg.lower()
 
@@ -134,38 +121,20 @@ def _detect_off_topic_correction(msg: str, current_slot: str | None, filled_slot
     if _ADDITIVE_SIGNALS.search(msg_lower):
         return True
 
-    # D) remove/add + item name found in a filled menu slot value
-    if _REMOVE_ADD_VERB.search(msg) and slots:
-        for slot_name in _MENU_SLOTS:
-            if slot_name == current_slot:
-                continue
-            data = slots.get(slot_name, {})
-            if not data.get("filled"):
-                continue
-            slot_val = str(data.get("value") or "").lower()
-            if not slot_val or slot_val in ("no", "none", ""):
-                continue
-            # Check if any word sequence from the message (3+ chars) appears in the slot value
-            words = msg_lower.split()
-            for i in range(len(words)):
-                for j in range(i + 1, min(i + 5, len(words) + 1)):
-                    phrase = " ".join(words[i:j])
-                    if len(phrase) >= 3 and phrase in slot_val:
-                        return True
-
     if not _CORRECTION_SIGNALS.search(msg):
         return False
 
     msg_lower = msg.lower()
 
-    # B) "wait/actually" + "also add / let me add / add X to the"
+    # B) "wait/actually" + "also add / let me add / add X to the" — route to check_modifications
+    #    so it can figure out which slot the item belongs to
     if _ADD_TO_PREV_PATTERN.search(msg_lower):
         return True
 
     # A) Correction signal + explicit slot keyword for a different slot
     for slot, patterns in _SLOT_KEYWORDS.items():
         if slot == current_slot:
-            continue
+            continue  # Talking about the current slot is normal, not an off-topic correction
         for pattern in patterns:
             if re.search(pattern, msg_lower):
                 return True
@@ -226,102 +195,21 @@ def _detect_modify_intent(msg: str, current_slot: str | None) -> bool:
     return False
 
 
-# ── Section-jump shortcuts ────────────────────────────────────────────────────
-# When the user names a section ("add desserts", "go to appetizers", "skip to
-# utensils"), route directly to the node that handles that section instead of
-# leaking into whatever node was current. The trigger verbs are loose on
-# purpose so we catch natural phrasings like "want desserts" or "more desserts"
-# alongside explicit "add/go to/pick" forms. Each entry is (pattern, node).
-_SECTION_JUMP: list[tuple[re.Pattern, str]] = [
-    (re.compile(r'\b(add|more|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\bdesserts?\b', re.IGNORECASE), "ask_desserts"),
-    (re.compile(r'\b(add|more|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\b(appetizers?|hors\s*d\'?oeuvres?|starters?)\b', re.IGNORECASE), "ask_appetizers"),
-    (re.compile(r'\b(add|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\b(main\s+(dish(es)?|courses?)|entr[eé]es?|dishes?|menu\s+items?)\b', re.IGNORECASE), "select_dishes"),
-    (re.compile(r'\b(add|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\butensils?\b', re.IGNORECASE), "ask_utensils"),
-    (re.compile(r'\b(add|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\brentals?\b', re.IGNORECASE), "ask_rentals"),
-    (re.compile(r'\b(add|pick|choose|select|want|show|go to|back to|skip to|jump to|do)\b.*?\b(bar(\s+service)?|drinks?|beverages?)\b', re.IGNORECASE), "collect_bar_service"),
-]
-
-
-def _detect_section_jump(msg: str, current: str) -> str | None:
-    """If the user asks for a section by name, return that section's node.
-
-    Skips the match when the user is already IN that section's ask/select pair
-    (e.g. "add desserts" while current_node is ask_desserts/select_desserts —
-    the current node will handle it naturally).
-    """
-    # Map: current node → nodes we should NOT jump TO (already here)
-    stay_put = {
-        "ask_desserts": {"ask_desserts", "select_desserts", "ask_more_desserts"},
-        "select_desserts": {"ask_desserts", "select_desserts", "ask_more_desserts"},
-        "ask_more_desserts": {"ask_desserts", "select_desserts", "ask_more_desserts"},
-        "ask_appetizers": {"ask_appetizers", "select_appetizers"},
-        "select_appetizers": {"ask_appetizers", "select_appetizers"},
-        "select_dishes": {"select_dishes", "present_menu", "ask_menu_changes", "collect_menu_changes"},
-        "ask_utensils": {"ask_utensils", "select_utensils"},
-        "select_utensils": {"ask_utensils", "select_utensils"},
-        "ask_rentals": {"ask_rentals"},
-        "collect_bar_service": {"collect_bar_service", "collect_drinks"},
-    }
-    blocked = stay_put.get(current, set())
-    for pattern, node in _SECTION_JUMP:
-        if node in blocked:
-            continue
-        if pattern.search(msg):
-            return node
-    return None
-
-
-async def _llm_fallback_is_modification(last_ai_msg: str, last_user_msg: str) -> bool:
-    """Ask the LLM whether the user is modifying a previous answer or answering normally.
-
-    Only called when all regex checks have failed AND there are filled menu slots.
-    Returns True if the LLM says "modification".
-    """
-    prompt = (
-        f'The agent just asked the customer a question. Determine if the customer is:\n'
-        f'(A) answering the agent\'s question normally, OR\n'
-        f'(B) trying to change/remove/add something from a PREVIOUS answer (not what\'s being asked right now)\n\n'
-        f'Agent\'s question: "{last_ai_msg[:300]}"\n'
-        f'Customer\'s reply: "{last_user_msg}"\n\n'
-        f'IMPORTANT: Only return "modification" if the customer is clearly changing a PREVIOUSLY GIVEN answer,\n'
-        f'not if they are answering the current question. For example:\n'
-        f'- Agent asks "how many guests?" + customer says "remove Crab Dip" \u2192 modification\n'
-        f'- Agent asks "any dietary restrictions?" + customer says "no dietary restrictions" \u2192 normal\n'
-        f'- Agent asks "passed or station?" + customer says "remove Crab Dip from appetizers" \u2192 modification\n\n'
-        f'Return ONLY: normal or modification'
-    )
-    response = await llm_cold.ainvoke([{"role": "user", "content": prompt}])
-    result = (response.content or "").strip().lower()
-    return result == "modification"
-
-
-async def route_message(state: ConversationState) -> str:
+def route_message(state: ConversationState) -> str:
     """
     Route to the correct node based on state.
 
     Priority:
-    0. Section-jump shortcut ("add desserts", "go to appetizers", …)
     1. If message is a natural correction/addition targeting a DIFFERENT slot → check_modifications
     2. Otherwise → current_node from state
-    3. LLM fallback when all regex checks fail and menu slots are filled
     """
     last_user_msg = ""
-    last_ai_msg = ""
     for msg in reversed(list(state.get("messages", []))):
-        if isinstance(msg, HumanMessage) and not last_user_msg:
+        if isinstance(msg, HumanMessage):
             last_user_msg = msg.content
-        elif isinstance(msg, AIMessage) and not last_ai_msg:
-            last_ai_msg = msg.content
-        if last_user_msg and last_ai_msg:
             break
 
     current = state.get("current_node", "start")
-
-    # 0. Section-jump shortcut — route directly to the named section.
-    jump = _detect_section_jump(last_user_msg, current)
-    if jump is not None:
-        state["current_node"] = jump
-        return jump
 
     # 1. Natural correction/addition for a slot different from what we're currently asking
     current_slot = _NODE_COLLECTS.get(current)
@@ -329,7 +217,7 @@ async def route_message(state: ConversationState) -> str:
         name for name, data in state.get("slots", {}).items()
         if data.get("filled")
     }
-    if _detect_off_topic_correction(last_user_msg, current_slot, filled_slots, slots=state.get("slots", {})):
+    if _detect_off_topic_correction(last_user_msg, current_slot, filled_slots):
         return "check_modifications"
 
     # 2. Natural "modify/change/update" intent combined with a slot keyword — route to check_modifications.
@@ -339,32 +227,6 @@ async def route_message(state: ConversationState) -> str:
     # 3. "replace X with Y" / "change X to Y" — if X matches any filled slot value, route to modify.
     if _detect_replace_by_value(last_user_msg, state.get("slots", {})):
         return "check_modifications"
-
-    # 4. If menu slots are filled and the message contains a bare add/remove verb with at least
-    #    one other word, it is deterministically a modification — no LLM needed.
-    slots = state.get("slots", {})
-    has_filled_menu_slots = any(
-        slots.get(s, {}).get("filled") for s in _MENU_SLOTS
-    )
-    if has_filled_menu_slots and last_user_msg:
-        word_count = len(last_user_msg.split())
-        has_remove_add = bool(_REMOVE_ADD_VERB.search(last_user_msg))
-        if has_remove_add and word_count >= 2:
-            return "check_modifications"
-
-    # 5. LLM fallback — only for longer ambiguous messages where no regex matched.
-    #    Skip when current node is a pure selection node — the user is always answering
-    #    the menu prompt there, never making a modification.
-    _SELECTION_NODES = {
-        "select_desserts", "select_appetizers", "select_dishes",
-        "select_utensils", "present_menu",
-    }
-    if has_filled_menu_slots and last_ai_msg and last_user_msg and current not in _SELECTION_NODES:
-        word_count = len(last_user_msg.split())
-        has_correction = bool(_CORRECTION_SIGNALS.search(last_user_msg))
-        if word_count > 3 or has_correction:
-            if await _llm_fallback_is_modification(last_ai_msg, last_user_msg):
-                return "check_modifications"
 
     from agent.nodes import NODE_MAP
     if current in NODE_MAP:

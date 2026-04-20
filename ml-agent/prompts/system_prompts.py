@@ -270,12 +270,11 @@ EXTRACTION_PROMPTS = {
     ),
     "venue": (
         "The customer was just asked where the event will be held. "
-        "Their reply is the message below. Extract the venue name, address, or location they gave. "
-        "Accept ANY of: venue/hall name, street address, city name, town name, neighborhood, hotel, restaurant, park — "
-        "even a single city or town name with no further detail is valid. "
+        "Their reply is the message below. Extract the venue name, address, or city+area they gave. "
+        "Accept: a venue/hall name, street address, city + neighborhood, hotel name, restaurant name, park name. "
         "If they say 'not sure', 'don't know yet', 'no venue', 'undecided', 'TBD' — return 'TBD'. "
         "Return NONE if the message is clearly NOT a location (a question, correction, or unrelated text). "
-        "Return NONE only for a continent name or vague words like 'home', 'backyard', 'my house', 'my place'."
+        "Return NONE for just a country name, continent, or vague word like 'home', 'backyard', 'my house', 'my place'."
     ),
     "guest_count": (
         "Extract the number of guests from this message. "

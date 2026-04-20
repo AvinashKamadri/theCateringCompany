@@ -62,13 +62,13 @@ interface Analytics {
   guest_buckets: { bucket: string; count: number }[];
 }
 
-const STATUS_CONFIG: Record<string, { label: string; order: number }> = {
-  draft:     { label: 'Draft',     order: 0 },
-  active:    { label: 'Active',    order: 1 },
-  confirmed: { label: 'Confirmed', order: 2 },
-  completed: { label: 'Completed', order: 3 },
-  cancelled: { label: 'Cancelled', order: 4 },
-  rejected:  { label: 'Rejected',  order: 5 },
+const STATUS_CONFIG: Record<string, { label: string; order: number; color: string }> = {
+  draft:     { label: 'Draft',     order: 0, color: '#aaa' },
+  active:    { label: 'Active',    order: 1, color: '#111' },
+  confirmed: { label: 'Confirmed', order: 2, color: '#555' },
+  completed: { label: 'Completed', order: 3, color: '#888' },
+  cancelled: { label: 'Cancelled', order: 4, color: '#ddd' },
+  rejected:  { label: 'Rejected',  order: 5, color: '#e5e5e5' },
 };
 
 const PIE_COLORS = ['#111', '#555', '#888', '#aaa', '#ddd'];
@@ -93,7 +93,7 @@ export default function CRMPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [pendingContracts, setPendingContracts] = useState<any[]>([]);
+  const [pendingContracts, setanys] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'overview' | 'pipeline' | 'list'>('overview');
 
@@ -112,7 +112,7 @@ export default function CRMPage() {
         setLeads(leadsData);
         setStats(statsData);
         if (analyticsData) setAnalytics(analyticsData);
-        setPendingContracts(pendingData?.contracts ?? []);
+        setanys(pendingData?.contracts ?? []);
       } catch (err) {
         console.error('Failed to load CRM data', err);
       } finally {
@@ -151,7 +151,7 @@ export default function CRMPage() {
     <div className="min-h-screen bg-neutral-50">
       {/* Header */}
       <div className="bg-white border-b border-neutral-200">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-5">
+        <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center justify-between mb-5">
             <div>
               <h1 className="text-xl font-bold text-black">CRM</h1>
@@ -166,7 +166,7 @@ export default function CRMPage() {
                 { label: 'Total Projects',  value: stats.total,                       icon: FileText,   sub: `${stats.by_status.active ?? 0} active` },
                 { label: 'Confirmed',       value: stats.by_status.confirmed ?? 0,    icon: TrendingUp, sub: `${stats.by_status.completed ?? 0} completed` },
                 { label: 'Avg Guest Count', value: stats.avg_guests,                  icon: Users,      sub: 'per event' },
-                { label: 'Via Event Chat',   value: stats.via_ai,                      icon: Sparkles,   sub: `${stats.total ? Math.round((stats.via_ai / stats.total) * 100) : 0}% of total` },
+                { label: 'Via AI Intake',   value: stats.via_ai,                      icon: Sparkles,   sub: `${stats.total ? Math.round((stats.via_ai / stats.total) * 100) : 0}% of total` },
               ].map(({ label, value, icon: Icon, sub }) => (
                 <div key={label} className="rounded-xl border border-neutral-200 bg-white p-4">
                   <div className="flex items-center justify-between mb-2">
@@ -182,17 +182,17 @@ export default function CRMPage() {
             </div>
           )}
 
-          {/* View toggle — bigger, pill-style */}
-          <div className="flex gap-2">
+          {/* View toggle */}
+          <div className="flex gap-1.5">
             {(['overview', 'pipeline', 'list'] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
                 className={cn(
-                  'px-5 py-2.5 rounded-xl text-sm font-semibold transition-all capitalize',
+                  'px-3 py-1.5 rounded-md text-sm font-medium transition-colors capitalize',
                   viewMode === mode
-                    ? 'bg-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_6px_14px_-6px_rgba(0,0,0,0.3)]'
-                    : 'bg-white text-neutral-700 border border-neutral-200 hover:border-neutral-400 hover:text-black'
+                    ? 'bg-black text-white'
+                    : 'text-neutral-600 hover:text-black hover:bg-neutral-100'
                 )}
               >
                 {mode === 'overview' ? 'Overview' : mode === 'pipeline' ? 'Pipeline' : 'List'}
@@ -203,7 +203,7 @@ export default function CRMPage() {
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-6">
+      <div className="max-w-7xl mx-auto px-6 py-6">
 
         {/* ── OVERVIEW ── */}
         {viewMode === 'overview' && (
@@ -416,47 +416,77 @@ export default function CRMPage() {
               </div>
             </div>
 
-            {/* Summary totals — Items / Guests / Prices across all events */}
-            {(() => {
-              const totalGuests = leads.reduce((s, l) => s + (l.guest_count ?? 0), 0);
-              const totalContracts = leads.reduce((s, l) => s + (l.contract_count ?? 0), 0);
-              const totalRevenue = leads.reduce((s, l) => s + (l.paid_amount ?? 0), 0);
-              return (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="bg-white rounded-xl border border-neutral-200 p-5">
-                    <div className="flex items-center gap-2 mb-2">
-                      <FileText className="h-4 w-4 text-neutral-400" />
-                      <p className="text-xs font-semibold tracking-wider text-neutral-500 uppercase">Items Contracted</p>
-                    </div>
-                    <p className="text-3xl font-bold text-black">{totalContracts.toLocaleString()}</p>
-                    <p className="text-xs text-neutral-400 mt-1">Across {leads.length} project{leads.length === 1 ? '' : 's'}</p>
-                  </div>
-                  <div className="bg-white rounded-xl border border-neutral-200 p-5">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Users className="h-4 w-4 text-neutral-400" />
-                      <p className="text-xs font-semibold tracking-wider text-neutral-500 uppercase">Total Guests</p>
-                    </div>
-                    <p className="text-3xl font-bold text-black">{totalGuests.toLocaleString()}</p>
-                    <p className="text-xs text-neutral-400 mt-1">Summed across events</p>
-                  </div>
-                  <div className="bg-white rounded-xl border border-neutral-200 p-5">
-                    <div className="flex items-center gap-2 mb-2">
-                      <TrendingUp className="h-4 w-4 text-neutral-400" />
-                      <p className="text-xs font-semibold tracking-wider text-neutral-500 uppercase">Revenue Collected</p>
-                    </div>
-                    <p className="text-3xl font-bold text-black">${totalRevenue.toLocaleString()}</p>
-                    <p className="text-xs text-neutral-400 mt-1">Client payments to date</p>
-                  </div>
-                </div>
-              );
-            })()}
+            {/* Recent projects mini-table */}
+            <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-black">All Projects</h3>
+                <span className="text-xs text-neutral-400">{leads.length} total</span>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-neutral-50 border-b border-neutral-100">
+                  <tr>
+                    {['Project', 'Client', 'Event Date', 'Guests', 'Status'].map((h) => (
+                      <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-neutral-400 uppercase tracking-wide">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-50">
+                  {leads.map((lead) => (
+                    <tr key={lead.id} className="hover:bg-neutral-50 transition-colors">
+                      <td className="px-4 py-3">
+                        <Link href={`/projects/${lead.id}`} className="font-medium text-black hover:underline text-sm">
+                          {lead.title}
+                        </Link>
+                        {lead.created_via_ai_intake && (
+                          <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] text-neutral-400">
+                            <Sparkles className="h-2.5 w-2.5" />AI
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-neutral-600">
+                        {lead.client_name || lead.client_email}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-neutral-500">
+                        {lead.event_date
+                          ? new Date(lead.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                          : <span className="text-neutral-300">TBD</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-neutral-500">
+                        {lead.guest_count ?? <span className="text-neutral-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={cn(
+                          'px-2 py-0.5 rounded-md text-xs font-medium',
+                          lead.status === 'confirmed' || lead.status === 'completed'
+                            ? 'bg-black text-white'
+                            : lead.status === 'cancelled'
+                            ? 'bg-neutral-600 text-white'
+                            : 'bg-neutral-100 text-neutral-600'
+                        )}>
+                          {STATUS_CONFIG[lead.status]?.label ?? lead.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {leads.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-10 text-center text-sm text-neutral-300">
+                        No projects yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
         {/* ── PIPELINE ── */}
         {viewMode === 'pipeline' && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            {stages.map(([status, { label }]) => {
+            {stages.map(([status, { label, color }]) => {
               const stageLeads = byStage(status);
               return (
                 <div key={status} className="bg-white rounded-xl border border-neutral-200 p-4">

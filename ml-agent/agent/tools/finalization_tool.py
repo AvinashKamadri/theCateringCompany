@@ -15,7 +15,6 @@ On final confirmation it:
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from langchain_core.messages import BaseMessage
@@ -36,11 +35,15 @@ from agent.state import (
     is_filled,
 )
 from agent.tools.base import ToolResult
+from agent.tools.structured_choice import normalize_structured_choice
 from tools.pricing import calculate_event_pricing
 
 
 _SYSTEM_PROMPT = (
     "You parse the customer's wrap-up responses for a catering order.\n"
+    "The user may answer the current question directly, decline it, or volunteer "
+    "other wrap-up details early. Capture any wrap-up facts that are explicitly "
+    "stated without inventing anything.\n"
     "- special_requests: any free-form requests (decor, timing, allergies wording). "
     "IMPORTANT: if the user says 'no', 'none', 'nope', 'skip', 'nothing', 'no special requests', "
     "or any clear decline, set special_requests to the string 'none' (not null/None).\n"
@@ -91,12 +94,14 @@ def _phase_of(slots: dict) -> str:
 
 
 def _allowed_fields_for_target(target: str) -> set[str]:
-    if target == "collect_special_requests":
+    if target in {"ask_special_requests_gate", "collect_special_requests"}:
         return {"special_requests"}
-    if target == "collect_dietary_concerns":
+    if target in {"ask_dietary_gate", "collect_dietary_concerns"}:
         return {"dietary_concerns"}
-    if target == "collect_additional_notes":
+    if target in {"ask_additional_notes_gate", "collect_additional_notes"}:
         return {"additional_notes"}
+    if target == "ask_followup_call":
+        return {"followup_call_requested"}
     if target == "review":
         return {"confirm_final"}
     return set()
@@ -250,7 +255,7 @@ class FinalizationTool:
         fills: list[tuple[str, Any]] = []
         confirm_final = False
         current_target = _next_target(slots)
-        _msg_lower = message.strip().lower().rstrip(".,!?")
+        _msg_lower = normalize_structured_choice(message)
 
         structured_handled = _apply_structured_answer(
             target=current_target,
@@ -260,12 +265,7 @@ class FinalizationTool:
         )
 
         extracted = None
-        if not structured_handled and current_target in {
-            "collect_special_requests",
-            "collect_dietary_concerns",
-            "collect_additional_notes",
-            "review",
-        }:
+        if not structured_handled:
             extracted = await extract(
                 schema=FinalizationExtraction,
                 system=_SYSTEM_PROMPT,
@@ -274,27 +274,12 @@ class FinalizationTool:
             )
 
         if extracted is not None:
-            rescued = _apply_cross_target_capture(
+            confirm_final = _apply_extracted_fields(
                 target=current_target,
                 extracted=extracted,
-                message=message,
-                message_lower=_msg_lower,
                 slots=slots,
                 fills=fills,
             )
-            if rescued:
-                extracted = None
-
-        if extracted is not None:
-            dump = extracted.model_dump(exclude_none=True)
-            for field_name, value in dump.items():
-                if field_name == "confirm_final":
-                    confirm_final = bool(value)
-                    continue
-                if field_name not in _allowed_fields_for_target(current_target):
-                    continue
-                fill_slot(slots, field_name, value)
-                fills.append((field_name, value))
 
         _DECLINE_RE = {"no", "nope", "none", "skip", "nothing", "nah", "no thanks", "not really",
                        "no special requests", "no dietary concerns", "no additional notes",
@@ -327,7 +312,7 @@ class FinalizationTool:
 
             recap = _render_review_recap(client_summary)
             closing = (
-                "\n\nPerfect — your request is locked in and sent to our team. "
+                "\n\nYour request is locked in and sent to our team. "
                 "A coordinator will review everything and reach out shortly to confirm. "
                 "Thanks so much!"
             )
@@ -365,14 +350,6 @@ class FinalizationTool:
             # Deterministic recap — avoids the LLM echoing tableware/service
             # option words that would re-trigger those card widgets in the UI.
             direct_response = _render_review_recap(summary)
-        elif next_target in {
-            "collect_special_requests",
-            "collect_dietary_concerns",
-            "collect_additional_notes",
-        }:
-            # Keep free-text follow-ups deterministic so the agent does not
-            # drift back into a repeated yes/no gate after the user already said yes.
-            direct_response = _direct_response_for_target(next_target)
         input_hint = _input_hint_for_target(next_target)
 
         return ToolResult(
@@ -477,6 +454,12 @@ _UTENSILS_PRETTY = {
     "bamboo": "bamboo utensils",
 }
 
+_SERVICE_STYLE_PRETTY = {
+    "cocktail_hour": "cocktail hour",
+    "reception": "reception",
+    "both": "cocktail hour + reception",
+}
+
 
 class _ReviewConfirmClassification(BaseModel):
     """Is the user confirming the final review summary, or asking to change something?"""
@@ -534,37 +517,73 @@ async def _classify_review_confirmation(message: str) -> bool:
     return bool(result and result.is_confirming)
 
 
-_DIETARY_HINT_RE = re.compile(
-    r"\b(allerg(?:y|ies)|diabet|vegan|vegetarian|gluten|celiac|halal|kosher|"
-    r"nut|dairy|lactose|shellfish|egg|soy|pork[- ]?free|food need|health need)\b",
-    re.IGNORECASE,
-)
-
-
-def _apply_cross_target_capture(
+def _append_text_value(
     *,
-    target: str,
-    extracted: FinalizationExtraction,
-    message: str,
-    message_lower: str,
+    slot_name: str,
+    value: str,
     slots: dict,
     fills: list[tuple[str, Any]],
 ) -> bool:
-    if target != "collect_special_requests":
+    cleaned = str(value or "").strip()
+    if not cleaned:
         return False
 
-    dietary_value = extracted.dietary_concerns
-    if not dietary_value and _DIETARY_HINT_RE.search(message_lower):
-        dietary_value = message.strip()
-    if not dietary_value:
+    old_value = get_slot_value(slots, slot_name)
+    old_text = str(old_value or "").strip()
+    cleaned_lower = cleaned.lower()
+    old_lower = old_text.lower()
+
+    if cleaned_lower == "none":
+        if old_lower in {"", "none"}:
+            if old_lower == "none":
+                return False
+            fill_slot(slots, slot_name, "none")
+            fills.append((slot_name, "none"))
+            return True
         return False
 
-    if not is_filled(slots, "special_requests"):
-        fill_slot(slots, "special_requests", "none")
-        fills.append(("special_requests", "none"))
-    fill_slot(slots, "dietary_concerns", dietary_value)
-    fills.append(("dietary_concerns", dietary_value))
+    if old_lower in {"", "none"}:
+        fill_slot(slots, slot_name, cleaned)
+        fills.append((slot_name, cleaned))
+        return True
+
+    if cleaned_lower in old_lower:
+        return False
+
+    merged = f"{old_text}; {cleaned}"
+    fill_slot(slots, slot_name, merged)
+    fills.append((slot_name, merged))
     return True
+
+
+def _apply_extracted_fields(
+    *,
+    target: str,
+    extracted: FinalizationExtraction,
+    slots: dict,
+    fills: list[tuple[str, Any]],
+) -> bool:
+    confirm_final = bool(extracted.confirm_final) if "confirm_final" in _allowed_fields_for_target(target) and extracted.confirm_final else False
+
+    for slot_name in ("special_requests", "dietary_concerns", "additional_notes"):
+        value = getattr(extracted, slot_name, None)
+        if value is None:
+            continue
+        _append_text_value(
+            slot_name=slot_name,
+            value=str(value),
+            slots=slots,
+            fills=fills,
+        )
+
+    if extracted.followup_call_requested is not None:
+        current_value = get_slot_value(slots, "followup_call_requested")
+        new_value = bool(extracted.followup_call_requested)
+        if current_value is None or bool(current_value) != new_value:
+            fill_slot(slots, "followup_call_requested", new_value)
+            fills.append(("followup_call_requested", new_value))
+
+    return confirm_final
 
 
 
@@ -617,12 +636,8 @@ def _render_review_recap(s: dict) -> str:
 
     if "wedding" in event_type:
         service_style = str(s.get("service_style") or "").lower()
-        if service_style == "cocktail_hour":
-            lines.append("• Service style: cocktail hour")
-        elif service_style == "reception":
-            lines.append("• Service style: reception")
-        elif service_style == "both":
-            lines.append("• Service style: both")
+        if service_style in _SERVICE_STYLE_PRETTY:
+            lines.append(f"• Service style: {_SERVICE_STYLE_PRETTY[service_style]}")
         elif s.get("cocktail_hour") is True:
             lines.append("• Cocktail hour: yes")
         elif s.get("cocktail_hour") is False:
@@ -645,9 +660,6 @@ def _render_review_recap(s: dict) -> str:
     ut_label = _UTENSILS_PRETTY.get(str(s.get("utensils") or "").lower())
     if ut_label:
         lines.append(f"• Cutlery: {ut_label}")
-    if s.get("linens"):
-        lines.append("• Linens included")
-
     if s.get("drinks") is True:
         lines.append("• Drinks: included")
     elif s.get("drinks") is False:
@@ -671,6 +683,8 @@ def _render_review_recap(s: dict) -> str:
             lines.append(f"• Rentals: {rentals}")
         else:
             lines.append(f"• Rentals: {', '.join(rentals)}")
+    elif s.get("linens"):
+        lines.append("• Rentals: Linens")
 
     # Labor (onsite only — skip for dropoff)
     if service == "onsite":

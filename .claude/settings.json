@@ -65,7 +65,10 @@
       "Bash(python -c \"import sys; print\\(sys.path\\); import os; print\\(os.listdir\\('.'\\)\\)\")",
       "Bash(PYTHONPATH=. python -c \"from agent.tools.modification_tool import ModificationTool; print\\('OK'\\)\")",
       "Bash(find \"c:\\\\Projects\\\\CateringCompany\\\\ml-agent\\\\agent\\\\\" -type f -name \"*.py\" | head -50)",
-      "Bash(GIT_EDITOR=true git rebase --continue)"
+      "Bash(GIT_EDITOR=true git rebase --continue)",
+      "Bash(git show *)",
+      "Bash(cp /tmp/new_state.py c:/Projects/CateringCompany/ml-agent/agent/state.py)",
+      "Bash(cp /tmp/new_orchestrator.py c:/Projects/CateringCompany/ml-agent/orchestrator.py)"
     ],
     "additionalDirectories": [
       "c:\\Users\\avina\\projects\\flashback\\TheCateringCompanyAgent\\agent\\nodes",

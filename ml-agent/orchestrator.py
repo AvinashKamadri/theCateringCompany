@@ -25,6 +25,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.response_generator import render as render_response
 from agent.router import route as route_turn
+from agent.trace_context import trace_scope
 from agent.tools.base import ToolResult
 from agent.state import (
     PHASE_GREETING,
@@ -124,11 +125,20 @@ class AgentOrchestrator:
         )
 
         try:
-            decision = await route_turn(
-                message=message,
-                history=history,
-                state=state,
-            )
+            with trace_scope(
+                thread_id=thread_id,
+                project_id=project_id,
+                conversation_id=state_id or "",
+                user_id=user_id,
+                author_id=author_id,
+                phase=conversation_phase,
+                tool="router",
+            ):
+                decision = await route_turn(
+                    message=message,
+                    history=history,
+                    state=state,
+                )
             logger.info(
                 "router_decision thread=%s action=%s confidence=%.2f tool=%s",
                 thread_id,
@@ -150,18 +160,38 @@ class AgentOrchestrator:
                         "clarifying_question": decision.clarifying_question,
                     },
                 )
-                agent_content = await render_response(
-                    tool_result=tool_result, user_message=message, history=history
-                )
+                with trace_scope(
+                    thread_id=thread_id,
+                    project_id=project_id,
+                    conversation_id=state_id or "",
+                    user_id=user_id,
+                    author_id=author_id,
+                    phase=conversation_phase,
+                    tool="response_generator",
+                    source_tool="router",
+                    target="clarify",
+                ):
+                    agent_content = await render_response(
+                        tool_result=tool_result, user_message=message, history=history
+                    )
             else:
                 call = decision.tool_calls[0]
                 tool = TOOL_REGISTRY[call.tool_name]
                 tool_used = call.tool_name
-                tool_result = await tool.run(
-                    message=message,
-                    history=history,
-                    state=state,
-                )
+                with trace_scope(
+                    thread_id=thread_id,
+                    project_id=project_id,
+                    conversation_id=state_id or "",
+                    user_id=user_id,
+                    author_id=author_id,
+                    phase=conversation_phase,
+                    tool=tool_used,
+                ):
+                    tool_result = await tool.run(
+                        message=message,
+                        history=history,
+                        state=state,
+                    )
                 state = tool_result.state
                 slots = state["slots"]
                 conversation_phase = state.get("conversation_phase", conversation_phase)
@@ -174,11 +204,22 @@ class AgentOrchestrator:
                     conversation_phase,
                     [f[0] for f in tool_result.response_context.get("filled_this_turn", [])],
                 )
-                agent_content = await render_response(
-                    tool_result=tool_result,
-                    user_message=message,
-                    history=history,
-                )
+                with trace_scope(
+                    thread_id=thread_id,
+                    project_id=project_id,
+                    conversation_id=state_id or "",
+                    user_id=user_id,
+                    author_id=author_id,
+                    phase=conversation_phase,
+                    tool="response_generator",
+                    source_tool=tool_used,
+                    target=(tool_result.response_context or {}).get("next_question_target"),
+                ):
+                    agent_content = await render_response(
+                        tool_result=tool_result,
+                        user_message=message,
+                        history=history,
+                    )
         except Exception as exc:
             logger.error("Orchestrator turn failed: %s\n%s", exc, traceback.format_exc())
             agent_content = (

@@ -2,10 +2,11 @@
 FastAPI server wrapping the catering intake agent.
 """
 # Code version — bump this to verify server is running latest code
-_CODE_VERSION = "v6-2026-03-14"
+_CODE_VERSION = "v7-2026-04-20"
 
 import os
 import uuid
+import logging
 from contextlib import asynccontextmanager
 
 from pathlib import Path
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 from orchestrator import AgentOrchestrator
 from agent.instructor_client import warmup as warmup_instructor
 from agent.logging_config import configure_logging
+from agent.trace_context import trace_scope
 
 configure_logging()
 from tools.pricing import calculate_event_pricing
@@ -31,6 +33,18 @@ from database.db_manager import (
 
 
 orchestrator = AgentOrchestrator()
+logger = logging.getLogger(__name__)
+
+
+def _filled_slot_views(slots: dict | None) -> tuple[dict[str, object], dict[str, object]]:
+    public: dict[str, object] = {}
+    internal: dict[str, object] = {}
+    for key, raw in (slots or {}).items():
+        if not isinstance(raw, dict) or not raw.get("filled"):
+            continue
+        target = internal if str(key).startswith("__") else public
+        target[str(key)] = raw.get("value")
+    return public, internal
 
 
 @asynccontextmanager
@@ -113,13 +127,31 @@ async def chat(req: ChatRequest):
     _uuid_pattern = _re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.I)
     resolved_user_id = req.user_id or (req.author_id if _uuid_pattern.match(req.author_id) else None)
 
-    result = await orchestrator.process_message(
+    with trace_scope(
         thread_id=thread_id,
-        message=req.message,
-        author_id=req.author_id,
         project_id=req.project_id,
         user_id=resolved_user_id,
-    )
+        author_id=req.author_id,
+    ):
+        existing_state = await load_conversation_state(thread_id)
+        before_public, before_internal = _filled_slot_views(existing_state.get("slots") if existing_state else None)
+        logger.info(
+            "chat_request thread=%s project=%s current_node=%s message=%r public_slots=%s internal_slots=%s",
+            thread_id,
+            req.project_id,
+            existing_state.get("current_node") if existing_state else None,
+            req.message,
+            before_public,
+            before_internal,
+        )
+
+        result = await orchestrator.process_message(
+            thread_id=thread_id,
+            message=req.message,
+            author_id=req.author_id,
+            project_id=req.project_id,
+            user_id=resolved_user_id,
+        )
 
     contract_id = None
 
@@ -163,6 +195,17 @@ async def chat(req: ChatRequest):
     # Always sync current slot state to project so the project view stays live
     _project_id = result.get("project_id", "")
     _slots = result.get("slots", {})
+    after_public, after_internal = _filled_slot_views(_slots)
+    logger.info(
+        "chat_response thread=%s project=%s current_node=%s slots_filled=%s is_complete=%s public_slots=%s internal_slots=%s",
+        thread_id,
+        _project_id,
+        result.get("current_node"),
+        result.get("slots_filled"),
+        result.get("is_complete"),
+        after_public,
+        after_internal,
+    )
     if _project_id and _slots:
         try:
             await sync_slots_to_project(_project_id, _slots, thread_id)
@@ -194,6 +237,14 @@ async def get_conversation(thread_id: str):
     # Extract filled slot values (exclude internal bookkeeping keys prefixed with __)
     slots = state.get("slots", {})
     filled_slots = {k: v["value"] for k, v in slots.items() if v.get("filled") and not k.startswith("__")}
+    _public, _internal = _filled_slot_views(slots)
+    logger.info(
+        "conversation_fetch thread=%s current_node=%s public_slots=%s internal_slots=%s",
+        thread_id,
+        state["current_node"],
+        _public,
+        _internal,
+    )
 
     return {
         "thread_id": thread_id,
@@ -217,6 +268,14 @@ async def get_slots(thread_id: str):
     public_slots = {k: v for k, v in slots.items() if not k.startswith("__")}
     filled = {k: v["value"] for k, v in public_slots.items() if v.get("filled")}
     unfilled = [k for k, v in public_slots.items() if not v.get("filled")]
+    _public, _internal = _filled_slot_views(slots)
+    logger.info(
+        "slot_fetch thread=%s current_node=%s public_slots=%s internal_slots=%s",
+        thread_id,
+        state["current_node"],
+        _public,
+        _internal,
+    )
 
     return {
         "thread_id": thread_id,

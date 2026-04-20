@@ -12,10 +12,14 @@ modification_history}` shape to render progress cards.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Annotated, Any, Literal, Sequence, TypedDict
 
 from langchain_core.messages import BaseMessage
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -207,6 +211,13 @@ def fill_slot(slots: dict, name: str, value: Any) -> dict:
         "modified_at": now,
         "modification_history": history,
     }
+    logger.info(
+        "slot_update slot=%s action=fill old=%r new=%r internal=%s",
+        name,
+        old_value,
+        value,
+        name.startswith("__"),
+    )
     return slots
 
 
@@ -230,6 +241,13 @@ def clear_slot(slots: dict, name: str) -> dict:
         "modified_at": now,
         "modification_history": history,
     }
+    logger.info(
+        "slot_update slot=%s action=clear old=%r new=%r internal=%s",
+        name,
+        old_value,
+        None,
+        name.startswith("__"),
+    )
     return slots
 
 

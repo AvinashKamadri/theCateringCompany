@@ -27,6 +27,13 @@ _LABOR_SLOTS = (
     "labor_trash",
 )
 
+_WEDDING_CAKE_STAGE_SLOTS = (
+    "__wedding_cake_gate",
+    "__wedding_cake_flavor",
+    "__wedding_cake_filling",
+    "__wedding_cake_buttercream",
+)
+
 
 def apply_cascade(
     slot_name: str,
@@ -51,6 +58,14 @@ def apply_cascade(
             if new_value != need and slots.get(dep, {}).get("filled"):
                 clear_slot(slots, dep)
                 effects.append((dep, "cleared (event type changed)"))
+        if new_value != "Wedding":
+            if slots.get("wedding_cake", {}).get("filled"):
+                clear_slot(slots, "wedding_cake")
+                effects.append(("wedding_cake", "cleared (event type changed)"))
+            for dep in _WEDDING_CAKE_STAGE_SLOTS:
+                if slots.get(dep, {}).get("filled"):
+                    clear_slot(slots, dep)
+                    effects.append((dep, "cleared (event type changed)"))
 
     # --- service_type == Dropoff clears ALL labor + disables bartender ---
     elif slot_name == "service_type":
@@ -98,6 +113,14 @@ def apply_cascade(
         if new_value and slots.get("selected_dishes", {}).get("filled"):
             clear_slot(slots, "selected_dishes")
             effects.append(("selected_dishes", "cleared (custom menu requested)"))
+
+    # --- wedding_cake removal clears hidden cake-stage slots ---
+    elif slot_name == "wedding_cake":
+        if new_value in (None, "", "none"):
+            for dep in _WEDDING_CAKE_STAGE_SLOTS:
+                if slots.get(dep, {}).get("filled"):
+                    clear_slot(slots, dep)
+                    effects.append((dep, "cleared (wedding cake removed)"))
 
     # --- meal_style == plated auto-notes china ---
     elif slot_name == "meal_style":

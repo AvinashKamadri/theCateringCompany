@@ -85,6 +85,10 @@ function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
   const hasVenue    = !!slots.venue;
   const hasEventType = !!slots.event_type;
   const hasName     = !!slots.name;
+  const eventType = String(slots.event_type || '').toLowerCase();
+  const isWedding = eventType.includes('wedding');
+  const isCorporate = eventType.includes('corporate');
+  const isBirthday = eventType.includes('birthday');
   const slotList = (val?: string | string[]) => {
     if (!val || val === 'none' || val === 'no') return [];
     if (Array.isArray(val)) return val.filter(Boolean);
@@ -246,9 +250,9 @@ function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
           <div className="pt-1 border-t border-neutral-100">
             <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-2">Full Intake Snapshot</p>
             <div className="space-y-1.5 text-sm">
-              {slots.partner_name && <p className="text-neutral-700"><span className="text-neutral-400">Partner:</span> {slots.partner_name}</p>}
-              {slots.company_name && <p className="text-neutral-700"><span className="text-neutral-400">Company:</span> {slots.company_name}</p>}
-              {slots.honoree_name && <p className="text-neutral-700"><span className="text-neutral-400">Honoree:</span> {slots.honoree_name}</p>}
+              {isWedding && slots.partner_name && <p className="text-neutral-700"><span className="text-neutral-400">Partner:</span> {slots.partner_name}</p>}
+              {isCorporate && slots.company_name && <p className="text-neutral-700"><span className="text-neutral-400">Company:</span> {slots.company_name}</p>}
+              {isBirthday && slots.honoree_name && <p className="text-neutral-700"><span className="text-neutral-400">Honoree:</span> {slots.honoree_name}</p>}
               {slots.email && <p className="text-neutral-700"><span className="text-neutral-400">Email:</span> {slots.email}</p>}
               {slots.phone && <p className="text-neutral-700"><span className="text-neutral-400">Phone:</span> {slots.phone}</p>}
               {slots.wedding_cake && slots.wedding_cake !== 'none' && <p className="text-neutral-700"><span className="text-neutral-400">Wedding cake:</span> {slots.wedding_cake}</p>}
@@ -375,9 +379,9 @@ function AiIntakeContent() {
   const titleUpdatedRef = useRef(false);
 
   const handleSlotsUpdate = async (slots: Partial<ContractData>) => {
-    // Always merge — API responses include all filled slots, frontend patches are single-field.
-    // Merging ensures frontend-captured fields (email, phone) aren't wiped by API responses.
-    setCurrentSlots((prev) => ({ ...prev, ...slots }));
+    // Replace with the backend's latest filled-slot snapshot so removals and
+    // event-type-driven clears don't linger in the sidebar.
+    setCurrentSlots({ ...slots });
 
     // Update project title (once only)
     if (draftProjectId && !titleUpdatedRef.current) {
@@ -410,7 +414,10 @@ function AiIntakeContent() {
       // Extract email and phone from slots
       const contactPhone = (s as any).phone || (s as any).contact_phone || undefined;
       const contactEmail = (s as any).email || (s as any).contact_email || undefined;
-      const weddingCake = (s as any).wedding_cake || undefined;
+      const weddingCake =
+        (s as any).wedding_cake && (s as any).wedding_cake !== 'none'
+          ? (s as any).wedding_cake
+          : undefined;
 
       const response = await apiClient.post('/projects/ai-intake', {
         client_name:          s.name,

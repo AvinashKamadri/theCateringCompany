@@ -31,7 +31,8 @@ Tableware = Literal[
 ]
 Utensils = Literal["standard_plastic", "eco_biodegradable", "bamboo"]
 TravelFee = Literal["none", "tier1_150", "tier2_250", "tier3_375plus"]
-ModificationAction = Literal["add", "remove", "replace"]
+ModificationAction = Literal["add", "remove", "replace", "reopen"]
+SelectionGroundingStatus = Literal["resolved", "ambiguous", "no_match"]
 
 
 # ============================================================================
@@ -230,6 +231,24 @@ class ModificationExtraction(BaseModel):
     )
 
 
+class SelectedItemGrounding(BaseModel):
+    """Resolve a list-edit reference against the user's currently selected items only."""
+
+    status: SelectionGroundingStatus
+    matched_names: List[str] = Field(
+        default_factory=list,
+        description="Exact selected item names from the provided current selection only.",
+    )
+    reference_text: Optional[str] = Field(
+        default=None,
+        description="The short user-facing phrase being grounded, such as 'egg' or 'chicken'.",
+    )
+    reason: str = Field(
+        ...,
+        description="Short explanation for why the reference was resolved, ambiguous, or unmatched.",
+    )
+
+
 # ============================================================================
 # FinalizationTool — special requests, dietary, follow-up, confirm
 # ============================================================================
@@ -259,6 +278,15 @@ ToolName = Literal[
     "finalization_tool",
 ]
 
+TurnIntent = Literal[
+    "answer_current_prompt",
+    "continue_current_flow",
+    "modify_existing",
+    "reopen_previous_section",
+    "provide_other_information",
+    "unclear",
+]
+
 
 class ToolCall(BaseModel):
     tool_name: ToolName
@@ -281,11 +309,39 @@ class OrchestratorDecision(BaseModel):
         return v
 
 
+class TurnRoutingSignals(BaseModel):
+    """Structured routing signals extracted before final tool selection.
+
+    This keeps policy in code: the model only classifies the turn shape, while
+    the router decides what that means operationally.
+    """
+
+    intent: TurnIntent
+    referenced_slot: Optional[str] = Field(
+        default=None,
+        description=(
+            "Exact slot name if the user is clearly referring to one known slot. "
+            "For reopen_previous_section, use the list slot being revisited. "
+            "Otherwise null."
+        ),
+    )
+    proposed_tool: Optional[ToolName] = Field(
+        default=None,
+        description=(
+            "Best tool guess when the message is not simply answering the current "
+            "prompt and not clearly a modification. Otherwise null."
+        ),
+    )
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    reason: str = Field(..., description="Short explanation for the classification.")
+
+
 __all__ = [
     "EventDetailsExtraction",
     "MenuSelectionExtraction",
     "AddOnsExtraction",
     "ModificationExtraction",
+    "SelectedItemGrounding",
     "FinalizationExtraction",
     "ToolCall",
     "OrchestratorDecision",
@@ -298,5 +354,8 @@ __all__ = [
     "Utensils",
     "TravelFee",
     "ModificationAction",
+    "SelectionGroundingStatus",
     "ToolName",
+    "TurnIntent",
+    "TurnRoutingSignals",
 ]

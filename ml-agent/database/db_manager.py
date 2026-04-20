@@ -607,6 +607,13 @@ async def sync_slots_to_project(project_id: str, slots: dict, thread_id: str) ->
             addons.append(v if isinstance(v, str) else str(v))
 
     desserts = slot_val("desserts")
+    service_style = slot_val("service_style")
+    if isinstance(service_style, str):
+        service_style = {
+            "cocktail_hour": "cocktail hour",
+            "reception": "reception",
+            "both": "cocktail hour + reception",
+        }.get(service_style.lower(), service_style)
 
     summary_json: dict = {"thread_id": thread_id}
 
@@ -615,7 +622,7 @@ async def sync_slots_to_project(project_id: str, slots: dict, thread_id: str) ->
         "client_name": slot_val("name"),
         "event_type": slot_val("event_type"),
         "service_type": slot_val("service_type"),
-        "service_style": slot_val("service_style"),
+        "service_style": service_style,
         "venue_name": slot_val("venue"),
         "main_dishes": slot_val("selected_dishes"),
         "appetizers": slot_val("appetizers"),

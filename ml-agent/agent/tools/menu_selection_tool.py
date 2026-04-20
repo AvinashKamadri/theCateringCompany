@@ -20,6 +20,10 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage
 
+from agent.ambiguous_choice import (
+    replace_query_with_selection,
+    resolve_choice_selection,
+)
 from agent.cascade import apply_cascade
 from agent.instructor_client import extract
 from agent.menu_resolver import (
@@ -28,8 +32,8 @@ from agent.menu_resolver import (
     load_main_dish_menu,
     load_dessert_menu_expanded,
     parse_slot_items,
-    resolve_desserts,
-    resolve_to_db_items,
+    resolve_dessert_choices,
+    resolve_menu_items,
 )
 from agent.models import MenuSelectionExtraction
 from agent.state import (
@@ -38,11 +42,13 @@ from agent.state import (
     PHASE_DRINKS_BAR,
     PHASE_MAIN_MENU,
     PHASE_TRANSITION,
+    clear_slot,
     fill_slot,
     get_slot_value,
     is_filled,
 )
 from agent.tools.base import ToolResult
+from agent.tools.structured_choice import normalize_structured_choice
 
 
 _SYSTEM_PROMPT = (
@@ -119,6 +125,7 @@ class MenuSelectionTool:
             "selected_dishes": parse_slot_items(get_slot_value(slots, "selected_dishes") or ""),
             "desserts": parse_slot_items(get_slot_value(slots, "desserts") or ""),
         }
+        forced_extracted: MenuSelectionExtraction | None = None
 
         # Override category_hint from conversation phase so the extractor
         # and the resolver agree on which menu to hit.
@@ -126,10 +133,36 @@ class MenuSelectionTool:
         if phase == PHASE_TRANSITION:
             phase = _phase_of(slots)
         forced_category = _forced_category_from_phase(phase)
+        current_target = _next_target([], phase, slots)
+        expecting_appetizer_style = current_target == "ask_appetizer_style"
+        expecting_meal_style = current_target == "ask_meal_style"
 
         effects: list[tuple[str, str]] = []
         fills: list[tuple[str, Any]] = []
         unmatched_items: list[str] = []
+
+        pending_choice = get_slot_value(slots, "__pending_menu_choice")
+        if pending_choice:
+            if not isinstance(pending_choice, dict):
+                clear_slot(slots, "__pending_menu_choice")
+            else:
+                matches = [str(v) for v in pending_choice.get("matches") or [] if str(v).strip()]
+                selected = resolve_choice_selection(message, matches)
+                if not selected:
+                    return self._repeat_pending_menu_choice_result(
+                        state=state,
+                        pending_choice=pending_choice,
+                    )
+
+                clear_slot(slots, "__pending_menu_choice")
+                forced_extracted = MenuSelectionExtraction(
+                    raw_items=replace_query_with_selection(
+                        [str(v) for v in (pending_choice.get("raw_items") or []) if str(v).strip()],
+                        query=str(pending_choice.get("query") or ""),
+                        selection=selected,
+                    ),
+                    category_hint=str(pending_choice.get("category") or "") or forced_category,
+                )
 
         # ----------------------------------------------------------------
         # Pre-process style button sentinel values BEFORE LLM extraction.
@@ -138,7 +171,7 @@ class MenuSelectionTool:
         # if the LLM echoes them without lowercasing. Intercept here so
         # the extraction path never sees these ambiguous strings.
         # ----------------------------------------------------------------
-        _msg_lower = message.strip().lower()
+        _msg_lower = normalize_structured_choice(message)
 
         _MEAL_STYLE_MAP = {
             "plated": "plated", "plated-style": "plated", "plated style": "plated",
@@ -159,14 +192,14 @@ class MenuSelectionTool:
             "station": "station", "stations": "station",
         }
 
-        if _msg_lower in _MEAL_STYLE_MAP and not is_filled(slots, "meal_style"):
+        if _msg_lower in _MEAL_STYLE_MAP and expecting_meal_style and not is_filled(slots, "meal_style"):
             val = _MEAL_STYLE_MAP[_msg_lower]
             old = get_slot_value(slots, "meal_style")
             fill_slot(slots, "meal_style", val)
             fills.append(("meal_style", val))
             effects.extend(apply_cascade("meal_style", old, val, slots))
 
-        if _msg_lower in _APP_STYLE_MAP and not is_filled(slots, "appetizer_style"):
+        if _msg_lower in _APP_STYLE_MAP and expecting_appetizer_style and not is_filled(slots, "appetizer_style"):
             val = _APP_STYLE_MAP[_msg_lower]
             fill_slot(slots, "appetizer_style", val)
             fills.append(("appetizer_style", val))
@@ -202,7 +235,7 @@ class MenuSelectionTool:
             fills.append(("__gate_desserts", True))
             _style_only = True
 
-        extracted = None
+        extracted = forced_extracted
         if not _style_only and phase == PHASE_DESSERT and not is_filled(slots, "desserts"):
             _dessert_decline_re = re.compile(
                 r"(\bno(?:\s+thanks)?\b|\bnone\b|\bskip\b|\bpass\b|\bwithout\b).*desserts?"
@@ -232,10 +265,9 @@ class MenuSelectionTool:
                         "needs_custom_menu_call": bool(get_slot_value(slots, "custom_menu")),
                         "next_question_target": _next_target(fills, next_phase, slots),
                     },
-                    direct_response="Totally fine — we can skip dessert.",
                 )
 
-        if not _style_only:
+        if extracted is None and not _style_only:
             extracted = await extract(
                 schema=MenuSelectionExtraction,
                 system=_SYSTEM_PROMPT,
@@ -243,8 +275,9 @@ class MenuSelectionTool:
                 history=_history_for_llm(history),
             )
 
-        # Auto-set cocktail_hour=True when in cocktail phase and user isn't declining.
-        # Without this, _phase_of() loops forever waiting for explicit "cocktail hour" confirmation.
+        # Auto-set cocktail_hour only for non-weddings. Weddings need the
+        # explicit cocktail hour / reception / both choice, so we must not
+        # silently skip that question.
         if not is_filled(slots, "cocktail_hour") and phase == PHASE_COCKTAIL:
             event_type = (get_slot_value(slots, "event_type") or "").lower()
             # Non-weddings skip the cocktail-hour-vs-reception distinction entirely:
@@ -258,9 +291,6 @@ class MenuSelectionTool:
                 if not is_filled(slots, "appetizer_style"):
                     fill_slot(slots, "appetizer_style", "station")
                     fills.append(("appetizer_style", "station"))
-            elif not (extracted is not None and extracted.is_decline):
-                fill_slot(slots, "cocktail_hour", True)
-                fills.append(("cocktail_hour", True))
 
         if extracted is not None:
             category = extracted.category_hint or forced_category
@@ -280,14 +310,20 @@ class MenuSelectionTool:
                 effects.extend(apply_cascade("cocktail_hour", old, extracted.cocktail_hour, slots))
 
             # ---- meal_style ----
-            if extracted.meal_style is not None:
+            if (
+                extracted.meal_style is not None
+                and (expecting_meal_style or not extracted.raw_items)
+            ):
                 old = get_slot_value(slots, "meal_style")
                 fill_slot(slots, "meal_style", extracted.meal_style)
                 fills.append(("meal_style", extracted.meal_style))
                 effects.extend(apply_cascade("meal_style", old, extracted.meal_style, slots))
 
             # ---- appetizer_style ----
-            if extracted.appetizer_style is not None:
+            if (
+                extracted.appetizer_style is not None
+                and (expecting_appetizer_style or not extracted.raw_items)
+            ):
                 fill_slot(slots, "appetizer_style", extracted.appetizer_style)
                 fills.append(("appetizer_style", extracted.appetizer_style))
 
@@ -353,6 +389,12 @@ class MenuSelectionTool:
                     extracted.raw_items, category, slots
                 )
                 for target_slot, resolved_value, matched_count in resolved_result:
+                    if target_slot == "__ambiguous__":
+                        pending_choice = get_slot_value(slots, "__pending_menu_choice") or {}
+                        return self._repeat_pending_menu_choice_result(
+                            state=state,
+                            pending_choice=pending_choice,
+                        )
                     if target_slot == "__dessert_overflow__":
                         # Hard cap exceeded — reject selection and reshow the menu
                         state["conversation_phase"] = PHASE_DESSERT
@@ -455,7 +497,7 @@ class MenuSelectionTool:
             slots=slots,
         )
         if progress_response:
-            direct_response = progress_response
+            response_context["menu_progress"] = progress_response
         elif no_items_selected and input_hint and not asking_style:
             # Show DB-driven numbered menu list — LLM can't generate real item names.
             # Style question turns and acks are handled by the LLM naturally.
@@ -467,6 +509,40 @@ class MenuSelectionTool:
             response_context=response_context,
             input_hint=input_hint,
             direct_response=direct_response,
+        )
+
+    def _repeat_pending_menu_choice_result(
+        self,
+        *,
+        state: dict,
+        pending_choice: dict[str, Any],
+    ) -> ToolResult:
+        matches = [str(v) for v in pending_choice.get("matches") or [] if str(v).strip()]
+        options = [{"value": item, "label": item} for item in matches]
+        category = _slot_for_category(str(pending_choice.get("category") or ""))
+        label = {
+            "appetizers": "appetizer",
+            "selected_dishes": "main dish",
+            "desserts": "dessert",
+        }.get(category, "menu item")
+        query = str(pending_choice.get("query") or "")
+        prompt = (
+            f"I found more than one {label} match for '{query}'. Which one do you want?\n\n"
+            + "\n".join(f"{idx}. {item}" for idx, item in enumerate(matches, 1))
+        )
+        return ToolResult(
+            state=state,
+            response_context={
+                "tool": self.name,
+                "error": "ambiguous_menu_item",
+                "ambiguous_query": query,
+                "ambiguous_matches": matches,
+            },
+            input_hint={
+                "type": "options",
+                "options": options,
+            },
+            direct_response=prompt,
         )
 
     # ------------------------------------------------------------------
@@ -500,21 +576,36 @@ class MenuSelectionTool:
             # Unknown target — skip
             return []
 
-        # Handle 'ALL' sentinel
-        if len(raw_items) == 1 and raw_items[0].strip().upper() == "ALL":
-            items_text = ", ".join(
-                item["name"] for catitems in scoped_menu.values() for item in catitems
-            )
-        else:
-            items_text = ", ".join(raw_items)
-
         existing_names = parse_slot_items(get_slot_value(slots, target_slot) or "")
 
-        matched, resolved_text = await resolve_to_db_items(
-            items_text,
-            menu=scoped_menu,
-            existing_names=existing_names,
-        )
+        if len(raw_items) == 1 and raw_items[0].strip().upper() == "ALL":
+            resolution = await resolve_menu_items(
+                ", ".join(item["name"] for catitems in scoped_menu.values() for item in catitems),
+                menu=scoped_menu,
+            )
+        else:
+            resolution = await resolve_menu_items(
+                raw_items,
+                menu=scoped_menu,
+                existing_names=existing_names,
+            )
+
+        if resolution.ambiguous_choices:
+            ambiguous = resolution.ambiguous_choices[0]
+            fill_slot(
+                slots,
+                "__pending_menu_choice",
+                {
+                    "category": category or ("desserts" if target_slot == "desserts" else "dishes"),
+                    "query": ambiguous.query,
+                    "matches": ambiguous.matches,
+                    "raw_items": raw_items,
+                },
+            )
+            return [("__ambiguous__", ambiguous.query, len(ambiguous.matches))]
+
+        matched = resolution.matched_items
+        resolved_text = resolution.formatted_value
 
         # Merge with existing — never replace silently
         if existing_names and matched:
@@ -532,9 +623,25 @@ class MenuSelectionTool:
         event_type = (get_slot_value(slots, "event_type") or "").lower()
         is_wedding = "wedding" in event_type
         existing_names = parse_slot_items(get_slot_value(slots, "desserts") or "")
-        matched = await resolve_desserts(
-            raw_items, is_wedding=is_wedding, existing_names=existing_names
+        resolution = await resolve_dessert_choices(
+            raw_items,
+            is_wedding=is_wedding,
+            existing_names=existing_names,
         )
+        if resolution.ambiguous_choices:
+            ambiguous = resolution.ambiguous_choices[0]
+            fill_slot(
+                slots,
+                "__pending_menu_choice",
+                {
+                    "category": "desserts",
+                    "query": ambiguous.query,
+                    "matches": ambiguous.matches,
+                    "raw_items": raw_items,
+                },
+            )
+            return [("__ambiguous__", ambiguous.query, len(ambiguous.matches))]
+        matched = resolution.matched_items
 
         # Dedup + merge with existing
         existing_lower = {n.lower() for n in existing_names}
@@ -780,7 +887,10 @@ def _build_menu_turn_response(
             after=parse_slot_items(get_slot_value(slots, "appetizers") or ""),
         )
         if next_target == "ask_appetizer_style":
-            return lead + "\n\nHow would you like the appetizers served?"
+            return (
+                lead
+                + "\n\nHow would you like the appetizers served: passed around by servers, or set up at a station?"
+            )
         return lead
 
     if "appetizer_style" in filled_slots:

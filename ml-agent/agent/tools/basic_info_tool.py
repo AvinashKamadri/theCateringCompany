@@ -19,6 +19,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 
 from agent.cascade import apply_cascade
+from agent.event_identity import filter_identity_fields
 from agent.instructor_client import extract
 from agent.models import EventDetailsExtraction
 from agent.state import (
@@ -36,6 +37,7 @@ from agent.state import (
     is_filled,
 )
 from agent.tools.base import ToolResult
+from agent.tools.structured_choice import normalize_structured_choice
 
 
 _SYSTEM_PROMPT = (
@@ -77,6 +79,13 @@ _WEDDING_CAKE_BUTTERCREAMS = {
 }
 
 
+def _display_structured_choice(raw_message: str, normalized: str) -> str:
+    raw = (raw_message or "").strip()
+    if raw and raw.lower().strip(" .,!?") == normalized:
+        return raw
+    return normalized.title()
+
+
 def _wedding_cake_stage(slots: dict) -> str | None:
     if not is_filled(slots, "__wedding_cake_gate"):
         return "ask_wedding_cake"
@@ -101,7 +110,11 @@ def _normalize_tbd_venue(message_lower: str) -> str | None:
         "tbd_confirm_call",
         "to be determined",
         "confirm on call",
+        "confirm venue on call",
+        "venue confirm on call",
         "confirm later",
+        "confirm venue later",
+        "venue confirm later",
         "i'll confirm later",
         "not decided yet",
         "skip",
@@ -118,6 +131,7 @@ def _normalize_tbd_venue(message_lower: str) -> str | None:
         or "to be determined" in msg
         or "confirm later" in msg
         or "confirm on call" in msg
+        or ("confirm" in msg and "venue" in msg and ("call" in msg or "later" in msg))
         or "not decided yet" in msg
     ):
         return "TBD - Confirm on call"
@@ -179,7 +193,7 @@ class BasicInfoTool:
         cascade_effects: list[tuple[str, str]] = []
         rejected_date = False
 
-        _msg_lower = message.strip().lower()
+        _msg_lower = normalize_structured_choice(message)
         _skip_extraction = False
 
         _SERVICE_TYPE_MAP: dict[str, str] = {
@@ -239,17 +253,19 @@ class BasicInfoTool:
                     filled_this_turn.append(("wedding_cake", "none"))
                     _skip_extraction = True
             elif cake_stage == "ask_wedding_cake_flavor" and _msg_lower in _WEDDING_CAKE_FLAVORS:
-                fill_slot(slots, "__wedding_cake_flavor", message.strip())
-                filled_this_turn.append(("__wedding_cake_flavor", message.strip()))
+                flavor = _display_structured_choice(message, _msg_lower)
+                fill_slot(slots, "__wedding_cake_flavor", flavor)
+                filled_this_turn.append(("__wedding_cake_flavor", flavor))
                 _skip_extraction = True
             elif cake_stage == "ask_wedding_cake_filling" and _msg_lower in _WEDDING_CAKE_FILLINGS:
-                fill_slot(slots, "__wedding_cake_filling", message.strip())
-                filled_this_turn.append(("__wedding_cake_filling", message.strip()))
+                filling = _display_structured_choice(message, _msg_lower)
+                fill_slot(slots, "__wedding_cake_filling", filling)
+                filled_this_turn.append(("__wedding_cake_filling", filling))
                 _skip_extraction = True
             elif cake_stage == "ask_wedding_cake_buttercream" and _msg_lower in _WEDDING_CAKE_BUTTERCREAMS:
                 flavor = str(get_slot_value(slots, "__wedding_cake_flavor") or "").strip()
                 filling = str(get_slot_value(slots, "__wedding_cake_filling") or "").strip()
-                buttercream = message.strip()
+                buttercream = _display_structured_choice(message, _msg_lower)
                 fill_slot(slots, "__wedding_cake_buttercream", buttercream)
                 fill_slot(
                     slots,
@@ -270,7 +286,14 @@ class BasicInfoTool:
             )
 
         if extracted is not None:
-            for field_name, value in extracted.model_dump(exclude_none=True).items():
+            extracted_values = extracted.model_dump(exclude_none=True)
+            effective_event_type = extracted_values.get("event_type") or get_slot_value(slots, "event_type")
+            extracted_values = filter_identity_fields(
+                extracted_values,
+                event_type=effective_event_type,
+            )
+
+            for field_name, value in extracted_values.items():
                 old_value = get_slot_value(slots, field_name)
                 if field_name == "event_date":
                     value = value.isoformat() if hasattr(value, "isoformat") else str(value)
@@ -335,11 +358,14 @@ def _phase_to_question(phase: str, slots: dict) -> str:
     if phase == PHASE_GUEST_COUNT:
         return "ask_guest_count"
     if phase == PHASE_TRANSITION:
+        if event_type == "Wedding":
+            return "ask_service_style"
         return "transition_to_menu"
     return "continue"
 
 
 def _input_hint_for_phase(phase: str, slots: dict | None = None) -> dict | None:
+    event_type = get_slot_value(slots or {}, "event_type")
     if phase == PHASE_EVENT_TYPE:
         return {
             "type": "options",
@@ -410,6 +436,15 @@ def _input_hint_for_phase(phase: str, slots: dict | None = None) -> dict | None:
                 {"value": "tbd", "label": "TBD / Confirm later"},
             ],
             "allow_text": True,
+        }
+    if phase == PHASE_TRANSITION and event_type == "Wedding":
+        return {
+            "type": "options",
+            "options": [
+                {"value": "cocktail hour", "label": "Cocktail hour"},
+                {"value": "reception", "label": "Reception"},
+                {"value": "both", "label": "Both"},
+            ],
         }
     return None
 

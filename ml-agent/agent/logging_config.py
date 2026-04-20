@@ -19,6 +19,8 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from agent.trace_context import TraceContextFilter
+
 
 _CONFIGURED = False
 
@@ -32,9 +34,12 @@ def configure_logging() -> None:
     level = getattr(logging, level_name, logging.INFO)
 
     fmt = logging.Formatter(
-        "%(asctime)s %(levelname)-5s [%(name)s] %(message)s",
+        "%(asctime)s %(levelname)-5s [%(name)s] "
+        "[thread=%(trace_thread)s phase=%(trace_phase)s tool=%(trace_tool)s target=%(trace_target)s] "
+        "%(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    trace_filter = TraceContextFilter()
 
     root = logging.getLogger()
     root.setLevel(level)
@@ -44,6 +49,7 @@ def configure_logging() -> None:
     stdout_handler = logging.StreamHandler(sys.stdout)
     stdout_handler.setFormatter(fmt)
     stdout_handler.setLevel(level)
+    stdout_handler.addFilter(trace_filter)
     root.addHandler(stdout_handler)
 
     log_file = os.getenv("ML_LOG_FILE")
@@ -55,6 +61,7 @@ def configure_logging() -> None:
         )
         file_handler.setFormatter(fmt)
         file_handler.setLevel(level)
+        file_handler.addFilter(trace_filter)
         root.addHandler(file_handler)
 
     # Silence noisy libraries — INFO-level request spam from these floods

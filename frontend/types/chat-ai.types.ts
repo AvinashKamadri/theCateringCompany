@@ -14,6 +14,7 @@ export interface ChatRequest {
 
 export interface InputHint {
   type: 'options' | 'date' | 'menu_picker';
+  category?: string;
   options?: Array<{ value: string; label?: string }>;
   menu?: Array<{
     category: string;

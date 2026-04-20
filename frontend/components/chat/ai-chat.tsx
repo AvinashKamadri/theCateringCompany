@@ -335,7 +335,6 @@ function pickerFromInputHint(inputHint?: InputHint | null): PickerPayload | null
 
   return null;
 }
-
 function parseCategorizedItems(content: string): CategoryGroup[] | null {
   const lines = content.split('\n');
   const groups: CategoryGroup[] = [];
@@ -501,14 +500,45 @@ function parseListItems(content: string): ListItem[] | null {
   return null;
 }
 
-// Parse an inline "Your current selected X: A ($p), B ($p), ..." phrase into
-// items for read-only display. Used in confirmation/removal ack messages so
-// the user sees their existing selection as cards instead of a text blob.
-const INLINE_SELECTED_RE = /(?:your\s+)?current\s+(?:selected|chosen|picked)\s+(?:dishes|items|menu|appetizers|desserts|selections?):\s*([^\n]+)/i;
-function parseInlineSelectedItems(content: string): ListItem[] | null {
-  const m = INLINE_SELECTED_RE.exec(content);
-  if (!m) return null;
-  const tail = m[1].replace(/\s+Now[\s,].*$/i, '').replace(/\s*\.?\s*$/, '');
+interface InlineSelectionSnapshot {
+  before: string;
+  after: string;
+  label: string;
+  items: ListItem[];
+}
+
+// Parse inline selection summaries from confirmation/modification replies so
+// the current menu can be shown visually in the chat thread.
+const INLINE_SELECTED_RE = /(?:your\s+)?current\s+(?:selected|chosen|picked)\s+(dishes|items|menu|appetizers|desserts|selections?):\s*([^\n]+)/i;
+const INLINE_NOW_RE = /^(.*?)(?:^|\s)(your\s+([a-z][a-z/&\s]+?)\s+(?:are|is)\s+now:\s*)([^.\n]+)(?:\.\s*(.*))?$/i;
+
+function parseInlineSelectionSnapshot(content: string): InlineSelectionSnapshot | null {
+  const currentSelected = INLINE_SELECTED_RE.exec(content);
+  if (currentSelected?.[2]) {
+    const items = parseInlineSelectionItems(currentSelected[2]);
+    if (!items.length) return null;
+    return {
+      before: content.trim(),
+      after: '',
+      label: currentSelected[1] || 'selection',
+      items,
+    };
+  }
+
+  const inlineNow = INLINE_NOW_RE.exec(content.trim());
+  if (!inlineNow?.[4]) return null;
+  const items = parseInlineSelectionItems(inlineNow[4]);
+  if (!items.length) return null;
+  return {
+    before: (inlineNow[1] || '').trim(),
+    after: (inlineNow[5] || '').trim(),
+    label: (inlineNow[3] || 'selection').trim(),
+    items,
+  };
+}
+
+function parseInlineSelectionItems(rawList: string): ListItem[] {
+  const tail = rawList.replace(/\s+Now[\s,].*$/i, '').replace(/\s*\.?\s*$/, '');
   const parts = tail.split(/,\s*(?![^()]*\))/); // split on commas not inside parens
   const items: ListItem[] = [];
   for (const raw of parts) {
@@ -518,7 +548,7 @@ function parseInlineSelectedItems(content: string): ListItem[] | null {
     if (priced) items.push({ name: priced[1].trim(), price: priced[2].trim() });
     else if (seg.length >= 2 && seg.length <= 80) items.push({ name: seg });
   }
-  return items.length ? items : null;
+  return items;
 }
 
 // Multi-select: items with prices AND more than 5 options (e.g. appetizers, mains).
@@ -829,6 +859,75 @@ function ItemSelector({
   );
 }
 
+function ReadOnlySelectionSnapshot({
+  label,
+  items,
+  categories,
+}: {
+  label: string;
+  items: ListItem[];
+  categories?: CategoryGroup[];
+}) {
+  const heading = label.replace(/\s+/g, ' ').trim();
+
+  const renderCard = (item: ListItem) => {
+    const imgUrl = getMenuImageUrl(item.name);
+    const displayName = item.label ?? item.name;
+
+    return (
+      <div key={item.name} className="rounded-xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
+        {imgUrl ? (
+          <div className="w-full h-20 bg-neutral-100 overflow-hidden">
+            <img
+              src={imgUrl}
+              alt={displayName}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          </div>
+        ) : (
+          <div className="w-full h-10 bg-neutral-100" />
+        )}
+        <div className="p-2">
+          <p className="text-xs font-semibold text-neutral-900 leading-tight line-clamp-2">{displayName}</p>
+          {item.price && <p className="text-xs text-neutral-500 mt-0.5">{item.price}</p>}
+          {item.description && (
+            <p className="text-[10px] text-neutral-400 mt-1 leading-snug line-clamp-3">{item.description}</p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="mt-2 rounded-2xl border border-neutral-200 bg-neutral-50/90 px-3 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">
+        Current {heading}
+      </p>
+      {categories && categories.length >= 2 ? (
+        <div className="mt-3 space-y-4">
+          {categories.map((group) => (
+            <div key={group.category || 'other'}>
+              {group.category && (
+                <p className="inline-block bg-white rounded-md border border-neutral-200 px-2.5 py-1 text-[11px] font-bold text-neutral-900 uppercase tracking-wider mb-2 shadow-sm">
+                  {group.category}
+                </p>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {group.items.map(renderCard)}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {items.map(renderCard)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Markdown renderer --------------------------------------------------------
 
 function MarkdownMessage({ content }: { content: string }) {
@@ -1005,11 +1104,30 @@ function isAskingForEmail(content: string): boolean {
 
 function isAskingForGuestCount(content: string): boolean {
   const lower = content.toLowerCase();
+  if (
+    lower.includes('phone') ||
+    lower.includes('email') ||
+    lower.includes('venue') ||
+    lower.includes('where will') ||
+    lower.includes('where is') ||
+    lower.includes('what date') ||
+    lower.includes('when is') ||
+    lower.includes('menu') ||
+    lower.includes('appetizer') ||
+    lower.includes('main menu')
+  ) {
+    return false;
+  }
   return (lower.includes('how many guest') || lower.includes('guest count') ||
     lower.includes('headcount') || lower.includes('head count') ||
     lower.includes('how many people') || lower.includes('how big') ||
     lower.includes('guest-wise') || lower.includes('expecting')) &&
     !lower.includes('confirm') && !lower.includes('got it');
+}
+
+function isGuestCountHint(inputHint?: InputHint | null): boolean {
+  if (!inputHint || inputHint.type !== 'options' || !inputHint.allow_text) return false;
+  return (inputHint.options ?? []).some((option) => option.value.toLowerCase() === 'tbd');
 }
 
 function isAskingForVenue(content: string): boolean {
@@ -1466,6 +1584,10 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
             const categorizedItems = isActive
               ? (hintPicker?.categories ?? (listItems ? (parseCategorizedItems(msg.content) ?? groupItemsByCategory(listItems)) : null))
               : null;
+            const inlineSelectionSnapshot = msg.role === 'ai' ? parseInlineSelectionSnapshot(msg.content) : null;
+            const inlineSelectionCategories = inlineSelectionSnapshot
+              ? (groupItemsByCategory(inlineSelectionSnapshot.items) ?? undefined)
+              : undefined;
 
             if (msg.role === 'ai' && listItems) {
               const { intro } = splitAtList(msg.content);
@@ -1573,6 +1695,35 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
               );
             }
 
+            if (inlineSelectionSnapshot) {
+              return (
+                <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
+                  <div className="flex flex-col items-center gap-1 shrink-0">
+                    <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
+                      <Sparkles className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <span className="text-[10px] text-neutral-400">AI</span>
+                  </div>
+                  <div className="tc-bubble-ai max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-neutral-900">
+                    {inlineSelectionSnapshot.before && (
+                      <MarkdownMessage content={inlineSelectionSnapshot.before} />
+                    )}
+                    <ReadOnlySelectionSnapshot
+                      label={inlineSelectionSnapshot.label}
+                      items={inlineSelectionSnapshot.items}
+                      categories={inlineSelectionCategories}
+                    />
+                    {inlineSelectionSnapshot.after && (
+                      <div className="mt-3">
+                        <MarkdownMessage content={inlineSelectionSnapshot.after} />
+                      </div>
+                    )}
+                    <span className="text-xs mt-2 block text-neutral-400">{time}</span>
+                  </div>
+                </div>
+              );
+            }
+
             return (
               <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
                 <div className="flex flex-col items-center gap-1 shrink-0">
@@ -1622,7 +1773,15 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           const isPhoneMode = !state.isLoading && !isNameMode && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && noMenu;
           const isEmailMode = !state.isLoading && !isNameMode && !isPhoneMode && !!lastAiMsg && isAskingForEmail(lastAiMsg.content) && noMenu;
           const isDateMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !!lastAiMsg && (isAskingForDate(lastAiMsg.content) || lastAiMsg.inputHint?.type === 'date') && noMenu;
-          const isGuestMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !isDateMode && !!lastAiMsg && isAskingForGuestCount(lastAiMsg.content) && noMenu;
+          const isGuestMode =
+            !state.isLoading &&
+            !isNameMode &&
+            !isPhoneMode &&
+            !isEmailMode &&
+            !isDateMode &&
+            !!lastAiMsg &&
+            (isGuestCountHint(lastAiMsg.inputHint) || isAskingForGuestCount(lastAiMsg.content)) &&
+            noMenu;
           const isVenueMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !isDateMode && !isGuestMode && !!lastAiMsg && isAskingForVenue(lastAiMsg.content) && noMenu;
           const specialMode = isNameMode || isPhoneMode || isEmailMode || isDateMode || isGuestMode;
 

@@ -12,7 +12,6 @@ Enforced rules:
 """
 
 from __future__ import annotations
-
 from typing import Any
 
 from langchain_core.messages import BaseMessage
@@ -31,6 +30,7 @@ from agent.state import (
     is_filled,
 )
 from agent.tools.base import ToolResult
+from agent.tools.structured_choice import normalize_structured_choice
 
 
 _SYSTEM_PROMPT = (
@@ -70,6 +70,67 @@ _LABOR_SLOTS = (
     "labor_table_preset",
     "labor_cleanup",
     "labor_trash",
+)
+
+_LABOR_SERVICE_OPTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        "labor_ceremony_setup",
+        "Ceremony setup",
+        (
+            "labor_ceremony_setup",
+            "yes_labor_ceremony_setup",
+            "ceremony setup",
+            "ceremony setup labor",
+            "ceremony",
+        ),
+    ),
+    (
+        "labor_table_setup",
+        "Table setup",
+        (
+            "labor_table_setup",
+            "yes_labor_table_setup",
+            "table setup",
+            "tables setup",
+            "table and chair setup",
+            "tables and chairs setup",
+        ),
+    ),
+    (
+        "labor_table_preset",
+        "Table preset",
+        (
+            "labor_table_preset",
+            "yes_labor_table_preset",
+            "table preset",
+            "table preset service",
+            "preset tables",
+            "tables preset",
+        ),
+    ),
+    (
+        "labor_cleanup",
+        "Cleanup",
+        (
+            "labor_cleanup",
+            "yes_labor_cleanup",
+            "cleanup",
+            "clean up",
+            "event cleanup",
+            "cleanup after the event",
+        ),
+    ),
+    (
+        "labor_trash",
+        "Trash removal",
+        (
+            "labor_trash",
+            "yes_labor_trash",
+            "trash",
+            "trash removal",
+            "trash service",
+        ),
+    ),
 )
 
 _YES = {"yes", "y", "yeah", "yep", "sure", "yes please"}
@@ -118,8 +179,6 @@ _UTENSILS_MAP: dict[str, str] = {
     "eco friendly / biodegradable": "eco_biodegradable",
     "bamboo": "bamboo",
 }
-
-
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
     out: list[dict] = []
     for m in history[-6:]:
@@ -136,7 +195,7 @@ def _phase_of(slots: dict) -> str:
         return PHASE_TABLEWARE
     if target in {"ask_rentals_gate", "ask_rentals_items"}:
         return PHASE_RENTALS
-    if target.startswith("ask_labor_"):
+    if target == "ask_labor_services":
         return PHASE_LABOR
     return PHASE_SPECIAL_REQUESTS
 
@@ -194,8 +253,7 @@ class AddOnsTool:
                     has_linens = "Linens" in normalized
                     fill_slot(slots, "linens", has_linens)
                     fills.append(("linens", has_linens))
-                    other_rentals = [v for v in normalized if v != "Linens"]
-                    final_value = ", ".join(other_rentals) if other_rentals else "none"
+                    final_value = ", ".join(normalized) if normalized else "none"
                     fill_slot(slots, "rentals", final_value)
                     fills.append(("rentals", final_value))
                     continue
@@ -229,20 +287,8 @@ class AddOnsTool:
         )
 
 
-_LABOR_QUESTIONS: dict[str, str] = {
-    "labor_ceremony_setup": "Would you like staff for ceremony setup?",
-    "labor_table_setup": "Would you like staff for table setup?",
-    "labor_table_preset": "Would you like tables preset before guests arrive?",
-    "labor_cleanup": "Would you like staff for cleanup after the event?",
-    "labor_trash": "Would you like trash removal included?",
-}
-
-
-def _next_unfilled_labor(slots: dict) -> str | None:
-    for s in _LABOR_SLOTS:
-        if not is_filled(slots, s):
-            return s
-    return None
+def _has_unfilled_labor(slots: dict) -> bool:
+    return any(not is_filled(slots, slot) for slot in _LABOR_SLOTS)
 
 
 def _next_target(slots: dict) -> str:
@@ -269,10 +315,8 @@ def _next_target(slots: dict) -> str:
         return "ask_rentals_items"
 
     service_type = get_slot_value(slots, "service_type")
-    if service_type != "Dropoff":
-        next_labor = _next_unfilled_labor(slots)
-        if next_labor:
-            return f"ask_{next_labor}"
+    if service_type != "Dropoff" and _has_unfilled_labor(slots):
+        return "ask_labor_services"
 
     return "transition_to_special_requests"
 
@@ -292,8 +336,8 @@ def _allowed_fields_for_target(target: str) -> set[str]:
         return set()
     if target == "ask_rentals_items":
         return {"rentals"}
-    if target.startswith("ask_labor_"):
-        return {target.removeprefix("ask_")}
+    if target == "ask_labor_services":
+        return set(_LABOR_SLOTS)
     return set()
 
 
@@ -305,6 +349,8 @@ def _apply_structured_answer(
     fills: list[tuple[str, Any]],
     effects: list[tuple[str, str]],
 ) -> bool:
+    message_lower = normalize_structured_choice(message_lower)
+
     if target == "ask_drinks_interest":
         if message_lower in _YES or message_lower in {"yes, add drinks"}:
             old = get_slot_value(slots, "drinks")
@@ -411,21 +457,18 @@ def _apply_structured_answer(
             has_linens = "Linens" in normalized_rentals
             fill_slot(slots, "linens", has_linens)
             fills.append(("linens", has_linens))
-            other_rentals = [v for v in normalized_rentals if v != "Linens"]
-            final_value = ", ".join(other_rentals) if other_rentals else "none"
+            final_value = ", ".join(normalized_rentals) if normalized_rentals else "none"
             fill_slot(slots, "rentals", final_value)
             fills.append(("rentals", final_value))
             return True
 
-    if target.startswith("ask_labor_"):
-        labor_slot = target.removeprefix("ask_")
-        if message_lower in _YES or message_lower == f"yes_{labor_slot}":
-            fill_slot(slots, labor_slot, True)
-            fills.append((labor_slot, True))
-            return True
-        if message_lower in _NO or message_lower == f"no_{labor_slot}":
-            fill_slot(slots, labor_slot, False)
-            fills.append((labor_slot, False))
+    if target == "ask_labor_services":
+        selected_slots = _normalize_labor_services([message_lower])
+        if selected_slots is not None:
+            for labor_slot in _LABOR_SLOTS:
+                wants_service = labor_slot in selected_slots
+                fill_slot(slots, labor_slot, wants_service)
+                fills.append((labor_slot, wants_service))
             return True
 
     return False
@@ -446,6 +489,39 @@ def _normalize_rentals(values: list[str]) -> list[str]:
     if "chair" in joined:
         found.append("Chairs")
     return found
+
+
+def _normalize_labor_services(values: list[str]) -> set[str] | None:
+    tokens: list[str] = []
+    for value in values:
+        text = normalize_structured_choice(value)
+        if not text:
+            continue
+        for part in text.split(","):
+            part = part.strip()
+            if part:
+                tokens.append(part)
+
+    if not tokens:
+        return None
+
+    joined = ", ".join(tokens)
+    if joined in {"none", "no", "skip", "no labor", "no staffing", "no labor needed", "no staffing needed"}:
+        return set()
+
+    selected: set[str] = set()
+    recognized = False
+    for token in tokens:
+        if token in {"none", "no", "skip", "no labor", "no staffing"}:
+            recognized = True
+            continue
+        for slot_name, _label, aliases in _LABOR_SERVICE_OPTIONS:
+            if any(alias in token for alias in aliases):
+                selected.add(slot_name)
+                recognized = True
+                break
+
+    return selected if recognized else None
 
 
 def _input_hint_for_target(target: str, slots: dict) -> dict | None:
@@ -522,14 +598,14 @@ def _input_hint_for_target(target: str, slots: dict) -> dict | None:
             ],
             "multi": True,
         }
-    if target.startswith("ask_labor_"):
-        labor_slot = target.removeprefix("ask_")
+    if target == "ask_labor_services":
         return {
             "type": "options",
             "options": [
-                {"value": f"yes_{labor_slot}", "label": "Yes"},
-                {"value": f"no_{labor_slot}", "label": "No"},
+                {"value": slot_name, "label": label}
+                for slot_name, label, _aliases in _LABOR_SERVICE_OPTIONS
             ],
+            "multi": True,
         }
     if target == "transition_to_special_requests":
         return {
@@ -559,13 +635,12 @@ def _direct_response_for_target(target: str, slots: dict) -> str | None:
         return "Do you need any rentals like linens, tables, or chairs?"
     if target == "ask_rentals_items":
         return "Which rentals would you like to add?"
-    if target.startswith("ask_labor_"):
-        labor_slot = target.removeprefix("ask_")
-        return _LABOR_QUESTIONS.get(labor_slot)
+    if target == "ask_labor_services":
+        return "Which service staff would you like us to handle? Select everything you need."
     if target == "transition_to_special_requests":
         return "Do you have any special requests we should note?"
     return None
 
 
 
-__all__ = ["AddOnsTool"]
+__all__ = ["AddOnsTool", "normalize_structured_choice", "_normalize_labor_services"]

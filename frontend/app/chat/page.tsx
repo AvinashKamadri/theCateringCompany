@@ -512,7 +512,7 @@ function AiIntakeContent() {
                     Plan any event,<br />effortlessly.
                   </h1>
                   <p className="text-sm sm:text-base text-white/60 max-w-sm leading-relaxed">
-                    Tell us what you're dreaming of — our AI handles the menu, the details, and the paperwork.
+                    Tell us what you&apos;re dreaming of — our AI handles the menu, the details, and the paperwork.
                   </p>
                   <button
                     onClick={() => { setActiveThreadId(undefined); setCurrentSlots({}); setProgress({ filled: 0, total: 20 }); setView('chat'); }}
@@ -684,3 +684,4 @@ export default function AiIntakePage() {
     </Suspense>
   );
 }
+

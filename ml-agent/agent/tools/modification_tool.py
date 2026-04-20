@@ -149,6 +149,10 @@ class ModificationTool:
     ) -> ToolResult:
         slots = state["slots"]
 
+        explicit_reopen_slot = _explicit_reopen_slot_from_message(message)
+        if explicit_reopen_slot:
+            return await self._reopen_list_slot(explicit_reopen_slot, slots, state)
+
         # Surface the current list contents to the LLM so it can pick the
         # right target_slot and item names regardless of which phase we're in.
         context_block = _current_lists_context(slots)
@@ -660,6 +664,35 @@ _LIST_SLOT_TO_PHASE = {
     "desserts": PHASE_DESSERT,
     "rentals": PHASE_RENTALS,
 }
+
+
+def _explicit_reopen_slot_from_message(message: str) -> str | None:
+    """Deterministically reopen list slots for plain-English menu-edit asks.
+
+    This runs before LLM extraction so requests like "show me the dessert menu"
+    or "add desserts back" cannot be misread as concrete selections.
+    """
+    msg = (message or "").strip().lower()
+    if not msg:
+        return None
+
+    reopen_markers = (
+        "show", "menu", "redo", "change", "switch", "actually", "want",
+        "have", "add back", "bring back", "put back", "reshow", "reopen",
+    )
+    if not any(marker in msg for marker in reopen_markers):
+        return None
+
+    slot_phrases: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("desserts", ("dessert menu", "desserts menu", "show desserts", "show me desserts", "add desserts back", "desserts back", "want desserts", "have desserts")),
+        ("appetizers", ("appetizer menu", "appetizers menu", "show appetizers", "show me appetizers", "add appetizers back", "appetizers back")),
+        ("selected_dishes", ("main menu", "mains menu", "show mains", "show main dishes", "main dishes back", "add mains back", "add main dishes back")),
+        ("rentals", ("rental menu", "rentals menu", "show rentals", "show me rentals", "rentals back", "add rentals back")),
+    )
+    for slot, phrases in slot_phrases:
+        if any(phrase in msg for phrase in phrases):
+            return slot
+    return None
 
 
 def _is_unspecified_list_change(mod: ModificationExtraction) -> bool:

@@ -552,6 +552,49 @@ async def test_modification_tool_reopens_dessert_menu_instead_of_adding_everythi
 
 
 @pytest.mark.asyncio
+async def test_modification_tool_reopens_desserts_even_when_extractor_would_pick_wrong_slot(monkeypatch):
+    slots = initialize_empty_slots()
+    fill_slot(slots, "desserts", "none")
+    fill_slot(slots, "__gate_desserts", True)
+
+    async def fake_extract(**kwargs):
+        raise AssertionError("extract should not run for explicit dessert reopen requests")
+
+    monkeypatch.setattr("agent.tools.modification_tool.extract", fake_extract)
+
+    async def fake_render_slot_menu(self, target_slot, slots):
+        assert target_slot == "desserts"
+        return ("Here are the dessert options:\n1. Brownies", {"type": "menu_picker", "category": "desserts", "items": []})
+
+    monkeypatch.setattr(ModificationTool, "_render_slot_menu", fake_render_slot_menu)
+
+    tool = ModificationTool()
+    result = await tool.run(
+        message="can you show me the dessert menu and add desserts back",
+        history=[],
+        state={"slots": slots, "conversation_phase": PHASE_FOLLOWUP},
+    )
+
+    assert get_slot_value(slots, "desserts") is None
+    assert get_slot_value(slots, "__gate_desserts") is None
+    assert result.response_context["next_phase"] == PHASE_DESSERT
+    assert "Here are the dessert options" in (result.direct_response or "")
+
+
+def test_quick_route_reopens_menu_sections_from_followup_phase():
+    slots = initialize_empty_slots()
+    fill_slot(slots, "followup_call_requested", False)
+
+    state = {
+        "conversation_phase": PHASE_FOLLOWUP,
+        "slots": slots,
+    }
+
+    assert _quick_route("show me the dessert menu", state) == "modification_tool"
+    assert _quick_route("actually add desserts back", state) == "modification_tool"
+
+
+@pytest.mark.asyncio
 async def test_add_ons_tool_defers_normal_question_wording_to_response_layer():
     slots = initialize_empty_slots()
     fill_slot(slots, "meal_style", "buffet")

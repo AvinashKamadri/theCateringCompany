@@ -191,9 +191,9 @@ async def get_conversation(thread_id: str):
 
     messages = await load_messages(thread_id)
 
-    slots = state.get("slots") or {}
-    filled_slots = {k: v["value"] for k, v in slots.items()
-                    if isinstance(v, dict) and v.get("filled") and not k.startswith("__")}
+    # Extract filled slot values (exclude internal bookkeeping keys prefixed with __)
+    slots = state.get("slots", {})
+    filled_slots = {k: v["value"] for k, v in slots.items() if v.get("filled") and not k.startswith("__")}
 
     return {
         "thread_id": thread_id,

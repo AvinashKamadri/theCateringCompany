@@ -12,6 +12,29 @@ export interface ChatRequest {
   user_id?: string;
 }
 
+export interface InputHint {
+  type: 'options' | 'date' | 'menu_picker';
+  options?: Array<{ value: string; label?: string }>;
+  menu?: Array<{
+    category: string;
+    items: Array<{
+      name: string;
+      unit_price?: number;
+      price_type?: string;
+      description?: string;
+    }>;
+  }>;
+  items?: Array<{
+    name: string;
+    unit_price?: number;
+    price_type?: string;
+    description?: string;
+  }>;
+  multi?: boolean;
+  allow_text?: boolean;
+  max_select?: number;
+}
+
 export interface ChatResponse {
   thread_id: string;
   project_id?: string;
@@ -20,6 +43,7 @@ export interface ChatResponse {
   slots_filled: number;
   total_slots: number;
   is_complete: boolean;
+  input_hint?: InputHint | null;
   /** ML-internal contract ID (Desktop agent saves to its own DB) */
   contract_id?: string | null;
   /** Full contract data dict (TheCateringCompanyAgent format, if present) */
@@ -33,25 +57,53 @@ export interface ChatResponse {
 export interface ContractData {
   // Basic info
   name: string;
-  event_date: string;        // YYYY-MM-DD
-  service_type: string;      // drop-off | on-site
-  event_type: string;        // Wedding | Corporate | Birthday | Social | Custom
+  email?: string;
+  phone?: string;
+  event_date: string;
+  service_type: string;
+  event_type: string;
   venue: string;
   guest_count: number | string;
-  service_style?: string;    // cocktail hour | reception | both
-  // Menu — ML agent returns these as comma-separated strings (e.g. "Chicken Tikka, Pasta")
+  partner_name?: string;
+  company_name?: string;
+  honoree_name?: string;
+  service_style?: string;
+  cocktail_hour?: boolean | string;
+
+  // Menu
+  meal_style?: string;
+  appetizer_style?: string;
   selected_dishes?: string | string[];
   appetizers?: string | string[];
+  desserts?: string | string[];
+  wedding_cake?: string;
+  custom_menu?: string;
   menu_notes?: string;
+
   // Add-ons
+  drinks?: boolean | string;
+  bar_service?: boolean | string;
+  bar_package?: string;
+  bartender?: boolean | string;
+  coffee_service?: boolean | string;
+  tableware?: string;
   utensils?: string;
-  desserts?: string;
-  rentals?: string;
+  linens?: boolean | string;
+  rentals?: string | string[];
   florals?: string;
+  labor_ceremony_setup?: boolean | string;
+  labor_table_setup?: boolean | string;
+  labor_table_preset?: boolean | string;
+  labor_cleanup?: boolean | string;
+  labor_trash?: boolean | string;
+  travel_fee?: string;
+
   // Final details
   special_requests?: string;
   dietary_concerns?: string;
   additional_notes?: string;
+  followup_call_requested?: boolean | string;
+
   // Carry the thread_id so the page can pass it downstream if needed
   thread_id?: string;
 }
@@ -76,7 +128,8 @@ export interface ChatMessage {
   role: 'user' | 'ai';
   content: string;
   timestamp: Date;
-  authorId?: string;   // undefined = AI, set = the user who sent it
+  inputHint?: InputHint | null;
+  authorId?: string;
 }
 
 export interface ChatState {

@@ -202,7 +202,7 @@ def _quick_route(message: str, state: dict) -> str | None:
 
     # Reopening a previous menu section from a later phase should route to the
     # modification tool so the picker can be shown again without guessing items.
-    if phase in {PHASE_DRINKS_BAR, PHASE_TABLEWARE, PHASE_RENTALS, PHASE_LABOR, PHASE_SPECIAL_REQUESTS, PHASE_DIETARY, PHASE_REVIEW}:
+    if phase in {PHASE_DRINKS_BAR, PHASE_TABLEWARE, PHASE_RENTALS, PHASE_LABOR, PHASE_SPECIAL_REQUESTS, PHASE_DIETARY, PHASE_FOLLOWUP, PHASE_REVIEW}:
         if (
             "dessert" in msg
             or "appetizer" in msg

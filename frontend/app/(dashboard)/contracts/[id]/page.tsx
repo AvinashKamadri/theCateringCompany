@@ -6,13 +6,12 @@ import {
   ArrowLeft, Calendar, Users, MapPin, FileText,
   Clock, CheckCircle2, AlertCircle, Loader2,
   ThumbsUp, ThumbsDown, X, Plus, Trash2, DollarSign, Calculator, Lock,
-  UtensilsCrossed, AlertTriangle, Info, PartyPopper, ConciergeBell, Download,
+  UtensilsCrossed, AlertTriangle, PartyPopper, ConciergeBell, Download,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import BentoInfoCard from '@/components/ui/BentoInfoCard';
 
 const STAFF_DOMAINS = ['@catering-company.com', '@catering-company.com'];
 
@@ -79,17 +78,6 @@ function formatEventDate(date: string): string {
     return date;
   }
 }
-
-function getEventTypeStyle(type: string): { bg: string; iconBg: string; iconColor: string } {
-  const t = type.toLowerCase();
-  if (t.includes('wedding'))                              return { bg: 'bg-rose-50',    iconBg: 'bg-rose-100',    iconColor: 'text-rose-500' };
-  if (t.includes('corporate') || t.includes('business')) return { bg: 'bg-blue-50',    iconBg: 'bg-blue-100',    iconColor: 'text-blue-500' };
-  if (t.includes('birthday'))                             return { bg: 'bg-purple-50',  iconBg: 'bg-purple-100',  iconColor: 'text-purple-500' };
-  if (t.includes('anniversary'))                          return { bg: 'bg-pink-50',    iconBg: 'bg-pink-100',    iconColor: 'text-pink-500' };
-  if (t.includes('graduation'))                           return { bg: 'bg-emerald-50', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-500' };
-  return { bg: 'bg-violet-50', iconBg: 'bg-violet-100', iconColor: 'text-violet-500' };
-}
-
 
 function dishNameToSlug(name: string): string {
   return name
@@ -449,7 +437,7 @@ export default function ContractDetailPage() {
   const isContractVisible = ['sent', 'signed'].includes(contract.status);
 
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <div className="min-h-screen tc-page-bg">
       {/* Reject modal */}
       {showRejectModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -473,7 +461,7 @@ export default function ContractDetailPage() {
               <button
                 onClick={handleReject}
                 disabled={rejecting || !rejectReason.trim()}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2 bg-neutral-900 text-white rounded-xl hover:bg-black disabled:opacity-50 text-sm flex items-center justify-center gap-2"
               >
                 {rejecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ThumbsDown className="h-4 w-4" />}
                 Reject
@@ -483,30 +471,101 @@ export default function ContractDetailPage() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="bg-white border-b border-neutral-200">
-        <div className="max-w-6xl mx-auto px-6 py-5">
-          <button onClick={() => router.back()} className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-900 mb-4 transition-colors">
-            <ArrowLeft className="h-3.5 w-3.5" /> Back
-          </button>
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-bold text-neutral-900">{contract.title || `Contract v${contract.version_number}`}</h1>
-              {project && (
-                <button onClick={() => router.push(`/projects/${project.id}`)} className="text-sm text-neutral-500 hover:text-black mt-0.5 transition-colors">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-20">
+        {/* Breadcrumb */}
+        <button onClick={() => router.back()} className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-900 mb-5 transition-colors">
+          <ArrowLeft className="h-3 w-3" /> Back
+        </button>
+
+        {/* Hero */}
+        <div className="flex items-end justify-between gap-4 pb-6 border-b border-neutral-200/60 mb-6 flex-wrap">
+          <div className="min-w-0">
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-neutral-900">
+              {contract.title || `Contract v${contract.version_number}`}
+            </h1>
+            {project && (
+              <p className="text-sm text-neutral-500 mt-2">
+                <span className="capitalize">{eventType !== '—' ? eventType : 'Event'}</span>
+                {' · '}
+                <button onClick={() => router.push(`/projects/${project.id}`)} className="font-semibold text-neutral-700 hover:text-black transition-colors">
                   {project.title}
                 </button>
-              )}
-            </div>
-            <span className={cn('inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border self-start', statusCfg.style)}>
-              <StatusIcon className="h-4 w-4" />
+              </p>
+            )}
+          </div>
+          {contract.status === 'pending_staff_approval' ? (
+            <span className="inline-flex items-center gap-2.5 pl-3.5 pr-4 py-2 rounded-full bg-neutral-900 text-white text-xs font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.18)]">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-50 animate-ping" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+              </span>
               {statusCfg.label}
             </span>
-          </div>
+          ) : (
+            <span className={cn(
+              'inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold',
+              contract.status === 'signed' ? 'bg-neutral-900 text-white' :
+              contract.status === 'rejected' ? 'bg-neutral-100 text-neutral-700 border border-neutral-200' :
+              'bg-neutral-100 text-neutral-700 border border-neutral-200'
+            )}>
+              <StatusIcon className="h-3.5 w-3.5" />
+              {statusCfg.label}
+            </span>
+          )}
         </div>
-      </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-6">
+        {/* Quick summary strip — 4 monochrome tiles */}
+        {(eventDate || guestCount != null || eventType !== '—' || serviceType) && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            {eventDate && (
+              <div className="group relative overflow-hidden bg-white border border-neutral-200/70 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-400">Date</span>
+                  <div className="w-8 h-8 rounded-lg bg-neutral-900 text-white grid place-items-center">
+                    <Calendar className="h-3.5 w-3.5" />
+                  </div>
+                </div>
+                <p className="text-base font-extrabold text-neutral-900 leading-tight">{formatEventDate(eventDate)}</p>
+              </div>
+            )}
+            {guestCount != null && (
+              <div className="group relative overflow-hidden bg-white border border-neutral-200/70 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-400">Guests</span>
+                  <div className="w-8 h-8 rounded-lg bg-neutral-900 text-white grid place-items-center">
+                    <Users className="h-3.5 w-3.5" />
+                  </div>
+                </div>
+                <p className="text-base font-extrabold text-neutral-900 leading-tight">
+                  {guestCount}
+                  <span className="block text-[11px] font-medium text-neutral-500 mt-0.5">Attendees</span>
+                </p>
+              </div>
+            )}
+            {eventType !== '—' && (
+              <div className="group relative overflow-hidden bg-white border border-neutral-200/70 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-400">Type</span>
+                  <div className="w-8 h-8 rounded-lg bg-neutral-900 text-white grid place-items-center">
+                    <PartyPopper className="h-3.5 w-3.5" />
+                  </div>
+                </div>
+                <p className="text-base font-extrabold text-neutral-900 leading-tight capitalize">{eventType}</p>
+              </div>
+            )}
+            {serviceType && (
+              <div className="group relative overflow-hidden bg-white border border-neutral-200/70 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-400">Service</span>
+                  <div className="w-8 h-8 rounded-lg bg-neutral-900 text-white grid place-items-center">
+                    <ConciergeBell className="h-3.5 w-3.5" />
+                  </div>
+                </div>
+                <p className="text-base font-extrabold text-neutral-900 leading-tight capitalize">{serviceType}</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Staff review panel — full width */}
         {isStaff && isPending && (
@@ -654,325 +713,331 @@ export default function ContractDetailPage() {
           </div>
         )}
 
-        {/* Bento grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
+        {/* Two-column layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5">
 
-          {/* ── Event Details ── horizontal stat cards */}
-          <BentoInfoCard className="lg:col-span-2 p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-neutral-900">Event Details</h2>
-              <Info className="h-5 w-5 text-neutral-300" />
-            </div>
+          {/* ═════════ MAIN AREA ═════════ */}
+          <div className="flex flex-col gap-5 min-w-0">
 
-            {/* Stat cards row */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-              {eventDate && (
-                <div className="flex items-center gap-3 bg-amber-50 rounded-2xl px-4 py-4">
-                  <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-                    <Calendar className="h-4 w-4 text-amber-600" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider mb-0.5">Date</p>
-                    <p className="text-sm font-bold text-neutral-900 leading-tight">{formatEventDate(eventDate)}</p>
-                  </div>
-                </div>
-              )}
-              {guestCount != null && (
-                <div className="flex items-center gap-3 bg-blue-50 rounded-2xl px-4 py-4">
-                  <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                    <Users className="h-4 w-4 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider mb-0.5">Guests</p>
-                    <p className="text-sm font-bold text-neutral-900 leading-tight">{guestCount} People</p>
-                  </div>
-                </div>
-              )}
-              {eventType !== '—' && (() => {
-                const s = getEventTypeStyle(eventType);
-                return (
-                  <div className={cn('flex items-center gap-3 rounded-2xl px-4 py-4', s.bg)}>
-                    <div className={cn('w-10 h-10 rounded-full flex items-center justify-center shrink-0', s.iconBg)}>
-                      <PartyPopper className={cn('h-4 w-4', s.iconColor)} />
+            {/* Event Details */}
+            <div className="bg-white border border-neutral-200/70 rounded-2xl p-6 sm:p-7 shadow-sm">
+              <div className="flex items-start justify-between mb-1">
+                <h2 className="text-lg font-bold text-neutral-900 tracking-tight">Event Details</h2>
+              </div>
+              <p className="text-xs text-neutral-500 mb-6">All confirmed information for this booking</p>
+
+              {venueName && (
+                <div className="pb-5 mb-5 border-b border-neutral-200/70">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-400 mb-3">
+                    <MapPin className="h-3 w-3" /> Venue
+                  </p>
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-9 h-9 rounded-xl bg-neutral-50 border border-neutral-200/70 grid place-items-center text-neutral-500 shrink-0">
+                      <MapPin className="h-4 w-4" />
                     </div>
-                    <div>
-                      <p className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider mb-0.5">Type</p>
-                      <p className="text-sm font-bold text-neutral-900 leading-tight capitalize">{eventType}</p>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-neutral-900">{venueName}</p>
+                      {venueAddress && <p className="text-xs text-neutral-500 mt-0.5">{venueAddress}</p>}
                     </div>
                   </div>
-                );
-              })()}
-              {serviceType && (
-                <div className="flex items-center gap-3 bg-neutral-100 rounded-2xl px-4 py-4">
-                  <div className="w-10 h-10 rounded-full bg-neutral-200 flex items-center justify-center shrink-0">
-                    <ConciergeBell className="h-4 w-4 text-neutral-500" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider mb-0.5">Service</p>
-                    <p className="text-sm font-bold text-neutral-900 leading-tight capitalize">{serviceType}</p>
-                  </div>
                 </div>
               )}
-            </div>
 
-            {/* Venue */}
-            {venueName && (
-              <div className="border-t border-neutral-100 pt-5 mb-5">
-                <p className="flex items-center gap-1.5 text-xs text-neutral-400 font-semibold uppercase tracking-widest mb-1.5">
-                  <MapPin className="h-3.5 w-3.5" /> Venue
+              <div>
+                <p className="flex items-center gap-1.5 text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-400 mb-3">
+                  <AlertTriangle className="h-3 w-3" /> Dietary Concerns
                 </p>
-                <p className="text-base font-bold text-neutral-900">{venueName}</p>
-                {venueAddress && <p className="text-xs text-neutral-400 mt-0.5">{venueAddress}</p>}
+                {dietaryRestrictions.length === 0 ? (
+                  <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-neutral-100 border border-neutral-200/70 text-xs font-medium text-neutral-600">
+                    <span className="h-1.5 w-1.5 rounded-full bg-neutral-400" />
+                    No restrictions
+                  </span>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {dietaryRestrictions.map((d, i) => (
+                      <span key={i} className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-neutral-900 text-white text-xs font-medium">
+                        <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                        {d}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Menu & Services */}
+            {(appetizers.length > 0 || mainDishes.length > 0 || desserts.length > 0) && (
+              <div className="bg-white border border-neutral-200/70 rounded-2xl p-6 sm:p-7 shadow-sm">
+                <div className="flex items-start justify-between mb-6">
+                  <div>
+                    <h2 className="text-lg font-bold text-neutral-900 tracking-tight">Menu &amp; Services</h2>
+                    <p className="text-xs text-neutral-500 mt-0.5">
+                      {appetizers.length + mainDishes.length + desserts.length} items
+                      {!isContractVisible && <span className="text-neutral-400"> · Pricing available after signing</span>}
+                    </p>
+                  </div>
+                  <div className="w-9 h-9 rounded-xl bg-neutral-100 grid place-items-center shrink-0">
+                    <UtensilsCrossed className="h-4 w-4 text-neutral-500" />
+                  </div>
+                </div>
+
+                <div className="space-y-7">
+                  {appetizers.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <p className="text-[11px] font-bold tracking-[0.1em] uppercase text-neutral-400">Appetizers / Hors d'Oeuvres</p>
+                        <span className="inline-flex items-center justify-center min-w-[22px] h-5 px-2 rounded-full bg-neutral-100 text-neutral-600 text-[10px] font-bold">{appetizers.length}</span>
+                        <div className="flex-1 h-px bg-gradient-to-r from-neutral-200 to-transparent" />
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                        {appetizers.map((item, i) => <DishCard key={i} name={item} slugList={menuImageSlugs} />)}
+                      </div>
+                    </div>
+                  )}
+                  {mainDishes.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <p className="text-[11px] font-bold tracking-[0.1em] uppercase text-neutral-400">Main Dishes</p>
+                        <span className="inline-flex items-center justify-center min-w-[22px] h-5 px-2 rounded-full bg-neutral-100 text-neutral-600 text-[10px] font-bold">{mainDishes.length}</span>
+                        <div className="flex-1 h-px bg-gradient-to-r from-neutral-200 to-transparent" />
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                        {mainDishes.map((item, i) => <DishCard key={i} name={item} slugList={menuImageSlugs} />)}
+                      </div>
+                    </div>
+                  )}
+                  {desserts.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <p className="text-[11px] font-bold tracking-[0.1em] uppercase text-neutral-400">Desserts</p>
+                        <span className="inline-flex items-center justify-center min-w-[22px] h-5 px-2 rounded-full bg-neutral-100 text-neutral-600 text-[10px] font-bold">{desserts.length}</span>
+                        <div className="flex-1 h-px bg-gradient-to-r from-neutral-200 to-transparent" />
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                        {desserts.map((item, i) => <DishCard key={i} name={item} slugList={menuImageSlugs} />)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {(utensils || rentals || florals) && (
+                  <div className="mt-6 pt-5 border-t border-neutral-200/70 flex flex-wrap gap-2">
+                    {utensils && (
+                      <span className="px-3 py-1.5 bg-neutral-50 border border-neutral-200/70 rounded-full text-xs font-medium text-neutral-700">
+                        <span className="text-neutral-400">Utensils · </span>{utensils}
+                      </span>
+                    )}
+                    {rentals && (
+                      <span className="px-3 py-1.5 bg-neutral-50 border border-neutral-200/70 rounded-full text-xs font-medium text-neutral-700">
+                        <span className="text-neutral-400">Rentals · </span>{rentals}
+                      </span>
+                    )}
+                    {florals && (
+                      <span className="px-3 py-1.5 bg-neutral-50 border border-neutral-200/70 rounded-full text-xs font-medium text-neutral-700">
+                        <span className="text-neutral-400">Florals · </span>{florals}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Dietary */}
-            <div className="border-t border-neutral-100 pt-5">
-              <p className="flex items-center gap-1.5 text-xs text-neutral-400 font-semibold uppercase tracking-widest mb-3">
-                <AlertTriangle className="h-3.5 w-3.5" /> Dietary Concerns
-              </p>
-              {dietaryRestrictions.length === 0 ? (
-                <div className="bg-stone-50 border-l-2 border-rose-200 rounded-xl px-4 py-3">
-                  <p className="text-sm text-neutral-500 italic">"No dietary concerns noted for this guest list."</p>
-                </div>
-              ) : (
-                <div className="bg-amber-50 border-l-2 border-amber-300 rounded-xl px-4 py-3">
-                  <p className="text-sm text-amber-800">{dietaryRestrictions.join(' · ')}</p>
-                </div>
-              )}
-            </div>
-          </BentoInfoCard>
+            {/* Add-ons & Special Requests */}
+            {(addons.length > 0 || specialRequests.length > 0) && (
+              <div className="bg-white border border-neutral-200/70 rounded-2xl p-6 shadow-sm">
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-400 mb-4">Add-ons &amp; Special Requests</p>
+                {addons.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-4 last:mb-0">
+                    {addons.map((a, i) => (
+                      <span key={i} className="px-3.5 py-2 bg-neutral-50 border border-neutral-200/70 rounded-xl text-xs font-medium text-neutral-700">{a}</span>
+                    ))}
+                  </div>
+                )}
+                {specialRequests.length > 0 && (
+                  <div className="bg-neutral-50 border-l-2 border-neutral-900 rounded-r-xl px-4 py-3">
+                    <p className="text-[10px] font-bold tracking-[0.1em] uppercase text-neutral-500 mb-2">Special Requests</p>
+                    <ul className="space-y-1.5">
+                      {specialRequests.map((r, i) => (
+                        <li key={i} className="text-xs text-neutral-700 flex items-start gap-2">
+                          <span className="text-neutral-400 mt-0.5">—</span>{r}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
 
-          {/* ── Contract Info + Client ── 1 col */}
-          <div className="flex flex-col gap-4">
+            {/* Contract Summary */}
+            {summary && (
+              <div className="bg-white border border-neutral-200/70 rounded-2xl overflow-hidden relative shadow-sm">
+                <span aria-hidden className="pointer-events-none select-none absolute -top-4 left-6 text-[160px] font-serif leading-none text-neutral-100">&ldquo;</span>
+                <span aria-hidden className="pointer-events-none select-none absolute -bottom-8 right-6 text-[160px] font-serif leading-none text-neutral-100">&rdquo;</span>
+                <div className="relative px-7 sm:px-8 py-7">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-400 mb-5">
+                    <FileText className="h-3 w-3" /> Contract Summary
+                  </p>
+                  <p className="text-base font-medium text-neutral-700 leading-relaxed whitespace-pre-wrap italic">
+                    {summary}
+                  </p>
+                  <div className="mt-6 pt-4 border-t border-neutral-200/70 flex items-center justify-between flex-wrap gap-2">
+                    <p className="text-xs text-neutral-400">
+                      v{contract.version_number} · {new Date(contract.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
-            {/* #3 Status banners — top of column so they're seen first */}
+          {/* ═════════ SIDEBAR ═════════ */}
+          <div className="flex flex-col gap-4 min-w-0">
+
+            {/* Status notices */}
             {!isStaff && isPending && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex gap-3 items-start">
-                <Clock className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-xs font-bold text-amber-800 mb-0.5">Awaiting Staff Review</p>
-                  <p className="text-xs text-amber-700">Our team will review and approve this contract before sending it to you for signature.</p>
+              <div className="relative overflow-hidden bg-gradient-to-br from-neutral-50 to-neutral-100 border border-neutral-200/70 rounded-2xl p-5">
+                <div className="absolute top-0 left-0 w-[3px] h-full bg-gradient-to-b from-neutral-900 to-neutral-600" />
+                <div className="flex items-center gap-2.5 mb-2">
+                  <div className="w-6 h-6 rounded-full bg-neutral-900 text-white grid place-items-center">
+                    <Clock className="h-3 w-3" />
+                  </div>
+                  <p className="text-sm font-bold text-neutral-900">Awaiting Staff Review</p>
                 </div>
+                <p className="text-xs text-neutral-600 leading-relaxed">Our team will review and approve this contract before sending it to you for signature.</p>
               </div>
             )}
             {contract.status === 'sent' && (
-              <div className="bg-purple-50 border border-purple-200 rounded-2xl p-4 flex gap-3 items-start">
-                <FileText className="h-4 w-4 text-purple-500 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-xs font-bold text-purple-800 mb-0.5">Sent for Signature</p>
-                  <p className="text-xs text-purple-700">The client has been emailed a link to sign this contract.</p>
+              <div className="relative overflow-hidden bg-gradient-to-br from-neutral-50 to-neutral-100 border border-neutral-200/70 rounded-2xl p-5">
+                <div className="absolute top-0 left-0 w-[3px] h-full bg-gradient-to-b from-neutral-900 to-neutral-600" />
+                <div className="flex items-center gap-2.5 mb-2">
+                  <div className="w-6 h-6 rounded-full bg-neutral-900 text-white grid place-items-center">
+                    <FileText className="h-3 w-3" />
+                  </div>
+                  <p className="text-sm font-bold text-neutral-900">Sent for Signature</p>
                 </div>
+                <p className="text-xs text-neutral-600 leading-relaxed">The client has been emailed a link to sign this contract.</p>
               </div>
             )}
             {contract.status === 'signed' && (
-              <div className="bg-green-50 border border-green-200 rounded-2xl p-4 flex gap-3 items-start">
-                <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-xs font-bold text-green-800 mb-0.5">Contract Signed</p>
-                  <p className="text-xs text-green-700">This contract has been fully executed.</p>
+              <div className="relative overflow-hidden bg-neutral-900 text-white border border-neutral-800 rounded-2xl p-5">
+                <div className="flex items-center gap-2.5 mb-2">
+                  <div className="w-6 h-6 rounded-full bg-white text-neutral-900 grid place-items-center">
+                    <CheckCircle2 className="h-3 w-3" />
+                  </div>
+                  <p className="text-sm font-bold">Contract Signed</p>
                 </div>
+                <p className="text-xs text-neutral-400 leading-relaxed">This contract has been fully executed.</p>
               </div>
             )}
             {contract.status === 'rejected' && contract.metadata?.rejection_reason && (
-              <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex gap-3 items-start">
-                <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-xs font-bold text-red-800 mb-0.5">Rejected</p>
-                  <p className="text-xs text-red-700">{contract.metadata.rejection_reason}</p>
+              <div className="relative overflow-hidden bg-gradient-to-br from-neutral-50 to-neutral-100 border border-neutral-200/70 rounded-2xl p-5">
+                <div className="absolute top-0 left-0 w-[3px] h-full bg-neutral-900" />
+                <div className="flex items-center gap-2.5 mb-2">
+                  <div className="w-6 h-6 rounded-full bg-neutral-900 text-white grid place-items-center">
+                    <AlertCircle className="h-3 w-3" />
+                  </div>
+                  <p className="text-sm font-bold text-neutral-900">Rejected</p>
                 </div>
+                <p className="text-xs text-neutral-600 leading-relaxed">{contract.metadata.rejection_reason}</p>
               </div>
             )}
 
-            {/* Contract info tile */}
-            <BentoInfoCard className="p-5 relative overflow-hidden">
-              <p className="text-xs font-bold text-neutral-700 uppercase tracking-wider mb-3">Contract Info</p>
-              <div className={cn('space-y-2 text-sm transition-all duration-300', !isContractVisible && 'blur-sm select-none pointer-events-none')}>
-                <div className="flex justify-between"><span className="text-neutral-400">Version</span><span className="font-semibold">v{contract.version_number}</span></div>
-                <div className="flex justify-between"><span className="text-neutral-400">Created</span><span className="font-medium">{new Date(contract.created_at).toLocaleDateString()}</span></div>
+            {/* Contract Info — dark elegant card */}
+            <div className="relative overflow-hidden bg-neutral-900 text-white border border-neutral-800 rounded-2xl p-5 shadow-lg">
+              <div className="absolute -top-24 -right-16 w-64 h-64 rounded-full bg-white/[0.04] blur-2xl pointer-events-none" />
+              <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-500 mb-4">Contract Info</p>
+              <div className={cn('transition-all duration-300', !isContractVisible && 'blur-sm select-none pointer-events-none')}>
+                <div className="flex items-center justify-between py-2.5 border-t border-white/10 first:border-t-0 first:pt-0">
+                  <span className="text-[11px] text-neutral-500">Version</span>
+                  <span className="text-sm font-semibold">v{contract.version_number}</span>
+                </div>
+                <div className="flex items-center justify-between py-2.5 border-t border-white/10">
+                  <span className="text-[11px] text-neutral-500">Created</span>
+                  <span className="text-sm font-semibold">{new Date(contract.created_at).toLocaleDateString()}</span>
+                </div>
                 {lineItems.length > 0 ? (
                   <>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Subtotal</span><span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Tax ({taxRate}%)</span><span>${pricingTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Onsite Fee ({onsiteServiceRate}%)</span><span>${pricingOnsiteSvc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">Gratuity ({gratuityRate}%)</span><span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                    <div className="flex justify-between border-t border-neutral-100 pt-2"><span className="font-semibold text-neutral-900">Grand Total</span><span className="font-bold text-neutral-900">${pricingGrandTotal.toLocaleString()}</span></div>
-                    <div className="flex justify-between text-xs"><span className="text-neutral-400">50% Deposit</span><span>${pricingDeposit.toLocaleString()}</span></div>
+                    <div className="flex items-center justify-between py-2 border-t border-white/10 text-xs">
+                      <span className="text-neutral-500">Subtotal</span>
+                      <span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2 text-xs">
+                      <span className="text-neutral-500">Tax ({taxRate}%)</span>
+                      <span>${pricingTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2 text-xs">
+                      <span className="text-neutral-500">Onsite Fee ({onsiteServiceRate}%)</span>
+                      <span>${pricingOnsiteSvc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2 text-xs">
+                      <span className="text-neutral-500">Gratuity ({gratuityRate}%)</span>
+                      <span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2.5 border-t border-white/20 mt-1">
+                      <span className="text-xs font-semibold">Grand Total</span>
+                      <span className="text-base font-extrabold">${pricingGrandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex items-center justify-between pb-1 text-xs">
+                      <span className="text-neutral-500">50% Deposit</span>
+                      <span>${pricingDeposit.toLocaleString()}</span>
+                    </div>
                   </>
                 ) : contract.total_amount != null ? (
-                  <div className="flex justify-between border-t border-neutral-100 pt-2">
-                    <span className="font-semibold text-neutral-900">Grand Total</span>
-                    <span className="font-bold text-neutral-900">${Number(contract.total_amount).toLocaleString()}</span>
+                  <div className="flex items-center justify-between py-3 border-t border-white/20 mt-1">
+                    <span className="text-xs font-semibold">Grand Total</span>
+                    <span className="text-base font-extrabold">${Number(contract.total_amount).toLocaleString()}</span>
                   </div>
                 ) : null}
-                <div className="flex justify-between pt-1"><span className="text-neutral-400 text-xs">Contract ID</span><span className="font-mono text-xs text-neutral-400 truncate max-w-[110px]">{contract.id}</span></div>
+                <div className="flex items-center justify-between pt-2.5 mt-1 border-t border-white/10">
+                  <span className="text-[11px] text-neutral-500">Contract ID</span>
+                  <span className="font-mono text-[10px] text-neutral-400 truncate max-w-[150px]">{contract.id}</span>
+                </div>
               </div>
               {!isContractVisible && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/60 rounded-2xl">
-                  <Lock className="h-5 w-5 text-neutral-400 mb-1.5" />
-                  <p className="text-xs font-medium text-neutral-500 text-center px-4">Available once contract is sent to client</p>
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-900/95 rounded-2xl">
+                  <div className="w-8 h-8 rounded-lg bg-white/10 grid place-items-center mb-2">
+                    <Lock className="h-3.5 w-3.5 text-white/70" />
+                  </div>
+                  <p className="text-[11px] font-medium text-white/70 text-center px-6 leading-relaxed">Pricing becomes available once the contract is sent to the client</p>
                 </div>
               )}
-            </BentoInfoCard>
+            </div>
 
-            {/* #2 Client tile — with initials avatar */}
+            {/* Client */}
             {(clientName !== '—' || clientInfo.email || clientInfo.phone) && (
-              <BentoInfoCard className="p-5">
-                <p className="text-xs font-bold text-neutral-700 uppercase tracking-wider mb-3">Client</p>
+              <div className="bg-white border border-neutral-200/70 rounded-2xl p-5 shadow-sm">
+                <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-400 mb-4">Client</p>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-neutral-900 flex items-center justify-center shrink-0">
-                    <span className="text-white text-sm font-bold">
-                      {(clientName !== '—' ? clientName : 'C')
-                        .split(' ').map((n: string) => n[0] ?? '').join('').slice(0, 2).toUpperCase()}
-                    </span>
+                  <div className="w-11 h-11 rounded-xl bg-neutral-900 text-white grid place-items-center font-bold text-sm shrink-0">
+                    {(clientName !== '—' ? clientName : 'C')
+                      .split(' ').map((n: string) => n[0] ?? '').join('').slice(0, 2).toUpperCase()}
                   </div>
                   <div className="min-w-0">
-                    {clientName !== '—' && <p className="font-semibold text-neutral-900 text-sm truncate">{clientName}</p>}
-                    {clientInfo.email && <p className="text-neutral-500 text-xs truncate">{clientInfo.email}</p>}
-                    {clientInfo.phone && <p className="text-neutral-500 text-xs">{clientInfo.phone}</p>}
+                    {clientName !== '—' && <p className="text-sm font-bold text-neutral-900 truncate">{clientName}</p>}
+                    {clientInfo.email && <p className="text-xs text-neutral-500 truncate">{clientInfo.email}</p>}
+                    {clientInfo.phone && <p className="text-xs text-neutral-500">{clientInfo.phone}</p>}
                   </div>
                 </div>
-              </BentoInfoCard>
+              </div>
             )}
 
-            {/* #4 Actions tile — better hierarchy */}
-            <BentoInfoCard className="p-5 space-y-2" enableTilt={false}>
-              <p className="text-xs font-bold text-neutral-700 uppercase tracking-wider mb-3">Actions</p>
-              {isStaff && contract.pdf_path && (
-                <a href={`/api/contracts/${contract.id}/pdf`} target="_blank" rel="noopener noreferrer"
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-xl hover:bg-neutral-700 transition text-sm font-semibold">
-                  <Download className="h-4 w-4" /> Download PDF
-                </a>
-              )}
+            {/* Actions */}
+            <div className="bg-white border border-neutral-200/70 rounded-2xl p-5 shadow-sm">
+              <p className="text-[10px] font-bold tracking-[0.12em] uppercase text-neutral-400 mb-4">Actions</p>
               {project && (
                 <button onClick={() => router.push(`/projects/${project.id}`)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-neutral-200 text-neutral-700 rounded-xl hover:bg-neutral-50 transition text-sm font-medium">
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-xl hover:bg-black transition text-sm font-semibold">
                   View Project
                 </button>
               )}
-            </BentoInfoCard>
+              {isStaff && contract.pdf_path && (
+                <a href={`/api/contracts/${contract.id}/pdf`} target="_blank" rel="noopener noreferrer"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-neutral-200 text-neutral-700 rounded-xl hover:bg-neutral-50 hover:border-neutral-400 transition text-sm font-semibold mt-2">
+                  <Download className="h-4 w-4" /> Download PDF
+                </a>
+              )}
+            </div>
           </div>
-
-          {/* ── Menu & Services ── full width, prominent */}
-          {(appetizers.length > 0 || mainDishes.length > 0 || desserts.length > 0 || utensils || rentals || florals) && (
-            <BentoInfoCard className="lg:col-span-3 p-8">
-              <h2 className="text-xl font-bold text-neutral-900 mb-6">Menu & Services</h2>
-              <div className="space-y-8">
-                {appetizers.length > 0 && (
-                  <div>
-                    <p className="text-sm font-semibold text-neutral-600 mb-3 flex items-center gap-2">
-                      Appetizers / Hors d'Oeuvres
-                      <span className="text-xs font-normal text-neutral-400">({appetizers.length})</span>
-                    </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                      {appetizers.map((item, i) => <DishCard key={i} name={item} slugList={menuImageSlugs} />)}
-                    </div>
-                  </div>
-                )}
-                {mainDishes.length > 0 && (
-                  <div>
-                    <p className="text-sm font-semibold text-neutral-600 mb-3 flex items-center gap-2">
-                      Main Dishes
-                      <span className="text-xs font-normal text-neutral-400">({mainDishes.length})</span>
-                    </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                      {mainDishes.map((item, i) => <DishCard key={i} name={item} dark={true} slugList={menuImageSlugs} />)}
-                    </div>
-                  </div>
-                )}
-                {desserts.length > 0 && (
-                  <div>
-                    <p className="text-sm font-semibold text-neutral-600 mb-3 flex items-center gap-2">
-                      Desserts
-                      <span className="text-xs font-normal text-neutral-400">({desserts.length})</span>
-                    </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                      {desserts.map((item, i) => <DishCard key={i} name={item} slugList={menuImageSlugs} />)}
-                    </div>
-                  </div>
-                )}
-              </div>
-              {/* #6 Utensils/Rentals/Florals as tags */}
-              {(utensils || rentals || florals) && (
-                <div className="mt-6 pt-5 border-t border-neutral-100 flex flex-wrap gap-2">
-                  {utensils && (
-                    <span className="px-3 py-1.5 border border-neutral-200 rounded-full text-xs font-medium text-neutral-700">
-                      <span className="text-neutral-400">Utensils · </span>{utensils}
-                    </span>
-                  )}
-                  {rentals && (
-                    <span className="px-3 py-1.5 border border-neutral-200 rounded-full text-xs font-medium text-neutral-700">
-                      <span className="text-neutral-400">Rentals · </span>{rentals}
-                    </span>
-                  )}
-                  {florals && (
-                    <span className="px-3 py-1.5 border border-neutral-200 rounded-full text-xs font-medium text-neutral-700">
-                      <span className="text-neutral-400">Florals · </span>{florals}
-                    </span>
-                  )}
-                </div>
-              )}
-            </BentoInfoCard>
-          )}
-
-          {/* ── Add-ons & Requests ── 1 col */}
-          {(addons.length > 0 || specialRequests.length > 0) && (
-            <BentoInfoCard className="p-6">
-              <p className="text-xs font-bold text-neutral-700 uppercase tracking-wider mb-4">Add-ons & Requests</p>
-              {addons.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-xs text-neutral-400 font-medium mb-2">Add-ons</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {addons.map((a, i) => (
-                      <span key={i} className="px-2.5 py-1 bg-neutral-100 border border-neutral-200 rounded-full text-xs font-medium text-neutral-700">{a}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {specialRequests.length > 0 && (
-                <div className="bg-stone-50 border-l-2 border-neutral-300 rounded-xl px-4 py-3">
-                  <p className="text-xs text-neutral-400 font-medium mb-2">Special Requests</p>
-                  <ul className="space-y-1.5">
-                    {specialRequests.map((r, i) => (
-                      <li key={i} className="text-xs text-neutral-700 flex items-start gap-1.5">
-                        <span className="text-neutral-300 mt-0.5">—</span>{r}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </BentoInfoCard>
-          )}
-
-          {/* ── Contract Summary ── full width */}
-          {summary && (
-            <BentoInfoCard className="lg:col-span-3 overflow-hidden relative" enableTilt={false}>
-              {/* decorative background quotes */}
-              <span className="pointer-events-none select-none absolute -top-4 left-6 text-[160px] font-serif leading-none text-neutral-100">"</span>
-              <span className="pointer-events-none select-none absolute -bottom-8 right-6 text-[160px] font-serif leading-none text-neutral-100">"</span>
-
-              <div className="relative px-8 pt-8 pb-8">
-                <p className="flex items-center gap-1.5 text-xs text-neutral-400 font-semibold uppercase tracking-widest mb-5">
-                  <FileText className="h-3.5 w-3.5" /> Contract Summary
-                </p>
-
-                <p className="text-lg font-medium text-neutral-700 leading-relaxed whitespace-pre-wrap italic">
-                  {summary}
-                </p>
-
-                {/* footer rule */}
-                <div className="mt-6 pt-4 border-t border-neutral-100 flex items-center justify-between">
-                  <p className="text-xs text-neutral-400">
-                    v{contract.version_number} &nbsp;·&nbsp; {new Date(contract.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-                  </p>
-                  <span className={cn('inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border', statusCfg.style)}>
-                    <StatusIcon className="h-3 w-3" />
-                    {statusCfg.label}
-                  </span>
-                </div>
-              </div>
-            </BentoInfoCard>
-          )}
 
         </div>
       </div>

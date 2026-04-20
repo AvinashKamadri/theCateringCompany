@@ -1,14 +1,26 @@
 """
-LangGraph state schema for the catering intake conversation flow.
+Conversation state schema (post-rebuild).
 
-Each slot stores its value, fill status, timestamp, and full modification_history
-so that @AI changes are tracked inline (matching ai_conversation_states schema).
+The 42-node state machine is GONE. `current_node` is replaced by two fields:
+  - `conversation_phase`  — coarse progress marker (S1..S19), drives frontend UI
+  - `conversation_status` — lifecycle: active | pending_staff_review | contract_sent
+
+Every tool MUST write state through `fill_slot()`. Direct dict assignment
+breaks the Next.js frontend — it relies on the `{value, filled, modified_at,
+modification_history}` shape to render progress cards.
 """
 
-from typing import TypedDict, Annotated, Sequence, Any
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Annotated, Any, Literal, Sequence, TypedDict
+
 from langchain_core.messages import BaseMessage
 
+
+# ============================================================================
+# Slot record shape — frontend depends on this exact structure
+# ============================================================================
 
 class SlotModification(TypedDict):
     old_value: Any
@@ -23,98 +35,166 @@ class SlotData(TypedDict):
     modification_history: list[SlotModification]
 
 
+ConversationStatus = Literal["active", "pending_staff_review", "contract_sent"]
+
+
 class ConversationState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], "Conversation history"]
     conversation_id: str
     project_id: str
     thread_id: str
-    current_node: str
+    # Phase marker — frontend uses this for progress display. Replaces current_node.
+    conversation_phase: str
+    # Lifecycle — controls whether the orchestrator will route at all.
+    conversation_status: ConversationStatus
     slots: dict[str, SlotData]
-    next_action: str
-    error: str | None
     contract_data: dict | None
     is_complete: bool
-    dietary_conflict_attempts: int  # tracks conflict re-asks to cap the loop at 2
+    error: str | None
 
 
-# All slots in the full catering flow
-SLOT_NAMES = [
-    # Basic info
-    "name",              # First and last name
-    "email",             # Email address
-    "phone",             # Phone number
-    "event_date",        # Event date
-    "service_type",      # drop-off or on-site
-    "event_type",        # Wedding, Corporate, Birthday, Social, Custom
-    "partner_name",      # Fiancé/partner name (weddings only)
-    "company_name",      # Company name (corporate only)
-    "honoree_name",      # Whose birthday/celebration (birthday only)
-    "venue",             # Venue details
-    "guest_count",       # Approximate guest count
-    "service_style",     # cocktail hour, reception, both
-    # Menu building
-    "meal_style",        # Buffet or Plated (wedding only)
-    "selected_dishes",   # List of 3-5 main dishes
-    "appetizers",        # List of appetizers or None
-    "appetizer_style",   # Passed or Station
-    "menu_notes",        # Special menu design notes
-    # Add-ons
-    "tableware",         # Disposable / Premium Disposable / China
-    "utensils",          # Utensil selections or "no"
-    "desserts",          # Dessert selections or "no"
-    "drinks",            # Drinks: water/tea/lemonade + coffee/bar add-ons
-    "rentals",           # linen/table/chair selections or "no"
-    "labor",             # Labor services (setup, cleanup, bartending, travel)
-    # Final details
-    "special_requests",  # Special requests or "none"
-    "dietary_concerns",  # Health and dietary concerns
-    "additional_notes",  # Anything else
-    "followup_call",     # Yes/no + preferred time
+# ============================================================================
+# Slot registry — MUST match Section 6 of AGENT_SPEC.md exactly
+# ============================================================================
+# Order here is informational only. Fill order is determined by the orchestrator,
+# not by list index. Typos here break the frontend silently — triple-check.
+
+SLOT_NAMES: list[str] = [
+    # --- Basic info (BasicInfoTool) ---
+    "name",
+    "email",
+    "phone",
+    "event_type",
+    "event_date",
+    "venue",
+    "guest_count",
+    "partner_name",
+    "company_name",
+    "honoree_name",
+    "service_type",
+
+    # --- Menu (MenuSelectionTool) ---
+    "cocktail_hour",
+    "service_style",
+    "appetizers",
+    "appetizer_style",
+    "meal_style",
+    "selected_dishes",
+    "custom_menu",
+    "desserts",
+    "wedding_cake",
+    "menu_notes",
+
+    # --- Add-ons (AddOnsTool) ---
+    "drinks",
+    "bar_service",
+    "bar_package",
+    "bartender",
+    "coffee_service",
+    "tableware",
+    "utensils",
+    "linens",
+    "rentals",
+    "labor_ceremony_setup",
+    "labor_table_setup",
+    "labor_table_preset",
+    "labor_cleanup",
+    "labor_trash",
+    "travel_fee",
+
+    # --- Finalization (FinalizationTool) ---
+    "special_requests",
+    "dietary_concerns",
+    "additional_notes",
+    "followup_call_requested",
 ]
 
 
+# Required-for-contract slot set. Drives the "can we move to review?" gate.
+REQUIRED_SLOTS: set[str] = {
+    "name",
+    "email",
+    "phone",
+    "event_type",
+    "event_date",
+    "guest_count",
+    "service_type",
+    "meal_style",
+    "selected_dishes",
+    "tableware",
+}
+
+# Slots that the frontend must NOT treat as user-modifiable.
+LOCKED_SLOTS: set[str] = {"bartender", "conversation_status"}
+
+
+# ============================================================================
+# Phases (coarse progress markers) — S1..S19 from AGENT_SPEC.md Section 3
+# ============================================================================
+
+PHASE_GREETING = "S1_greeting"
+PHASE_EVENT_TYPE = "S2_event_type"
+PHASE_CONDITIONAL_FOLLOWUP = "S3_conditional"
+PHASE_WEDDING_CAKE = "S3b_wedding_cake"
+PHASE_SERVICE_TYPE = "S4_service_type"
+PHASE_EVENT_DATE = "S5_event_date"
+PHASE_VENUE = "S6_venue"
+PHASE_GUEST_COUNT = "S7_guest_count"
+PHASE_TRANSITION = "S8_transition"
+PHASE_COCKTAIL = "S9_cocktail_hour"
+PHASE_MAIN_MENU = "S10_main_menu"
+PHASE_DESSERT = "S11_dessert"
+PHASE_DRINKS_BAR = "S12_drinks_bar"
+PHASE_TABLEWARE = "S13_tableware"
+PHASE_RENTALS = "S14_rentals"
+PHASE_LABOR = "S15_labor"
+PHASE_SPECIAL_REQUESTS = "S16_special_requests"
+PHASE_DIETARY = "S17_dietary"
+PHASE_FOLLOWUP = "S18_followup"
+PHASE_REVIEW = "S19_review"
+PHASE_COMPLETE = "complete"
+
+
+# ============================================================================
+# Slot helpers
+# ============================================================================
+
 def initialize_empty_slots() -> dict[str, SlotData]:
-    """Create empty slot structure for a new conversation."""
-    return {
-        name: {
+    """Create the empty slot dictionary for a brand-new conversation."""
+    empty: dict[str, SlotData] = {}
+    for name in SLOT_NAMES:
+        empty[name] = {
             "value": None,
             "filled": False,
             "modified_at": None,
             "modification_history": [],
         }
-        for name in SLOT_NAMES
-    }
+    return empty
 
 
 def fill_slot(slots: dict, name: str, value: Any) -> dict:
-    """
-    Fill a slot with a value and timestamp.
-    If the slot already had a value, record it in modification_history.
+    """Write a slot. ALWAYS use this — never write to `slots[name]` directly.
 
-    Guards: silently rejects None, empty string, and LLM null-string variants
-    (e.g. "null", "N/A", "undefined") so a bad extraction can never mark a
-    slot as filled with a garbage value.
+    Preserves modification_history and timestamps so the frontend can render
+    edit-over-time views without extra plumbing.
     """
-    # Inline null guard — mirrors is_null_extraction() without creating a
-    # circular import between state.py and helpers.py.
-    _NULL_STRINGS = {
-        "none", "null", "nil", "n/a", "na", "undefined",
-        "not found", "not available", "unknown", "not specified",
-        "not provided", "not mentioned", "not given", "not stated",
-        "-", "--", "—",
-    }
-    if value is None:
-        return slots
-    if isinstance(value, str) and (not value.strip() or value.strip().lower() in _NULL_STRINGS):
-        return slots
+    if name not in slots:
+        # Unknown slot — create the empty shell first. Keeps tools resilient
+        # against forgotten registry entries, but the registry check in
+        # ModificationTool will still reject typos before they reach here.
+        slots[name] = {
+            "value": None,
+            "filled": False,
+            "modified_at": None,
+            "modification_history": [],
+        }
 
+    existing = slots[name]
     now = datetime.now().isoformat()
-    existing = slots.get(name, {})
     old_value = existing.get("value") if existing.get("filled") else None
     history = list(existing.get("modification_history", []))
 
-    # If overwriting an existing value, log the change
-    if old_value is not None and old_value != value:
+    if existing.get("filled") and old_value != value:
         history.append({
             "old_value": old_value,
             "new_value": value,
@@ -130,42 +210,87 @@ def fill_slot(slots: dict, name: str, value: Any) -> dict:
     return slots
 
 
+def clear_slot(slots: dict, name: str) -> dict:
+    """Reset a slot to empty — used by the cascade map (Section 7)."""
+    if name not in slots:
+        return slots
+    now = datetime.now().isoformat()
+    existing = slots[name]
+    old_value = existing.get("value") if existing.get("filled") else None
+    history = list(existing.get("modification_history", []))
+    if old_value is not None:
+        history.append({
+            "old_value": old_value,
+            "new_value": None,
+            "timestamp": now,
+        })
+    slots[name] = {
+        "value": None,
+        "filled": False,
+        "modified_at": now,
+        "modification_history": history,
+    }
+    return slots
+
+
 def get_slot_value(slots: dict, name: str) -> Any:
-    """Get the value of a slot, or None if not filled."""
     slot = slots.get(name, {})
     return slot.get("value") if slot.get("filled") else None
 
 
-# Node flow sequence - defines the order of conversation nodes
-NODE_SEQUENCE = [
-    "start",
-    "collect_name",
-    "collect_event_date",
-    "select_service_type",
-    "select_event_type",
-    "wedding_message",       # conditional: only for weddings
-    "collect_venue",
-    "collect_guest_count",
-    "select_service_style",
-    # Menu building
-    "select_dishes",
-    "ask_appetizers",
-    "select_appetizers",     # conditional: only if yes
-    "menu_design",
-    "ask_menu_changes",
-    "collect_menu_changes",  # conditional: only if yes
-    # Add-ons
-    "ask_utensils",
-    "select_utensils",       # conditional: only if yes
-    "ask_desserts",
-    "select_desserts",       # conditional: only if yes
-    "ask_more_desserts",     # conditional: only if yes
-    "ask_rentals",
-    # Final
-    "ask_special_requests",
-    "collect_special_requests",  # conditional: only if yes
-    "collect_dietary",
-    "ask_anything_else",
-    "collect_anything_else",     # conditional: only if yes
-    "generate_contract",
+def is_filled(slots: dict, name: str) -> bool:
+    return bool(slots.get(name, {}).get("filled"))
+
+
+def filled_slot_summary(slots: dict) -> dict[str, Any]:
+    """Compact {name: value} view of filled slots for the orchestrator prompt."""
+    return {
+        name: slot["value"]
+        for name, slot in slots.items()
+        if slot.get("filled") and not name.startswith("__")
+    }
+
+
+def unfilled_required(slots: dict) -> list[str]:
+    """Which REQUIRED_SLOTS are still empty — drives routing prompt context."""
+    return [name for name in REQUIRED_SLOTS if not is_filled(slots, name)]
+
+
+__all__ = [
+    "ConversationState",
+    "ConversationStatus",
+    "SlotData",
+    "SlotModification",
+    "SLOT_NAMES",
+    "REQUIRED_SLOTS",
+    "LOCKED_SLOTS",
+    "initialize_empty_slots",
+    "fill_slot",
+    "clear_slot",
+    "get_slot_value",
+    "is_filled",
+    "filled_slot_summary",
+    "unfilled_required",
+    # phases
+    "PHASE_GREETING",
+    "PHASE_EVENT_TYPE",
+    "PHASE_CONDITIONAL_FOLLOWUP",
+    "PHASE_WEDDING_CAKE",
+    "PHASE_SERVICE_TYPE",
+    "PHASE_EVENT_DATE",
+    "PHASE_VENUE",
+    "PHASE_GUEST_COUNT",
+    "PHASE_TRANSITION",
+    "PHASE_COCKTAIL",
+    "PHASE_MAIN_MENU",
+    "PHASE_DESSERT",
+    "PHASE_DRINKS_BAR",
+    "PHASE_TABLEWARE",
+    "PHASE_RENTALS",
+    "PHASE_LABOR",
+    "PHASE_SPECIAL_REQUESTS",
+    "PHASE_DIETARY",
+    "PHASE_FOLLOWUP",
+    "PHASE_REVIEW",
+    "PHASE_COMPLETE",
 ]

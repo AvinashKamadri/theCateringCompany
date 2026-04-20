@@ -106,6 +106,7 @@ export default function ContractDetailPage() {
   const [breakdowns, setBreakdowns] = useState<Record<string, LineItemBreakdown>>({});
   const [expandedLines, setExpandedLines] = useState<Record<number, boolean>>({});
 
+
   useEffect(() => {
     const controller = new AbortController();
     apiClient.get(`/contracts/${contractId}`, { signal: controller.signal })

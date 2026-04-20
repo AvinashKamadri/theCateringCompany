@@ -78,55 +78,49 @@ Emerald for normal, amber for "has allergens". See the breakdown render block in
 
 ---
 
-## What's pending on the frontend
+## Deliverables
 
-These are the surfaces the backend is **ready for** but no UI exists yet:
+These are the surfaces the backend is **ready for** — your job is to build the UI.
+
+---
 
 ### 1. Conversation summary display
-Backend now populates `projects.conversation_summary` (string) and a `project_summaries` history table when a contract is created.
+**File:** [frontend/app/(dashboard)/projects/[id]/page.tsx](../frontend/app/(dashboard)/projects/[id]/page.tsx)
 
-**Where to add:** [frontend/app/(dashboard)/projects/[id]/page.tsx](../frontend/app/(dashboard)/projects/[id]/page.tsx) — new `BentoInfoCard` labeled "AI Summary". Render `project.conversation_summary` if present. Optional: "View history" link → list from `project_summaries` (you'll need a new backend endpoint `GET /api/projects/:id/summaries`; flag this if you hit it).
+Add a new `BentoInfoCard` labeled **"AI Summary"** that renders `project.conversation_summary`.
 
-Notes:
-- Summary is populated by an async worker, so the field may be `null` for ~30s after contract creation. Show a subtle "Summary being generated…" spinner when `contract exists && !conversation_summary`.
-- Expose `conversation_summary` from `projectsApi.getProject` — check `Project` interface at top of the project page file.
+- Summary is populated async by a worker ~30s after contract creation. Show a subtle "Summary being generated…" spinner when `contract exists && !conversation_summary`.
+- Expose `conversation_summary` on the `Project` interface at the top of the file.
+- Optional: "View history" link → list from `project_summaries`. You'll need to add `GET /api/projects/:id/summaries` to the backend — flag this if you get there.
+
+---
 
 ### 2. Invoices / payment-schedule UI
-Payment reminders are now firing but there's no UI to **view** what was sent or the overall payment schedule per project.
+**Files:** new route `frontend/app/(dashboard)/invoices/page.tsx` (staff) + a payment section on the project detail page.
 
-**Where to add:** new route `/invoices` (staff) + per-project section on the project detail page.
-- List endpoint needed: `GET /api/payments/schedules?project_id=...` (may need to add to backend — flag if missing).
-- For each `payment_schedule_items` row show: label, amount, due_date, status, `last_reminder_sent_at`, `overdue_notified_at`.
-- Add "Send reminder now" button that calls `POST /api/payments/reminders/run` (currently global — if per-item reminders are wanted, we'll add `POST /api/payments/schedule-items/:id/remind`).
+Display all `payment_schedule_items` per project: label, amount, due date, status, last reminder sent, overdue flag.
+
+- Fetch from `GET /api/payments/schedules?project_id=...` — this endpoint may need to be added to the backend, flag if missing.
+- "Send reminder now" button → `POST /api/payments/reminders/run` (currently global sweep; if per-item is needed we'll add `POST /api/payments/schedule-items/:id/remind`).
+
+---
 
 ### 3. Nutrition / macros on dishes
-The schema tracks `calories_per_100g`, `carbs/protein/fat_g_per_100g`, and `dish_ingredients.weight_g` per ingredient. No UI currently aggregates macros per dish or per menu item.
+**File:** [frontend/app/(dashboard)/inventory/page.tsx](../frontend/app/(dashboard)/inventory/page.tsx) — dishes tab.
 
-**Where to add:** [inventory/page.tsx](../frontend/app/(dashboard)/inventory/page.tsx) dishes tab — show computed totals next to each dish. Client-side computation is fine:
+Show computed macro totals next to each dish. Client-side calculation:
 ```ts
 const totalCals = dish.dish_ingredients.reduce((sum, di) =>
   sum + (Number(di.ingredients.calories_per_100g ?? 0) * Number(di.weight_g ?? 0) / 100), 0);
 ```
-
-### 4. Waste logs view
-Staff can now **log** waste (Project detail → Food Waste tile). There's no **view** yet.
-
-**Where to add:** a new tab or section on `/inventory` that lists recent `ingredient_stock_log` entries with `source='waste'`, joined to the project. Use `GET /api/inventory/stock-log` (already exists; filter client-side by source or ask backend to add a `?source=waste` filter).
+Fields available: `calories_per_100g`, `carbs_g_per_100g`, `protein_g_per_100g`, `fat_g_per_100g`, `dish_ingredients.weight_g`.
 
 ---
 
-## Local dev
-Standard 4-terminal setup (see [docs/reference_commands.md in memory or README](../README.md)):
-1. `docker compose up -d postgres redis`
-2. SSH tunnel to RDS on :5433 if using prod data
-3. `cd backend && npm run start:dev`
-4. `cd frontend && npm run dev`
+### 4. Waste logs view
+**File:** [frontend/app/(dashboard)/inventory/page.tsx](../frontend/app/(dashboard)/inventory/page.tsx) — add a third "Waste Logs" tab.
 
-After schema changes land, restart the backend (Prisma client regenerates automatically via `postinstall`).
+List recent `ingredient_stock_log` entries where `source = 'waste'`, joined to the project name.
 
-## Type-check before pushing
-```bash
-cd frontend && npx tsc --noEmit
-cd ../backend && npx tsc --noEmit
-```
-Both currently clean.
+- Use `GET /api/inventory/stock-log`. Filter by `?source=waste` if the backend supports it, otherwise filter client-side.
+- Show: ingredient name, quantity lost, project name (if linked), logged date, notes.

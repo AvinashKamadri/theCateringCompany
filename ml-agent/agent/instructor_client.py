@@ -35,7 +35,7 @@ if not _api_key:
 
 
 # ---- Pinned model snapshots (env-overridable) ------------------------------
-MODEL_EXTRACT  = os.getenv("ML_MODEL_EXTRACT",  "gpt-5.4-nano-2026-03-17")
+MODEL_EXTRACT  = os.getenv("ML_MODEL_EXTRACT",  "gpt-5.4-mini-2026-03-17")
 MODEL_ROUTER   = os.getenv("ML_MODEL_ROUTER",   "gpt-5.4-2026-03-05")
 MODEL_RESPONSE = os.getenv("ML_MODEL_RESPONSE", "gpt-5.4-2026-03-05")
 MODEL_WARMUP   = os.getenv("ML_MODEL_WARMUP",   MODEL_EXTRACT)
@@ -57,6 +57,10 @@ def _build_json_schema(schema: Type[T]) -> dict[str, object]:
     """Convert a Pydantic model into a strict JSON schema payload."""
     json_schema = schema.model_json_schema()
     json_schema.pop("title", None)
+    json_schema["additionalProperties"] = False
+    # Ensure all properties are in required array for strict mode
+    if "properties" in json_schema:
+        json_schema["required"] = list(json_schema["properties"].keys())
     return json_schema
 
 
@@ -75,10 +79,12 @@ def _text_format_for_schema(schema: Type[T]) -> dict[str, object]:
 def _build_function_tool_def(schema: Type[T]) -> dict[str, object]:
     return {
         "type": "function",
-        "name": schema.__name__,
-        "description": (schema.__doc__ or "").strip().split("\n")[0],
-        "parameters": _build_json_schema(schema),
-        "strict": True,
+        "function": {
+            "name": schema.__name__,
+            "description": (schema.__doc__ or "").strip().split("\n")[0],
+            "parameters": _build_json_schema(schema),
+            "strict": True,
+        }
     }
 
 

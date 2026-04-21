@@ -87,7 +87,7 @@ def build_openai_request_tags(
         ctx.get("phase", "-"),
         ctx.get("target", "-"),
     ]
-    prompt_cache_key = "|".join(cache_bits)[:256]
+    prompt_cache_key = "|".join(cache_bits)[:64]
 
     principal = ctx.get("user_id") or ctx.get("author_id") or ctx.get("thread_id") or "anonymous"
     safety_identifier = "catering_" + hashlib.sha256(principal.encode("utf-8")).hexdigest()[:32]

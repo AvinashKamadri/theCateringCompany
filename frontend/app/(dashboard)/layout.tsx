@@ -28,7 +28,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen bg-neutral-50">
       <AppNav />
-      <main className="pt-14">
+      <main className="pt-20">
         <div key={pathname} className="tc-page-enter">{children}</div>
       </main>
     </div>

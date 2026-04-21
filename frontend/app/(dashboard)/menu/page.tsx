@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, UtensilsCrossed, ChevronRight, AlertCircle, Leaf } from 'lucide-react';
+import { UtensilsCrossed, ChevronRight, AlertCircle, Leaf } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { RoleGuard } from '@/components/auth/RoleGuard';
 
@@ -79,22 +79,15 @@ function MenuPageContent() {
   }, [items]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center gap-4">
-            <Link href="/chat" className="text-gray-600 hover:text-gray-900 transition">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Our Menus</h1>
-              <p className="text-sm text-gray-600 mt-1">Explore our catering options — dishes, ingredients, allergens.</p>
-            </div>
-          </div>
-        </div>
+    <div className="max-w-7xl mx-auto px-6 py-8">
+      <header className="mb-8">
+        <h1 className="text-2xl font-bold text-neutral-900">Our Menus</h1>
+        <p className="text-sm text-neutral-600 mt-1">
+          Explore our catering options — dishes, ingredients, allergens.
+        </p>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main>
         {err && (
           <div className="mb-6 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
             <AlertCircle className="h-4 w-4" /> {err}
@@ -111,32 +104,39 @@ function MenuPageContent() {
 
         {byCategory.map((cat) => (
           <section key={cat.name} className="mb-10">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <UtensilsCrossed className="w-4 h-4 text-gray-500" />
-              {cat.name}
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-neutral-900 flex items-center gap-2">
+                <UtensilsCrossed className="w-4 h-4 text-neutral-500" />
+                {cat.name}
+              </h2>
+              <span className="text-xs text-neutral-500">
+                {cat.items.length} item{cat.items.length === 1 ? '' : 's'}
+              </span>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {cat.items.map((item) => (
                 <div
                   key={item.id}
-                  className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition"
+                  className="bg-white rounded-xl shadow-sm border border-neutral-200 overflow-hidden hover:shadow-md hover:border-neutral-300 transition"
                 >
                   <div className="p-5">
                     <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h3 className="text-base font-semibold text-gray-900">{item.name}</h3>
+                      <div className="min-w-0">
+                        <h3 className="text-base font-semibold text-neutral-900">{item.name}</h3>
                         {item.tags.length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1">
+                          <div className="mt-1.5 flex flex-wrap gap-1">
                             {item.tags.map((t) => (
-                              <span key={t} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">
+                              <span key={t} className="px-1.5 py-0.5 bg-neutral-100 text-neutral-600 text-xs rounded">
                                 {t}
                               </span>
                             ))}
                           </div>
                         )}
                       </div>
-                      <div className="text-sm font-semibold text-gray-900 whitespace-nowrap">{price(item)}</div>
+                      <div className="text-sm font-semibold text-neutral-900 whitespace-nowrap px-2.5 py-1 bg-neutral-50 border border-neutral-200 rounded-md">
+                        {price(item)}
+                      </div>
                     </div>
 
                     {item.menu_item_dishes.length > 0 && (
@@ -211,3 +211,4 @@ function MenuPageContent() {
     </div>
   );
 }
+

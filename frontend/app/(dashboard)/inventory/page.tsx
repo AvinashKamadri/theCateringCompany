@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { RoleGuard } from '@/components/auth/RoleGuard';
 import { apiClient } from '@/lib/api/client';
 import {
@@ -12,6 +13,7 @@ import {
   AlertCircle,
   X,
   Link2,
+  Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -97,6 +99,9 @@ function InventoryContent() {
     reload();
   }, []);
 
+  const dishesWithRecipe = dishes.filter((d) => d.dish_ingredients.length > 0).length;
+  const dishesMissingRecipe = dishes.length - dishesWithRecipe;
+
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
       <header className="flex items-center justify-between mb-6">
@@ -107,6 +112,13 @@ function InventoryContent() {
           </p>
         </div>
       </header>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <StatCard label="Ingredients" value={ingredients.length} hint="raw inputs" />
+        <StatCard label="Dishes" value={dishes.length} hint="reusable cooked items" />
+        <StatCard label="With recipe" value={dishesWithRecipe} hint="dishes linked to ingredients" accent="emerald" />
+        <StatCard label="Missing recipe" value={dishesMissingRecipe} hint="need ingredient links" accent={dishesMissingRecipe > 0 ? 'amber' : undefined} />
+      </div>
 
       <div className="flex gap-1 p-1 mb-6 bg-neutral-100 rounded-lg w-fit">
         <button
@@ -187,6 +199,32 @@ function InventoryContent() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── StatCard ──────────────────────────────────────────────────────────────
+
+function StatCard({
+  label,
+  value,
+  hint,
+  accent,
+}: {
+  label: string;
+  value: number;
+  hint?: string;
+  accent?: 'emerald' | 'amber';
+}) {
+  const accentCls =
+    accent === 'emerald' ? 'text-emerald-700'
+    : accent === 'amber' ? 'text-amber-700'
+    : 'text-neutral-900';
+  return (
+    <div className="bg-white rounded-xl border border-neutral-200 px-4 py-3">
+      <div className="text-xs font-medium text-neutral-500">{label}</div>
+      <div className={cn('text-2xl font-semibold mt-0.5', accentCls)}>{value}</div>
+      {hint && <div className="text-xs text-neutral-400 mt-0.5">{hint}</div>}
     </div>
   );
 }
@@ -325,13 +363,19 @@ function DishesTab({
 
   return (
     <div>
-      <div className="mb-3">
-        <input
-          placeholder="Filter dishes…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="w-full sm:w-80 px-3 py-2 text-sm border border-neutral-200 rounded-md focus:outline-none focus:ring-2 focus:ring-black/10"
-        />
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400 pointer-events-none" />
+          <input
+            placeholder="Filter dishes…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 text-sm border border-neutral-200 rounded-md focus:outline-none focus:ring-2 focus:ring-black/10"
+          />
+        </div>
+        <span className="text-xs text-neutral-500 whitespace-nowrap">
+          {filtered.length} of {dishes.length}
+        </span>
       </div>
 
       {filtered.length === 0 ? (
@@ -342,21 +386,34 @@ function DishesTab({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filtered.map((dish) => (
-            <div key={dish.id} className="bg-white rounded-xl border border-neutral-200 p-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-neutral-900">{dish.name}</h3>
+          {filtered.map((dish) => {
+            const hasRecipe = dish.dish_ingredients.length > 0;
+            return (
+            <div key={dish.id} className="bg-white rounded-xl border border-neutral-200 p-4 hover:border-neutral-300 transition">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-neutral-900 truncate">{dish.name}</h3>
+                    {hasRecipe && (
+                      <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] rounded uppercase tracking-wide shrink-0">
+                        recipe
+                      </span>
+                    )}
+                  </div>
                   {dish.menu_item_dishes.length > 0 && (
-                    <div className="text-xs text-neutral-500 mt-0.5">
-                      Appears in {dish.menu_item_dishes.length} menu item
-                      {dish.menu_item_dishes.length === 1 ? '' : 's'}
+                    <div className="text-xs text-neutral-500 mt-1">
+                      {dish.menu_item_dishes
+                        .slice(0, 2)
+                        .map((m) => m.menu_items.name)
+                        .join(', ')}
+                      {dish.menu_item_dishes.length > 2 &&
+                        ` +${dish.menu_item_dishes.length - 2} more`}
                     </div>
                   )}
                 </div>
                 <button
                   onClick={() => onLinkIngredient(dish)}
-                  className="flex items-center gap-1 px-2.5 py-1 text-xs bg-neutral-100 hover:bg-neutral-200 rounded-md"
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs bg-neutral-100 hover:bg-neutral-200 rounded-md shrink-0"
                 >
                   <Link2 className="h-3 w-3" />
                   Add ingredient
@@ -391,7 +448,8 @@ function DishesTab({
                 </ul>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -409,8 +467,11 @@ function ModalShell({
   onClose: () => void;
   children: React.ReactNode;
 }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-100">
           <h3 className="text-sm font-semibold text-neutral-900">{title}</h3>
@@ -420,7 +481,8 @@ function ModalShell({
         </div>
         <div className="p-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -72,13 +72,13 @@ export function AppNav() {
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-sm font-medium transition-colors',
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-sm font-medium transition-colors whitespace-nowrap',
                   isActive
                     ? 'bg-black text-white'
                     : 'text-neutral-600 hover:text-black hover:bg-neutral-100'
                 )}
               >
-                <item.icon className="h-3.5 w-3.5" />
+                <item.icon className="h-3.5 w-3.5 shrink-0" />
                 {item.name}
               </Link>
             );

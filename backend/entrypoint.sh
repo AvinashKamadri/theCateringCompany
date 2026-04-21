@@ -2,7 +2,7 @@
 set -e
 
 echo "[entrypoint] Running Prisma migrations..."
-npx prisma migrate deploy
+npx prisma db push --skip-generate
 
 echo "[entrypoint] Starting NestJS API..."
 exec node dist/main

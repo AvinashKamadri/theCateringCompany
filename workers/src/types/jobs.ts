@@ -36,3 +36,11 @@ export interface PricingJobData extends BaseJobData {
   projectPricingId: string;
   changeOrderId?: string;
 }
+
+export interface GmailSyncJobData extends BaseJobData {
+  historyId?: string;
+  webhookEventId?: string;
+}
+
+export interface GmailFullSyncJobData extends BaseJobData {
+}

@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Param,
+  Query,
   Req,
   Headers,
   HttpCode,
@@ -33,6 +34,18 @@ export class WebhooksController {
   async handleDocuSealWebhook(@Req() req: Request) {
     const rawBody = (req as any).rawBody as Buffer;
     await this.webhooksService.handleDocuSealWebhook(rawBody);
+    return { received: true };
+  }
+
+  @Public()
+  @Post('gmail')
+  @HttpCode(HttpStatus.OK)
+  async handleGmailPubSub(
+    @Req() req: Request,
+    @Query('secret') secret: string,
+  ) {
+    const rawBody = (req as any).rawBody as Buffer;
+    await this.webhooksService.handleGmailPubSubWebhook(rawBody, secret);
     return { received: true };
   }
 

@@ -17,6 +17,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { SocketsModule } from './sockets/sockets.module';
 import { OpenSignModule } from './opensign/opensign.module';
 import { CrmModule } from './crm/crm.module';
+import { GmailModule } from './gmail/gmail.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { CrmModule } from './crm/crm.module';
     SocketsModule,
     OpenSignModule,
     CrmModule,
+    GmailModule,
   ],
   providers: [
     { provide: APP_GUARD,  useClass: JwtAuthGuard },

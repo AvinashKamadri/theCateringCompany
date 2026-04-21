@@ -322,7 +322,17 @@ export class ProjectsService {
     if (role === 'owner') throw new ForbiddenException('Cannot assign owner role via this endpoint');
 
     const target = await this.prisma.users.findUnique({ where: { email } });
-    if (!target) throw new NotFoundException(`No user found with email ${email}`);
+
+    if (!target) {
+      // User hasn't signed up yet — store a pending invitation so the email pipeline
+      // and future signup can link their emails to this project automatically
+      await this.prisma.pending_invitations.upsert({
+        where: { project_id_invited_email: { project_id: projectId, invited_email: email } },
+        create: { project_id: projectId, invited_email: email, invited_by: requestingUserId, status: 'pending' },
+        update: { status: 'pending' },
+      });
+      return { user_id: null, email, role, pending: true };
+    }
 
     // Check if already a member
     const existing = await this.prisma.project_collaborators.findUnique({
@@ -424,6 +434,19 @@ export class ProjectsService {
         added_by: projectRecord?.owner_user_id ?? userId,
       },
     });
+
+    // Retroactively link email_chunks that arrived before this user signed up
+    const joiningUser = await this.prisma.users.findUnique({ where: { id: userId }, select: { email: true } });
+    if (joiningUser?.email) {
+      await this.prisma.email_chunks.updateMany({
+        where: { client_email: joiningUser.email, project_id: null },
+        data: { project_id: project.id },
+      });
+      await this.prisma.pending_invitations.updateMany({
+        where: { project_id: project.id, invited_email: joiningUser.email },
+        data: { status: 'accepted' },
+      }).catch(() => {});
+    }
 
     return { project, role: 'collaborator', already_member: false };
   }

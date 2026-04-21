@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { JobQueueService } from '../job_queue/job-queue.service';
@@ -191,5 +191,89 @@ export class WebhooksService {
         this.logger.log(`✅ Project ${contract.project_id} advanced to "confirmed" after contract signing`);
       }
     }
+  }
+
+  async handleGmailPubSubWebhook(rawBody: Buffer, secret: string): Promise<void> {
+    const expectedSecret = this.config.get<string>('GMAIL_PUBSUB_HMAC_SECRET');
+    if (!expectedSecret || secret !== expectedSecret) {
+      this.logger.warn('Gmail Pub/Sub webhook: invalid secret');
+      throw new UnauthorizedException('Invalid secret');
+    }
+
+    let payload: any;
+    try {
+      payload = JSON.parse(rawBody.toString());
+    } catch {
+      this.logger.warn('Gmail Pub/Sub webhook: invalid JSON body');
+      return;
+    }
+
+    const messageData = payload?.message?.data;
+    if (!messageData) {
+      this.logger.warn('Gmail Pub/Sub webhook: no message data');
+      return;
+    }
+
+    let gmailNotification: any;
+    try {
+      gmailNotification = JSON.parse(Buffer.from(messageData, 'base64').toString());
+    } catch {
+      this.logger.warn('Gmail Pub/Sub webhook: could not decode message data');
+      return;
+    }
+
+    const emailAddress: string | undefined = gmailNotification?.emailAddress;
+    const historyId: string | undefined = gmailNotification?.historyId
+      ? String(gmailNotification.historyId)
+      : undefined;
+
+    if (!emailAddress || !historyId) {
+      this.logger.warn('Gmail Pub/Sub webhook: missing emailAddress or historyId');
+      return;
+    }
+
+    // Dedup — skip if we already processed this exact payload
+    const idempotencyHash = createHash('sha256').update(rawBody).digest('hex');
+    const existing = await this.prisma.webhook_events.findFirst({
+      where: { idempotency_hash: idempotencyHash },
+    });
+    if (existing) {
+      this.logger.log(`Gmail Pub/Sub: duplicate webhook (hash ${idempotencyHash}), skipping`);
+      return;
+    }
+
+    // Find the OAuth account that owns this Gmail address
+    const oauthAccount = await this.prisma.oauth_accounts.findFirst({
+      where: {
+        provider: 'google',
+        raw_profile: { path: ['email'], equals: emailAddress },
+      },
+    });
+
+    if (!oauthAccount) {
+      this.logger.warn(`Gmail Pub/Sub: no OAuth account found for ${emailAddress}`);
+      return;
+    }
+
+    const webhookEvent = await this.prisma.webhook_events.create({
+      data: {
+        provider: 'gmail',
+        external_event_id: payload?.message?.messageId,
+        event_type: 'gmail.push',
+        payload,
+        idempotency_hash: idempotencyHash,
+        status: 'pending',
+      },
+    });
+
+    await this.jobQueue.send('gmail-sync', {
+      userId: oauthAccount.user_id,
+      historyId,
+      webhookEventId: webhookEvent.id,
+    });
+
+    this.logger.log(
+      `Gmail Pub/Sub: enqueued gmail-sync for user ${oauthAccount.user_id}, historyId: ${historyId}`,
+    );
   }
 }

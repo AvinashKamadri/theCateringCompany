@@ -34,6 +34,83 @@ export class AuthService {
     const existingUser = await this.prisma.users.findUnique({
       where: { email },
     });
+
+    // User was auto-created by the email pipeline (no password) — upgrade to full account
+    if (existingUser && !existingUser.password_hash) {
+      const passwordHash = await argon2.hash(password);
+      const isStaff = email.endsWith('@catering-company.com');
+      const roleId = isStaff ? 'staff' : 'host';
+      const profileType = isStaff ? 'staff' : 'client';
+
+      const upgradedUser = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.users.update({
+          where: { id: existingUser.id },
+          data: { password_hash: passwordHash, primary_phone: profile?.primary_phone ?? null },
+        });
+
+        const existingProfile = await tx.user_profiles.findFirst({
+          where: { user_id: existingUser.id },
+        });
+        if (!existingProfile && (profile?.first_name || profile?.last_name)) {
+          await tx.user_profiles.create({
+            data: {
+              user_id: existingUser.id,
+              profile_type: profileType,
+              metadata: { first_name: profile?.first_name ?? '', last_name: profile?.last_name ?? '' },
+            },
+          });
+        }
+
+        const existingRole = await tx.user_roles.findFirst({ where: { user_id: existingUser.id } });
+        if (!existingRole) {
+          await tx.user_roles.create({
+            data: { user_id: existingUser.id, role_id: roleId, scope_type: 'global', scope_id: null },
+          });
+        }
+
+        return updated;
+      });
+
+      const { accessToken, refreshToken } =
+        await this.createSessionAndTokens(upgradedUser.id, upgradedUser.email);
+
+      let joinedProject: { id: string; title: string; role: string } | null = null;
+      if (projectCode) {
+        try {
+          const shortHex = projectCode.slice(-8).toLowerCase();
+          if (/^[0-9a-f]{8}$/.test(shortHex)) {
+            const rows = await this.prisma.$queryRaw<{ id: string; title: string }[]>`
+              SELECT id, title FROM projects
+              WHERE deleted_at IS NULL
+                AND replace(id::text, '-', '') LIKE ${shortHex + '%'}
+              LIMIT 1
+            `;
+            if (rows.length > 0) {
+              await this.prisma.project_collaborators.upsert({
+                where: { project_id_user_id: { project_id: rows[0].id, user_id: upgradedUser.id } },
+                create: { project_id: rows[0].id, user_id: upgradedUser.id, role: 'collaborator' },
+                update: {},
+              });
+              // Retroactively link email_chunks that arrived before signup
+              await this.prisma.email_chunks.updateMany({
+                where: { client_email: email, project_id: null },
+                data: { project_id: rows[0].id },
+              });
+              await this.prisma.pending_invitations.updateMany({
+                where: { project_id: rows[0].id, invited_email: email },
+                data: { status: 'accepted' },
+              }).catch(() => {});
+              joinedProject = { id: rows[0].id, title: rows[0].title, role: 'collaborator' };
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to auto-join project during account upgrade:', err);
+        }
+      }
+
+      return { user: upgradedUser, accessToken, refreshToken, joinedProject };
+    }
+
     if (existingUser) {
       throw new ConflictException('Email already in use');
     }
@@ -131,6 +208,15 @@ export class AuthService {
               await this.prisma.project_collaborators.create({
                 data: { project_id: project.id, user_id: user.id, role: 'collaborator' },
               });
+              // Retroactively link email_chunks that arrived before signup
+              await this.prisma.email_chunks.updateMany({
+                where: { client_email: email, project_id: null },
+                data: { project_id: project.id },
+              });
+              await this.prisma.pending_invitations.updateMany({
+                where: { project_id: project.id, invited_email: email },
+                data: { status: 'accepted' },
+              }).catch(() => {});
             }
             joinedProject = {
               id: project.id,

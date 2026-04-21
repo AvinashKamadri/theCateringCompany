@@ -110,7 +110,7 @@ async function seedUsers() {
       }
     } catch (error) {
       errors++;
-      console.error(`Error creating staff user ${i}:`, error.message);
+      console.error(`Error creating staff user ${i}:`, (error as Error).message);
     }
   }
   console.log(`\n✅ Created ${staffCreated} staff users\n`);
@@ -164,7 +164,7 @@ async function seedUsers() {
       }
     } catch (error) {
       errors++;
-      console.error(`Error creating host user ${i}:`, error.message);
+      console.error(`Error creating host user ${i}:`, (error as Error).message);
     }
   }
   console.log(`\n✅ Created ${hostsCreated} host users\n`);

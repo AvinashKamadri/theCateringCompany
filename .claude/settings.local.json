@@ -24,7 +24,8 @@
       "Bash(tasklist /FI \"IMAGENAME eq python.exe\")",
       "Bash(tasklist /FI \"IMAGENAME eq python3.exe\")",
       "Bash(netstat -ano)",
-      "Bash(.venv/Scripts/python -c ' *)"
+      "Bash(.venv/Scripts/python -c ' *)",
+      "Bash(node -e ' *)"
     ]
   }
 }

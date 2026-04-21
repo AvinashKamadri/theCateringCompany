@@ -1,36 +1,57 @@
 """
-Agent Orchestrator — persists everything via production FK chain:
+Agent Orchestrator — shell around the new router + tools.
+
+Persistence FK chain (unchanged from the pre-overhaul shell):
   users -> projects -> threads -> ai_conversation_states -> messages
+
+What changed:
+- The 42-node LangGraph state machine is GONE.
+- Every turn runs exactly one Tool, picked by `agent.router.route()`.
+- The Response Generator owns phrasing; Tools propose structured facts.
+- `current_node` (DB column) now stores `conversation_phase` (S1..S19).
+
+Safety: the outer try/except guarantees the API never returns a 500 to the
+frontend on LLM / Instructor / OpenAI outages. On failure we preserve the
+prior slots and emit a gentle fallback message.
 """
 
-import uuid
-import traceback
-from typing import Dict, Any, Optional
+from __future__ import annotations
 
-from langchain_core.messages import HumanMessage, AIMessage
-from agent.graph import build_conversation_graph
-from agent.state import initialize_empty_slots, ConversationState, SLOT_NAMES
-from agent.input_hints import get_input_hint
-from agent.nodes.helpers import set_current_project_id, set_current_messages
-from database.db_manager import (
-    save_conversation_state, save_message,
-    load_conversation_state, load_messages,
-    create_project_and_thread, init_db,
+import logging
+import traceback
+from typing import Any, Dict, Optional
+
+from langchain_core.messages import AIMessage, HumanMessage
+
+from agent.response_generator import render as render_response
+from agent.router import route as route_turn
+from agent.trace_context import trace_scope
+from agent.tools.base import ToolResult
+from agent.state import (
+    PHASE_GREETING,
+    SLOT_NAMES,
+    initialize_empty_slots,
 )
+from agent.tools import TOOL_REGISTRY
+from database.db_manager import (
+    create_project_and_thread,
+    init_db,
+    load_conversation_state,
+    load_messages,
+    save_conversation_state,
+    save_message,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class AgentOrchestrator:
-    """
-    Main orchestrator that processes messages and persists to:
-      - projects / threads / ai_conversation_states (FK chain)
-      - messages (every user + agent message)
-    """
+    """Persists state + delegates each turn to router + one Tool."""
 
-    def __init__(self):
-        self.graph = build_conversation_graph()
+    def __init__(self) -> None:
         self._initialized = False
 
-    async def _ensure_init(self):
+    async def _ensure_init(self) -> None:
         if not self._initialized:
             await init_db()
             self._initialized = True
@@ -43,22 +64,16 @@ class AgentOrchestrator:
         project_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Process a user message through the conversation graph.
-        Creates project/thread FK chain on first message, then persists state + messages.
-        """
         await self._ensure_init()
 
-        # Load existing conversation state or create new
         existing = await load_conversation_state(thread_id)
 
         if existing:
             state_id = existing["id"]
             project_id = existing.get("project_id") or project_id
-            current_node = existing["current_node"]
+            conversation_phase = existing.get("current_node") or PHASE_GREETING
             slots = existing["slots"]
         else:
-            # First message — create the full FK chain
             pid, tid, state_id = await create_project_and_thread(
                 thread_id=thread_id,
                 project_id=project_id,
@@ -66,28 +81,18 @@ class AgentOrchestrator:
                 user_id=user_id,
             )
             project_id = pid
-            current_node = "start"
+            conversation_phase = PHASE_GREETING
             slots = initialize_empty_slots()
 
-        # Set project ID and seed conversation history for AI generation logging
-        set_current_project_id(project_id)
-
-        # Rebuild messages from DB
+        # Rebuild history from DB
         db_messages = await load_messages(thread_id)
-        messages = []
+        history = []
         for m in db_messages:
             if m["sender_type"] == "user":
-                messages.append(HumanMessage(content=m["content"]))
+                history.append(HumanMessage(content=m["content"]))
             else:
-                messages.append(AIMessage(content=m["content"]))
+                history.append(AIMessage(content=m["content"]))
 
-        # Add current user message
-        messages.append(HumanMessage(content=message))
-
-        # Seed conversation history so all llm_respond calls get full context automatically
-        set_current_messages(messages)
-
-        # Save user message to messages table
         await save_message(
             thread_id=thread_id,
             project_id=project_id,
@@ -97,54 +102,140 @@ class AgentOrchestrator:
             ai_conversation_state_id=state_id,
         )
 
-        # Build state for graph
-        state: ConversationState = {
-            "messages": messages,
+        state: Dict[str, Any] = {
+            "messages": history + [HumanMessage(content=message)],
             "conversation_id": state_id or "",
             "project_id": project_id,
             "thread_id": thread_id,
-            "current_node": current_node,
+            "conversation_phase": conversation_phase,
             "slots": slots,
-            "next_action": "",
-            "error": None,
             "contract_data": None,
             "is_complete": False,
-            "dietary_conflict_attempts": 0,
+            "error": None,
         }
 
+        agent_content = ""
+        input_hint = None
+        contract_data = None
+        tool_used = None
+
+        logger.info(
+            "turn_start thread=%s phase=%s msg=%r",
+            thread_id, conversation_phase, message[:120],
+        )
+
         try:
-            result = await self.graph.ainvoke(state)
+            with trace_scope(
+                thread_id=thread_id,
+                project_id=project_id,
+                conversation_id=state_id or "",
+                user_id=user_id,
+                author_id=author_id,
+                phase=conversation_phase,
+                tool="router",
+            ):
+                decision = await route_turn(
+                    message=message,
+                    history=history,
+                    state=state,
+                )
+            logger.info(
+                "router_decision thread=%s action=%s confidence=%.2f tool=%s",
+                thread_id,
+                decision.action,
+                decision.confidence,
+                decision.tool_calls[0].tool_name if decision.tool_calls else "-",
+            )
 
-            agent_content = ""
-            for msg in reversed(list(result["messages"])):
-                if isinstance(msg, AIMessage):
-                    agent_content = msg.content
-                    break
+            if decision.action == "no_action":
+                agent_content = (
+                    "Your request is already with our team — we'll be in touch soon."
+                )
+            elif decision.action == "clarify" or not decision.tool_calls:
+                tool_result = ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": "router",
+                        "error": "could_not_route",
+                        "clarifying_question": decision.clarifying_question,
+                    },
+                )
+                with trace_scope(
+                    thread_id=thread_id,
+                    project_id=project_id,
+                    conversation_id=state_id or "",
+                    user_id=user_id,
+                    author_id=author_id,
+                    phase=conversation_phase,
+                    tool="response_generator",
+                    source_tool="router",
+                    target="clarify",
+                ):
+                    agent_content = await render_response(
+                        tool_result=tool_result, user_message=message, history=history
+                    )
+            else:
+                call = decision.tool_calls[0]
+                tool = TOOL_REGISTRY[call.tool_name]
+                tool_used = call.tool_name
+                with trace_scope(
+                    thread_id=thread_id,
+                    project_id=project_id,
+                    conversation_id=state_id or "",
+                    user_id=user_id,
+                    author_id=author_id,
+                    phase=conversation_phase,
+                    tool=tool_used,
+                ):
+                    tool_result = await tool.run(
+                        message=message,
+                        history=history,
+                        state=state,
+                    )
+                state = tool_result.state
+                slots = state["slots"]
+                conversation_phase = state.get("conversation_phase", conversation_phase)
+                input_hint = tool_result.input_hint
+                contract_data = tool_result.response_context.get("pricing")
+                logger.info(
+                    "tool_done thread=%s tool=%s next_phase=%s filled=%s",
+                    thread_id,
+                    tool_used,
+                    conversation_phase,
+                    [f[0] for f in tool_result.response_context.get("filled_this_turn", [])],
+                )
+                with trace_scope(
+                    thread_id=thread_id,
+                    project_id=project_id,
+                    conversation_id=state_id or "",
+                    user_id=user_id,
+                    author_id=author_id,
+                    phase=conversation_phase,
+                    tool="response_generator",
+                    source_tool=tool_used,
+                    target=(tool_result.response_context or {}).get("next_question_target"),
+                ):
+                    agent_content = await render_response(
+                        tool_result=tool_result,
+                        user_message=message,
+                        history=history,
+                    )
+        except Exception as exc:
+            logger.error("Orchestrator turn failed: %s\n%s", exc, traceback.format_exc())
+            agent_content = (
+                "I hit a snag on my end — could you try that again in a moment?"
+            )
 
-            is_complete = result.get("is_complete", False)
-            new_node = result.get("current_node", current_node)
-            new_slots = result.get("slots", slots)
-            contract_data = result.get("contract_data")
+        is_complete = conversation_phase == "complete"
 
-        except Exception as e:
-            agent_content = "I apologize, but I encountered an issue. Could you please try again?"
-            is_complete = False
-            new_node = current_node
-            new_slots = slots
-            contract_data = None
-            print(f"[ERROR] Graph execution failed: {e}")
-            traceback.print_exc()
-
-        # Save conversation state
         new_state_id = await save_conversation_state(
             thread_id=thread_id,
             project_id=project_id,
-            current_node=new_node,
-            slots=new_slots,
+            current_node=conversation_phase,
+            slots=slots,
             is_completed=is_complete,
         )
 
-        # Save agent response to messages table
         await save_message(
             thread_id=thread_id,
             project_id=project_id,
@@ -154,22 +245,23 @@ class AgentOrchestrator:
             ai_conversation_state_id=new_state_id,
         )
 
-        # Count filled slots (exclude internal bookkeeping keys prefixed with __)
-        slots_filled = sum(1 for k, s in new_slots.items() if s.get("filled") and not k.startswith("__"))
-
-        # Frontend hint for the next input widget
-        input_hint = get_input_hint(new_node, result)
+        slots_filled = sum(
+            1 for k, s in slots.items()
+            if s.get("filled") and not k.startswith("__")
+        )
 
         return {
             "content": agent_content,
-            "current_node": new_node,
+            "current_node": conversation_phase,
+            "conversation_phase": conversation_phase,
             "slots_filled": slots_filled,
             "total_slots": len(SLOT_NAMES),
             "is_complete": is_complete,
             "ai_conversation_state_id": new_state_id,
             "project_id": project_id,
             "thread_id": thread_id,
-            "slots": new_slots,
+            "slots": slots,
             "contract_data": contract_data,
             "input_hint": input_hint,
+            "tool_used": tool_used,
         }

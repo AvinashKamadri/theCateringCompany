@@ -99,9 +99,6 @@ function InventoryContent() {
     reload();
   }, []);
 
-  const dishesWithRecipe = dishes.filter((d) => d.dish_ingredients.length > 0).length;
-  const dishesMissingRecipe = dishes.length - dishesWithRecipe;
-
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
       <header className="flex items-center justify-between mb-6">
@@ -112,13 +109,6 @@ function InventoryContent() {
           </p>
         </div>
       </header>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <StatCard label="Ingredients" value={ingredients.length} hint="raw inputs" />
-        <StatCard label="Dishes" value={dishes.length} hint="reusable cooked items" />
-        <StatCard label="With recipe" value={dishesWithRecipe} hint="dishes linked to ingredients" accent="emerald" />
-        <StatCard label="Missing recipe" value={dishesMissingRecipe} hint="need ingredient links" accent={dishesMissingRecipe > 0 ? 'amber' : undefined} />
-      </div>
 
       <div className="flex gap-1 p-1 mb-6 bg-neutral-100 rounded-lg w-fit">
         <button
@@ -199,32 +189,6 @@ function InventoryContent() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-// ─── StatCard ──────────────────────────────────────────────────────────────
-
-function StatCard({
-  label,
-  value,
-  hint,
-  accent,
-}: {
-  label: string;
-  value: number;
-  hint?: string;
-  accent?: 'emerald' | 'amber';
-}) {
-  const accentCls =
-    accent === 'emerald' ? 'text-emerald-700'
-    : accent === 'amber' ? 'text-amber-700'
-    : 'text-neutral-900';
-  return (
-    <div className="bg-white rounded-xl border border-neutral-200 px-4 py-3">
-      <div className="text-xs font-medium text-neutral-500">{label}</div>
-      <div className={cn('text-2xl font-semibold mt-0.5', accentCls)}>{value}</div>
-      {hint && <div className="text-xs text-neutral-400 mt-0.5">{hint}</div>}
     </div>
   );
 }
@@ -363,8 +327,8 @@ function DishesTab({
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
+      <div className="mb-4">
+        <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400 pointer-events-none" />
           <input
             placeholder="Filter dishes…"
@@ -373,9 +337,6 @@ function DishesTab({
             className="w-full pl-9 pr-3 py-2 text-sm border border-neutral-200 rounded-md focus:outline-none focus:ring-2 focus:ring-black/10"
           />
         </div>
-        <span className="text-xs text-neutral-500 whitespace-nowrap">
-          {filtered.length} of {dishes.length}
-        </span>
       </div>
 
       {filtered.length === 0 ? (

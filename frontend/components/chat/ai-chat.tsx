@@ -1,9 +1,9 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect, useRef, Fragment } from 'react';
 import { Send, Loader2, Sparkles, Check, ChevronDown, MessageSquare } from 'lucide-react';
 import { chatAiApi } from '@/lib/api/chat-ai';
-import type { ChatMessage, ChatState, ContractData } from '@/types/chat-ai.types';
+import type { ChatMessage, ChatState, ContractData, InputHint } from '@/types/chat-ai.types';
 import { toast } from 'sonner';
 import { CommandDialog } from './command-dialog';
 import IntakeReviewPanel from './IntakeReviewPanel';
@@ -46,7 +46,7 @@ export function ChatHeader({
         </div>
         <div className="min-w-0 flex-1">
           <h2 className="text-base sm:text-lg font-bold text-neutral-900 truncate">Catering Assistant</h2>
-          <p className="text-xs text-neutral-500 hidden sm:block">Let's plan your perfect event together</p>
+          <p className="text-xs text-neutral-500 hidden sm:block">Let&apos;s plan your perfect event together</p>
         </div>
         {isSaving && (
           <div className="flex items-center gap-1.5 text-neutral-500 text-xs shrink-0">
@@ -70,7 +70,7 @@ export function ChatHeader({
 
 const STORAGE_KEY = 'tc_chat_sessions';
 
-// ─── Static menu category map (keyed by lowercase item name) ─────────────────
+// --- Static menu category map (keyed by lowercase item name) -----------------
 const ITEM_CATEGORY_MAP: Record<string, string> = {
   // Chicken
   'maple bacon chicken pops': 'Chicken',
@@ -133,7 +133,7 @@ const ITEM_CATEGORY_MAP: Record<string, string> = {
   'tomatoes and feta': 'Vegetarian',
 };
 
-// Main menu item → category map
+// Main menu item ? category map
 const MAIN_ITEM_CATEGORY_MAP: Record<string, string> = {
   // Platters
   'vegetable platter': 'Platters',
@@ -225,10 +225,11 @@ function groupItemsByCategory(items: ListItem[]): CategoryGroup[] | null {
   return groups;
 }
 
-// ─── List parsing ─────────────────────────────────────────────────────────────
+// --- List parsing -------------------------------------------------------------
 
 interface ListItem {
   name: string;
+  label?: string;
   price?: string;
   description?: string;
 }
@@ -273,6 +274,67 @@ interface CategoryGroup {
   items: ListItem[];
 }
 
+interface PickerPayload {
+  items: ListItem[];
+  categories?: CategoryGroup[];
+  multi: boolean;
+  maxSelect?: number;
+}
+
+function formatHintPrice(unitPrice?: number, priceType?: string): string | undefined {
+  if (unitPrice === undefined || unitPrice === null) return undefined;
+  if (priceType === 'flat') return `$${unitPrice.toFixed(2)}`;
+  if (priceType === 'per_unit') return `$${unitPrice.toFixed(2)}/per_unit`;
+  return `$${unitPrice.toFixed(2)}/per_person`;
+}
+
+function pickerFromInputHint(inputHint?: InputHint | null): PickerPayload | null {
+  if (!inputHint) return null;
+
+  if (inputHint.type === 'options' && inputHint.options?.length) {
+    return {
+      items: inputHint.options.map((option) => ({
+        name: option.value,
+        label: option.label ?? option.value,
+      })),
+      multi: !!inputHint.multi,
+      maxSelect: inputHint.max_select,
+    };
+  }
+
+  if (inputHint.type !== 'menu_picker') return null;
+
+  if (inputHint.menu?.length) {
+    const categories = inputHint.menu.map((group) => ({
+      category: group.category,
+      items: group.items.map((item) => ({
+        name: item.name,
+        price: formatHintPrice(item.unit_price, item.price_type),
+        description: item.description,
+      })),
+    }));
+    return {
+      items: categories.flatMap((group) => group.items),
+      categories,
+      multi: true,
+      maxSelect: inputHint.max_select,
+    };
+  }
+
+  if (inputHint.items?.length) {
+    return {
+      items: inputHint.items.map((item) => ({
+        name: item.name,
+        price: formatHintPrice(item.unit_price, item.price_type),
+        description: item.description,
+      })),
+      multi: true,
+      maxSelect: inputHint.max_select,
+    };
+  }
+
+  return null;
+}
 function parseCategorizedItems(content: string): CategoryGroup[] | null {
   const lines = content.split('\n');
   const groups: CategoryGroup[] = [];
@@ -327,7 +389,7 @@ function normalizeCardValue(value: string): string {
   return v;
 }
 
-// ─── Inline choice detection from AI messages ──────────────────────────────
+// --- Inline choice detection from AI messages ------------------------------
 // Detects known question patterns and returns synthetic card options
 // Ordered: most specific first, yes/no last
 
@@ -438,14 +500,45 @@ function parseListItems(content: string): ListItem[] | null {
   return null;
 }
 
-// Parse an inline "Your current selected X: A ($p), B ($p), ..." phrase into
-// items for read-only display. Used in confirmation/removal ack messages so
-// the user sees their existing selection as cards instead of a text blob.
-const INLINE_SELECTED_RE = /(?:your\s+)?current\s+(?:selected|chosen|picked)\s+(?:dishes|items|menu|appetizers|desserts|selections?):\s*([^\n]+)/i;
-function parseInlineSelectedItems(content: string): ListItem[] | null {
-  const m = INLINE_SELECTED_RE.exec(content);
-  if (!m) return null;
-  const tail = m[1].replace(/\s+Now[\s,].*$/i, '').replace(/\s*\.?\s*$/, '');
+interface InlineSelectionSnapshot {
+  before: string;
+  after: string;
+  label: string;
+  items: ListItem[];
+}
+
+// Parse inline selection summaries from confirmation/modification replies so
+// the current menu can be shown visually in the chat thread.
+const INLINE_SELECTED_RE = /(?:your\s+)?current\s+(?:selected|chosen|picked)\s+(dishes|items|menu|appetizers|desserts|selections?):\s*([^\n]+)/i;
+const INLINE_NOW_RE = /^(.*?)(?:^|\s)(your\s+([a-z][a-z/&\s]+?)\s+(?:are|is)\s+now:\s*)([^.\n]+)(?:\.\s*(.*))?$/i;
+
+function parseInlineSelectionSnapshot(content: string): InlineSelectionSnapshot | null {
+  const currentSelected = INLINE_SELECTED_RE.exec(content);
+  if (currentSelected?.[2]) {
+    const items = parseInlineSelectionItems(currentSelected[2]);
+    if (!items.length) return null;
+    return {
+      before: content.trim(),
+      after: '',
+      label: currentSelected[1] || 'selection',
+      items,
+    };
+  }
+
+  const inlineNow = INLINE_NOW_RE.exec(content.trim());
+  if (!inlineNow?.[4]) return null;
+  const items = parseInlineSelectionItems(inlineNow[4]);
+  if (!items.length) return null;
+  return {
+    before: (inlineNow[1] || '').trim(),
+    after: (inlineNow[5] || '').trim(),
+    label: (inlineNow[3] || 'selection').trim(),
+    items,
+  };
+}
+
+function parseInlineSelectionItems(rawList: string): ListItem[] {
+  const tail = rawList.replace(/\s+Now[\s,].*$/i, '').replace(/\s*\.?\s*$/, '');
   const parts = tail.split(/,\s*(?![^()]*\))/); // split on commas not inside parens
   const items: ListItem[] = [];
   for (const raw of parts) {
@@ -455,7 +548,7 @@ function parseInlineSelectedItems(content: string): ListItem[] | null {
     if (priced) items.push({ name: priced[1].trim(), price: priced[2].trim() });
     else if (seg.length >= 2 && seg.length <= 80) items.push({ name: seg });
   }
-  return items.length ? items : null;
+  return items;
 }
 
 // Multi-select: items with prices AND more than 5 options (e.g. appetizers, mains).
@@ -507,9 +600,9 @@ function splitAtList(content: string): { intro: string } {
   return { intro: content.slice(0, firstListLine).trimEnd() };
 }
 
-// ─── Menu item image helper ──────────────────────────────────────────────────
+// --- Menu item image helper --------------------------------------------------
 
-// Map slugified menu names → actual image filename (no extension) for items
+// Map slugified menu names ? actual image filename (no extension) for items
 // whose filename doesn't match the generated slug (shortened names, spelling
 // variants, etc.). Keys are the output of the slug pipeline below.
 const IMAGE_ALIAS: Record<string, string> = {
@@ -530,7 +623,7 @@ const IMAGE_ALIAS: Record<string, string> = {
 };
 
 function getMenuImageUrl(name: string): string | null {
-  // Convert "Chicken Tikka Skewers ($3.50/pp)" → "chicken-tikka-skewers"
+  // Convert "Chicken Tikka Skewers ($3.50/pp)" ? "chicken-tikka-skewers"
   // Only strip parens when they contain a price ($); keep flavor lists like
   // "Meatballs (BBQ, Swedish, Sweet and Sour)" so the slug still matches.
   const clean = name
@@ -540,7 +633,7 @@ function getMenuImageUrl(name: string): string | null {
     .toLowerCase()
     .replace(/[&]/g, 'and')
     .replace(/[\/]/g, '-')
-    .replace(/w\//g, 'w-')               // "w/" → "w-"
+    .replace(/w\//g, 'w-')               // "w/" ? "w-"
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
@@ -550,7 +643,7 @@ function getMenuImageUrl(name: string): string | null {
   return `/menu-images/${file}.jpg`;
 }
 
-// ─── Option card (single-select square) ───────────────────────────────────────
+// --- Option card (single-select square) ---------------------------------------
 
 function OptionCard({
   item,
@@ -564,6 +657,7 @@ function OptionCard({
   const imgUrl = item.price ? getMenuImageUrl(item.name) : null; // Only show images for food items (with prices)
   const [imgError, setImgError] = React.useState(false);
   const hasImg = imgUrl && !imgError;
+  const displayName = item.label ?? item.name;
 
   return (
     <button
@@ -578,7 +672,7 @@ function OptionCard({
     >
       {hasImg && (
         <div className="w-full h-20 bg-neutral-100 overflow-hidden">
-          <img src={imgUrl} alt={item.name} onError={() => setImgError(true)} className="w-full h-full object-cover" loading="lazy" />
+          <img src={imgUrl} alt={displayName} onError={() => setImgError(true)} className="w-full h-full object-cover" loading="lazy" />
         </div>
       )}
       {selected && (
@@ -587,7 +681,7 @@ function OptionCard({
         </div>
       )}
       <div className={`p-3 ${hasImg ? 'pt-2' : 'flex-1 flex flex-col justify-end'}`}>
-        <span className="text-sm font-semibold leading-tight">{item.name}</span>
+        <span className="text-sm font-semibold leading-tight">{displayName}</span>
         {item.price && (
           <span className={`text-xs mt-0.5 block ${selected ? 'text-neutral-300' : 'text-neutral-400'}`}>
             {item.price}
@@ -603,7 +697,7 @@ function OptionCard({
   );
 }
 
-// ─── Multi-select grid (menu items with prices) ───────────────────────────────
+// --- Multi-select grid (menu items with prices) -------------------------------
 
 function MenuItemCard({
   item,
@@ -616,6 +710,7 @@ function MenuItemCard({
 }) {
   const imgUrl = getMenuImageUrl(item.name);
   const [imgError, setImgError] = React.useState(false);
+  const displayName = item.label ?? item.name;
 
   return (
     <button
@@ -630,7 +725,7 @@ function MenuItemCard({
         <div className="w-full h-24 bg-neutral-100 overflow-hidden">
           <img
             src={imgUrl}
-            alt={item.name}
+            alt={displayName}
             onError={() => setImgError(true)}
             className="w-full h-full object-cover"
             loading="lazy"
@@ -645,7 +740,7 @@ function MenuItemCard({
         </div>
       )}
       <div className="p-2 flex-1">
-        <p className="text-xs font-semibold text-neutral-900 leading-tight line-clamp-2">{item.name}</p>
+        <p className="text-xs font-semibold text-neutral-900 leading-tight line-clamp-2">{displayName}</p>
         {item.price && <p className="text-xs text-neutral-500 mt-0.5">{item.price}</p>}
         {item.description && (
           <p className="text-[10px] text-neutral-400 mt-1 leading-snug line-clamp-3">{item.description}</p>
@@ -655,7 +750,7 @@ function MenuItemCard({
   );
 }
 
-// ─── Unified list UI ──────────────────────────────────────────────────────────
+// --- Unified list UI ----------------------------------------------------------
 
 function ItemSelector({
   items,
@@ -764,7 +859,76 @@ function ItemSelector({
   );
 }
 
-// ─── Markdown renderer ────────────────────────────────────────────────────────
+function ReadOnlySelectionSnapshot({
+  label,
+  items,
+  categories,
+}: {
+  label: string;
+  items: ListItem[];
+  categories?: CategoryGroup[];
+}) {
+  const heading = label.replace(/\s+/g, ' ').trim();
+
+  const renderCard = (item: ListItem) => {
+    const imgUrl = getMenuImageUrl(item.name);
+    const displayName = item.label ?? item.name;
+
+    return (
+      <div key={item.name} className="rounded-xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
+        {imgUrl ? (
+          <div className="w-full h-20 bg-neutral-100 overflow-hidden">
+            <img
+              src={imgUrl}
+              alt={displayName}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          </div>
+        ) : (
+          <div className="w-full h-10 bg-neutral-100" />
+        )}
+        <div className="p-2">
+          <p className="text-xs font-semibold text-neutral-900 leading-tight line-clamp-2">{displayName}</p>
+          {item.price && <p className="text-xs text-neutral-500 mt-0.5">{item.price}</p>}
+          {item.description && (
+            <p className="text-[10px] text-neutral-400 mt-1 leading-snug line-clamp-3">{item.description}</p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="mt-2 rounded-2xl border border-neutral-200 bg-neutral-50/90 px-3 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">
+        Current {heading}
+      </p>
+      {categories && categories.length >= 2 ? (
+        <div className="mt-3 space-y-4">
+          {categories.map((group) => (
+            <div key={group.category || 'other'}>
+              {group.category && (
+                <p className="inline-block bg-white rounded-md border border-neutral-200 px-2.5 py-1 text-[11px] font-bold text-neutral-900 uppercase tracking-wider mb-2 shadow-sm">
+                  {group.category}
+                </p>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {group.items.map(renderCard)}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {items.map(renderCard)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Markdown renderer --------------------------------------------------------
 
 function MarkdownMessage({ content }: { content: string }) {
   const lines = content.split('\n');
@@ -845,7 +1009,7 @@ function inlineFormat(text: string): React.ReactNode {
   });
 }
 
-// ─── Confetti ─────────────────────────────────────────────────────────────────
+// --- Confetti -----------------------------------------------------------------
 
 function fireConfetti(count = 120) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -876,7 +1040,7 @@ function fireConfetti(count = 120) {
   setTimeout(() => layer.remove(), 3800);
 }
 
-// ─── Session storage ──────────────────────────────────────────────────────────
+// --- Session storage ----------------------------------------------------------
 
 function saveSessionToStorage(threadId: string) {
   try {
@@ -896,28 +1060,28 @@ function saveSessionToStorage(threadId: string) {
   }
 }
 
-// ─── Country codes ────────────────────────────────────────────────────────────
+// --- Country codes ------------------------------------------------------------
 const COUNTRY_CODES = [
-  { code: '+1',  flag: '🇺🇸', name: 'US' },
-  { code: '+1',  flag: '🇨🇦', name: 'CA' },
-  { code: '+44', flag: '🇬🇧', name: 'GB' },
-  { code: '+91', flag: '🇮🇳', name: 'IN' },
-  { code: '+61', flag: '🇦🇺', name: 'AU' },
-  { code: '+64', flag: '🇳🇿', name: 'NZ' },
-  { code: '+971', flag: '🇦🇪', name: 'AE' },
-  { code: '+65', flag: '🇸🇬', name: 'SG' },
-  { code: '+60', flag: '🇲🇾', name: 'MY' },
-  { code: '+63', flag: '🇵🇭', name: 'PH' },
-  { code: '+852', flag: '🇭🇰', name: 'HK' },
-  { code: '+49', flag: '🇩🇪', name: 'DE' },
-  { code: '+33', flag: '🇫🇷', name: 'FR' },
-  { code: '+39', flag: '🇮🇹', name: 'IT' },
-  { code: '+34', flag: '🇪🇸', name: 'ES' },
-  { code: '+55', flag: '🇧🇷', name: 'BR' },
-  { code: '+52', flag: '🇲🇽', name: 'MX' },
-  { code: '+81', flag: '🇯🇵', name: 'JP' },
-  { code: '+82', flag: '🇰🇷', name: 'KR' },
-  { code: '+86', flag: '🇨🇳', name: 'CN' },
+  { code: '+1',  flag: '????', name: 'US' },
+  { code: '+1',  flag: '????', name: 'CA' },
+  { code: '+44', flag: '????', name: 'GB' },
+  { code: '+91', flag: '????', name: 'IN' },
+  { code: '+61', flag: '????', name: 'AU' },
+  { code: '+64', flag: '????', name: 'NZ' },
+  { code: '+971', flag: '????', name: 'AE' },
+  { code: '+65', flag: '????', name: 'SG' },
+  { code: '+60', flag: '????', name: 'MY' },
+  { code: '+63', flag: '????', name: 'PH' },
+  { code: '+852', flag: '????', name: 'HK' },
+  { code: '+49', flag: '????', name: 'DE' },
+  { code: '+33', flag: '????', name: 'FR' },
+  { code: '+39', flag: '????', name: 'IT' },
+  { code: '+34', flag: '????', name: 'ES' },
+  { code: '+55', flag: '????', name: 'BR' },
+  { code: '+52', flag: '????', name: 'MX' },
+  { code: '+81', flag: '????', name: 'JP' },
+  { code: '+82', flag: '????', name: 'KR' },
+  { code: '+86', flag: '????', name: 'CN' },
 ];
 
 function isAskingForName(content: string): boolean {
@@ -940,11 +1104,30 @@ function isAskingForEmail(content: string): boolean {
 
 function isAskingForGuestCount(content: string): boolean {
   const lower = content.toLowerCase();
+  if (
+    lower.includes('phone') ||
+    lower.includes('email') ||
+    lower.includes('venue') ||
+    lower.includes('where will') ||
+    lower.includes('where is') ||
+    lower.includes('what date') ||
+    lower.includes('when is') ||
+    lower.includes('menu') ||
+    lower.includes('appetizer') ||
+    lower.includes('main menu')
+  ) {
+    return false;
+  }
   return (lower.includes('how many guest') || lower.includes('guest count') ||
     lower.includes('headcount') || lower.includes('head count') ||
     lower.includes('how many people') || lower.includes('how big') ||
     lower.includes('guest-wise') || lower.includes('expecting')) &&
     !lower.includes('confirm') && !lower.includes('got it');
+}
+
+function isGuestCountHint(inputHint?: InputHint | null): boolean {
+  if (!inputHint || inputHint.type !== 'options' || !inputHint.allow_text) return false;
+  return (inputHint.options ?? []).some((option) => option.value.toLowerCase() === 'tbd');
 }
 
 function isAskingForVenue(content: string): boolean {
@@ -966,7 +1149,7 @@ function isAskingForDate(content: string): boolean {
     (lower.includes('date') && (lower.includes('have in mind') || lower.includes('planning'))));
 }
 
-// ─── Date picker calendar ─────────────────────────────────────────────────────
+// --- Date picker calendar -----------------------------------------------------
 function DatePickerCalendar({ value, onChange, onConfirm, disabled }: {
   value: string;
   onChange: (v: string) => void;
@@ -1083,7 +1266,7 @@ function DatePickerCalendar({ value, onChange, onConfirm, disabled }: {
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// --- Main component -----------------------------------------------------------
 
 export function AiChat({ projectId, authorId, userId, userName = 'You', initialThreadId, onComplete, onThreadStart, onSlotsUpdate, onProgressUpdate, showSessionsButton, onShowSessions, isSaving, hideHeader }: AiChatProps) {
   const [state, setState] = useState<ChatState>({
@@ -1102,16 +1285,6 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     isOpen: false,
     command: null,
   });
-  // Frontend-only intercept flows (contact info, wedding cake)
-  type FrontendStep =
-    | null
-    | 'contact_email' | 'contact_phone'
-    | 'cake_ask' | 'cake_flavor' | 'cake_filling' | 'cake_buttercream';
-  const [frontendStep, setFrontendStep] = useState<FrontendStep>(null);
-  const contactAskedRef = useRef(false);
-  const weddingCakeAskedRef = useRef(false);
-  const deferredAiMessageRef = useRef<ChatMessage | null>(null);
-  const weddingCakeDataRef = useRef<{ flavor?: string; filling?: string; buttercream?: string }>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const startedRef = useRef(false);
@@ -1172,7 +1345,8 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     let lastListIdx: number | null = null;
     state.messages.forEach((msg, idx) => {
       if (msg.role !== 'ai') return;
-      if (!parseListItems(msg.content)) return;
+      const hintedPicker = pickerFromInputHint(msg.inputHint);
+      if (!hintedPicker && !parseListItems(msg.content)) return;
       // Skip messages where the intro is an ack + open-ended follow-up —
       // the list items belong to the previous turn, not this one.
       const { intro } = splitAtList(msg.content);
@@ -1238,6 +1412,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
         role: m.sender_type === 'user' ? 'user' : 'ai',
         content: m.content,
         timestamp: new Date(m.created_at),
+        inputHint: null,
       }));
       setState((prev) => ({
         ...prev,
@@ -1251,11 +1426,6 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
       onThreadStart?.(threadId);
       if (conv.slots) {
         onSlotsUpdate?.(conv.slots);
-        // Don't re-ask frontend questions on conversation reload
-        if (conv.slots.name) contactAskedRef.current = true;
-        if (conv.slots.event_type && /wedding/i.test(String(conv.slots.event_type))) {
-          weddingCakeAskedRef.current = true;
-        }
       }
       onProgressUpdate?.({ filled: conv.slots_filled ?? 0, total: 20 });
       if (conv.is_completed && conv.slots) {
@@ -1270,147 +1440,6 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
   const handleSendMessage = async (messageText?: string) => {
     const content = messageText || input.trim();
     if (!content || state.isLoading) return;
-
-    // ─── Inline contact edits: "change phone/email to X" ─────────────
-    // Optimistically update the local slot so the panel reflects the new
-    // value immediately; the message still flows through the agent so its
-    // state can catch up too.
-    if (!frontendStep) {
-      const emailEdit = /\b(?:change|update|correct|set|fix|use)\s+(?:my\s+|the\s+)?e-?mail\s*(?:to|:)?\s*([^\s,]+@[^\s,]+\.[a-zA-Z]{2,})/i.exec(content);
-      const phoneEdit = /\b(?:change|update|correct|set|fix|use)\s+(?:my\s+|the\s+)?(?:phone|mobile|contact)?\s*(?:number|#)?\s*(?:to|:)?\s*(\+?\d[\d\s\-()]{6,}\d)/i.exec(content);
-      const updates: any = {};
-      if (emailEdit) updates.email = emailEdit[1];
-      if (phoneEdit) updates.phone = phoneEdit[1].replace(/[\s\-()]/g, '');
-      if (updates.email || updates.phone) {
-        onSlotsUpdate?.(updates);
-        if (updates.email) toast.success(`Email updated to ${updates.email}`);
-        if (updates.phone) toast.success(`Phone updated to ${updates.phone}`);
-      }
-    }
-
-    // ─── Re-trigger wedding cake via "@ai change cake" ───────────────
-    if (!frontendStep && weddingCakeAskedRef.current && /(@ai\s+)?(change|update|redo|edit)\s*(wedding\s*)?cake/i.test(content)) {
-      const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date() };
-      setInput(''); setMenuSelections([]); setActiveMenuMsgIdx(null);
-      weddingCakeDataRef.current = {};
-      deferredAiMessageRef.current = null;
-      const ask: ChatMessage = { role: 'ai', content: '🎂 Would you like a wedding cake?\n1. Yes\n2. No thanks', timestamp: new Date() };
-      setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, ask] }));
-      setFrontendStep('cake_ask');
-      return;
-    }
-
-    // ─── Frontend-only step interception ──────────────────────────────
-    if (frontendStep) {
-      const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date() };
-      setInput(''); setMenuSelections([]); setActiveMenuMsgIdx(null);
-      const isYes = /yes|yeah|yep|sure|show|want/i.test(content);
-      const releaseDeferred = () => {
-        const d = deferredAiMessageRef.current;
-        deferredAiMessageRef.current = null;
-        return d ? [d] : [];
-      };
-
-      // ── Contact: email ──
-      if (frontendStep === 'contact_email') {
-        const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
-        const trimmed = content.trim();
-        if (!emailRegex.test(trimmed)) {
-          const retryMsg: ChatMessage = {
-            role: 'ai',
-            content: "Hmm, that doesn't look like a valid email. Could you double-check? (e.g., name@example.com)",
-            timestamp: new Date(),
-          };
-          setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, retryMsg] }));
-          // Stay on contact_email — don't advance.
-          return;
-        }
-        onSlotsUpdate?.({ email: trimmed } as any);
-        const phoneMsg: ChatMessage = {
-          role: 'ai',
-          content: 'And your phone number?',
-          timestamp: new Date(),
-        };
-        setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, phoneMsg] }));
-        setFrontendStep('contact_phone');
-        return;
-      }
-
-      // ── Contact: phone ──
-      if (frontendStep === 'contact_phone') {
-        const phone = content.replace(/[^\d+]/g, '');
-        onSlotsUpdate?.({ phone } as any);
-        setInput('');
-        setState((prev) => ({
-          ...prev,
-          messages: [...prev.messages, userMsg, ...releaseDeferred()],
-        }));
-        setFrontendStep(null);
-        return;
-      }
-
-      // ── Wedding cake: ask ──
-      if (frontendStep === 'cake_ask') {
-        if (isYes) {
-          const flavorMsg: ChatMessage = {
-            role: 'ai',
-            content: 'Wonderful! Pick a cake flavor:\n1. Yellow\n2. White\n3. Almond\n4. Chocolate\n5. Carrot\n6. Red Velvet\n7. Bananas Foster\n8. Whiskey Caramel\n9. Lemon\n10. Spice\n11. Funfetti\n12. Pumpkin Spice\n13. Cookies and Cream\n14. Strawberry\n15. Coconut',
-            timestamp: new Date(),
-          };
-          setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, flavorMsg] }));
-          setFrontendStep('cake_flavor');
-        } else {
-          setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, ...releaseDeferred()] }));
-          setFrontendStep(null);
-        }
-        return;
-      }
-
-      // ── Wedding cake: flavor ──
-      if (frontendStep === 'cake_flavor') {
-        weddingCakeDataRef.current.flavor = content;
-        const fillingMsg: ChatMessage = {
-          role: 'ai',
-          content: 'Great pick! Now choose a filling:\n1. Butter Cream\n2. Lemon Curd\n3. Raspberry Jam\n4. Strawberry Jam\n5. Cream Cheese Icing\n6. Peanut Butter Cream\n7. Mocha Buttercream\n8. Salted Caramel Buttercream\n9. Cinnamon Butter Cream',
-          timestamp: new Date(),
-        };
-        setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, fillingMsg] }));
-        setFrontendStep('cake_filling');
-        return;
-      }
-
-      // ── Wedding cake: filling ──
-      if (frontendStep === 'cake_filling') {
-        weddingCakeDataRef.current.filling = content;
-        const bcMsg: ChatMessage = {
-          role: 'ai',
-          content: 'Almost done! Choose your buttercream frosting:\n1. Signature\n2. Chocolate\n3. Cream Cheese Frosting',
-          timestamp: new Date(),
-        };
-        setState((prev) => ({ ...prev, messages: [...prev.messages, userMsg, bcMsg] }));
-        setFrontendStep('cake_buttercream');
-        return;
-      }
-
-      // ── Wedding cake: buttercream (final) ──
-      if (frontendStep === 'cake_buttercream') {
-        const { flavor, filling } = weddingCakeDataRef.current;
-        const summaryMsg: ChatMessage = {
-          role: 'ai',
-          content: `Wedding cake set! 2 Tier 6" & 8" ($275) — ${flavor} cake, ${filling} filling, ${content} frosting.`,
-          timestamp: new Date(),
-        };
-        setState((prev) => ({
-          ...prev,
-          messages: [...prev.messages, userMsg, summaryMsg, ...releaseDeferred()],
-        }));
-        onSlotsUpdate?.({ wedding_cake: `2 Tier 6" & 8" — ${flavor}, ${filling}, ${content}` } as any);
-        weddingCakeDataRef.current = {};
-        setFrontendStep(null);
-        return;
-      }
-    }
-    // ─── End frontend-only interception ───────────────────────────────
 
     if (content.startsWith('/')) {
       const command = content.toLowerCase();
@@ -1459,74 +1488,21 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
         role: 'ai',
         content: response.message,
         timestamp: new Date(),
+        inputHint: response.input_hint ?? null,
       };
 
-      // Count real user messages (exclude auto-greeting)
-      const userMsgCount = state.messages.filter((m) => m.role === 'user').length + 1; // +1 for current
-
-      // After user gives name (2nd user msg) → inject email+phone questions
-      const isNameResponse = !contactAskedRef.current && userMsgCount === 2
-        && !content.startsWith('/') && !/\d{5,}/.test(content); // not a phone/number
-
-      // After user selects "Wedding" → inject cake question
-      const isWeddingSelection = !weddingCakeAskedRef.current
-        && /wedding/i.test(content)
-        && !/(venue|guest|date|appetizer|menu|dessert|cake|email|phone)/i.test(content);
-
-      if (isNameResponse) {
-        contactAskedRef.current = true;
-        deferredAiMessageRef.current = aiMessage;
-        const emailAsk: ChatMessage = {
-          role: 'ai',
-          content: 'What\'s the best email to reach you at?',
-          timestamp: new Date(),
-        };
-        setState((prev) => ({
-          ...prev,
-          messages: [...prev.messages, emailAsk],
-          threadId: response.thread_id,
-          progress: { filled: response.slots_filled, total: response.total_slots },
-          isComplete: response.is_complete,
-          isLoading: false,
-        }));
-        setFrontendStep('contact_email');
-      } else if (isWeddingSelection) {
-        weddingCakeAskedRef.current = true;
-        deferredAiMessageRef.current = aiMessage;
-        const cakeAsk: ChatMessage = {
-          role: 'ai',
-          content: '🎂 Would you like a wedding cake?\n1. Yes\n2. No thanks',
-          timestamp: new Date(),
-        };
-        setState((prev) => ({
-          ...prev,
-          messages: [...prev.messages, cakeAsk],
-          threadId: response.thread_id,
-          progress: { filled: response.slots_filled, total: response.total_slots },
-          isComplete: response.is_complete,
-          isLoading: false,
-        }));
-        setFrontendStep('cake_ask');
-      } else {
-        setState((prev) => ({
-          ...prev,
-          messages: [...prev.messages, aiMessage],
-          threadId: response.thread_id,
-          progress: { filled: response.slots_filled, total: response.total_slots },
-          isComplete: response.is_complete,
-          isLoading: false,
-        }));
-      }
+      setState((prev) => ({
+        ...prev,
+        messages: [...prev.messages, aiMessage],
+        threadId: response.thread_id,
+        progress: { filled: response.slots_filled, total: response.total_slots },
+        isComplete: response.is_complete,
+        isLoading: false,
+      }));
 
       onProgressUpdate?.({ filled: response.slots_filled, total: response.total_slots });
       saveSessionToStorage(response.thread_id);
       if (!state.threadId) onThreadStart?.(response.thread_id);
-
-      // Auto-detect email and phone in user messages → save to slots
-      const emailMatch = content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-      if (emailMatch) onSlotsUpdate?.({ email: emailMatch[0] } as any);
-      const phoneMatch = content.match(/\+?\d[\d\s()-]{8,}\d/);
-      if (phoneMatch) onSlotsUpdate?.({ phone: phoneMatch[0].replace(/[\s()-]/g, '') } as any);
 
       // Always fetch latest slots after every AI response to catch additions AND removals.
       // Small delay so the agent's save_conversation_state has time to commit before we read.
@@ -1603,10 +1579,15 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
             const userInitial = userName.charAt(0).toUpperCase();
             const time = msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             const isActive = idx === activeMenuMsgIdx;
-            const listItems = isActive ? parseListItems(msg.content) : null;
-            const categorizedItems = isActive && listItems
-              ? (parseCategorizedItems(msg.content) ?? groupItemsByCategory(listItems))
+            const hintPicker = isActive ? pickerFromInputHint(msg.inputHint) : null;
+            const listItems = isActive ? (hintPicker?.items ?? parseListItems(msg.content)) : null;
+            const categorizedItems = isActive
+              ? (hintPicker?.categories ?? (listItems ? (parseCategorizedItems(msg.content) ?? groupItemsByCategory(listItems)) : null))
               : null;
+            const inlineSelectionSnapshot = msg.role === 'ai' ? parseInlineSelectionSnapshot(msg.content) : null;
+            const inlineSelectionCategories = inlineSelectionSnapshot
+              ? (groupItemsByCategory(inlineSelectionSnapshot.items) ?? undefined)
+              : undefined;
 
             if (msg.role === 'ai' && listItems) {
               const { intro } = splitAtList(msg.content);
@@ -1634,7 +1615,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
 
               // Only suppress cards for pure confirmations — if the message also
               // presents a new numbered list or inline yes/no choices, always show cards.
-              const hasNewQuestion = /^\s*\d+\./m.test(msg.content) || detectInlineChoices(msg.content) !== null;
+              const hasNewQuestion = !!hintPicker || /^\s*\d+\./m.test(msg.content) || detectInlineChoices(msg.content) !== null;
               const isConfirm = isConfirmationMessage(intro) && !hasNewQuestion;
 
               // Confirmation messages: render as plain read-only list, not interactive cards
@@ -1655,14 +1636,14 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                 );
               }
 
-              const multi = isMultiSelect(listItems, msg.content);
+              const multi = hintPicker?.multi ?? isMultiSelect(listItems, msg.content);
               // Cap desserts at 4: detect by intro text OR by shape of the list.
               const isDesserts =
                 /\bdesserts?\b/i.test(intro) ||
                 /\bsweet(en)?\b/i.test(intro) ||
                 /pick (up to|at most)?\s*4\b/i.test(msg.content) ||
                 (!listItems.some((i) => i.price) && listItems.length <= 8 && listItems.length > 6);
-              const maxSelect = isDesserts ? 4 : undefined;
+              const maxSelect = hintPicker?.maxSelect ?? (isDesserts ? 4 : undefined);
 
               return (
                 <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
@@ -1687,7 +1668,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       maxSelect={maxSelect}
                       /* Single-select OR multi-select with a strict maxSelect
                        *  (e.g. desserts capped at 4) auto-sends. Menu and
-                       *  appetizers are multi WITHOUT maxSelect → no auto-send,
+                       *  appetizers are multi WITHOUT maxSelect ? no auto-send,
                        *  user must press Send manually. */
                       onAutoSend={(value) => handleSendMessage(normalizeCardValue(value))}
                     />
@@ -1709,6 +1690,35 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       <span className="text-xs font-bold text-white">{userInitial}</span>
                     </div>
                     <span className="text-[10px] text-neutral-400">You</span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (inlineSelectionSnapshot) {
+              return (
+                <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
+                  <div className="flex flex-col items-center gap-1 shrink-0">
+                    <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
+                      <Sparkles className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <span className="text-[10px] text-neutral-400">AI</span>
+                  </div>
+                  <div className="tc-bubble-ai max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-neutral-900">
+                    {inlineSelectionSnapshot.before && (
+                      <MarkdownMessage content={inlineSelectionSnapshot.before} />
+                    )}
+                    <ReadOnlySelectionSnapshot
+                      label={inlineSelectionSnapshot.label}
+                      items={inlineSelectionSnapshot.items}
+                      categories={inlineSelectionCategories}
+                    />
+                    {inlineSelectionSnapshot.after && (
+                      <div className="mt-3">
+                        <MarkdownMessage content={inlineSelectionSnapshot.after} />
+                      </div>
+                    )}
+                    <span className="text-xs mt-2 block text-neutral-400">{time}</span>
                   </div>
                 </div>
               );
@@ -1760,10 +1770,18 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           const lastAiMsg = [...state.messages].reverse().find((m) => m.role === 'ai');
           const noMenu = activeMenuMsgIdx === null;
           const isNameMode = !state.isLoading && !!lastAiMsg && isAskingForName(lastAiMsg.content) && noMenu;
-          const isPhoneMode = !state.isLoading && !isNameMode && frontendStep === 'contact_phone' && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && noMenu;
+          const isPhoneMode = !state.isLoading && !isNameMode && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && noMenu;
           const isEmailMode = !state.isLoading && !isNameMode && !isPhoneMode && !!lastAiMsg && isAskingForEmail(lastAiMsg.content) && noMenu;
-          const isDateMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !!lastAiMsg && isAskingForDate(lastAiMsg.content) && noMenu;
-          const isGuestMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !isDateMode && !!lastAiMsg && isAskingForGuestCount(lastAiMsg.content) && noMenu;
+          const isDateMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !!lastAiMsg && (isAskingForDate(lastAiMsg.content) || lastAiMsg.inputHint?.type === 'date') && noMenu;
+          const isGuestMode =
+            !state.isLoading &&
+            !isNameMode &&
+            !isPhoneMode &&
+            !isEmailMode &&
+            !isDateMode &&
+            !!lastAiMsg &&
+            (isGuestCountHint(lastAiMsg.inputHint) || isAskingForGuestCount(lastAiMsg.content)) &&
+            noMenu;
           const isVenueMode = !state.isLoading && !isNameMode && !isPhoneMode && !isEmailMode && !isDateMode && !isGuestMode && !!lastAiMsg && isAskingForVenue(lastAiMsg.content) && noMenu;
           const specialMode = isNameMode || isPhoneMode || isEmailMode || isDateMode || isGuestMode;
 
@@ -1933,3 +1951,4 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     </>
   );
 }
+

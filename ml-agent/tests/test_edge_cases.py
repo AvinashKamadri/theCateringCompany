@@ -1,279 +1,185 @@
-"""
-Edge case and error handling tests
-"""
+"""Current edge-case coverage for the orchestrator shell."""
+
+import sys
+import uuid
 
 import pytest
-from orchestrator import AgentOrchestrator
+
+
+sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
+
+import orchestrator as orchestrator_module
+from agent.models import OrchestratorDecision, ToolCall
+from agent.state import PHASE_GREETING, fill_slot, get_slot_value, initialize_empty_slots
+from agent.tools.base import ToolResult
+
+
+class _EchoTool:
+    name = "basic_info_tool"
+
+    def __init__(self, *, raise_error: bool = False) -> None:
+        self.raise_error = raise_error
+
+    async def run(self, *, message, history, state):
+        if self.raise_error:
+            raise RuntimeError("boom")
+        slots = state["slots"]
+        if not get_slot_value(slots, "name"):
+            fill_slot(slots, "name", message.strip())
+        return ToolResult(
+            state=state,
+            response_context={"tool": self.name, "next_question_target": "ask_event_type"},
+            direct_response=f"Echoed: {message[:40]}",
+        )
+
+
+@pytest.fixture
+def edge_testbed(monkeypatch):
+    states: dict[str, dict] = {}
+
+    async def fake_init_db():
+        return None
+
+    async def fake_create_project_and_thread(*, thread_id, project_id, title, user_id):
+        return project_id or str(uuid.uuid4()), thread_id, str(uuid.uuid4())
+
+    async def fake_load_conversation_state(thread_id):
+        return states.get(thread_id)
+
+    async def fake_load_messages(thread_id):
+        return []
+
+    async def fake_save_conversation_state(*, thread_id, project_id, current_node, slots, is_completed):
+        state_id = states.get(thread_id, {}).get("id") or str(uuid.uuid4())
+        states[thread_id] = {
+            "id": state_id,
+            "project_id": project_id,
+            "current_node": current_node,
+            "slots": slots,
+            "is_completed": is_completed,
+        }
+        return state_id
+
+    async def fake_save_message(**kwargs):
+        return None
+
+    async def fake_render_response(*, tool_result, user_message, history):
+        return tool_result.direct_response or "rendered"
+
+    async def fake_route_turn(*, message, history, state):
+        lowered = message.lower()
+        if lowered == "":
+            return OrchestratorDecision(
+                action="clarify",
+                tool_calls=[],
+                confidence=0.9,
+                clarifying_question="Could you say that again?",
+            )
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[ToolCall(tool_name="basic_info_tool", reason="edge test")],
+            confidence=1.0,
+        )
+
+    monkeypatch.setattr(orchestrator_module, "init_db", fake_init_db)
+    monkeypatch.setattr(orchestrator_module, "create_project_and_thread", fake_create_project_and_thread)
+    monkeypatch.setattr(orchestrator_module, "load_conversation_state", fake_load_conversation_state)
+    monkeypatch.setattr(orchestrator_module, "load_messages", fake_load_messages)
+    monkeypatch.setattr(orchestrator_module, "save_conversation_state", fake_save_conversation_state)
+    monkeypatch.setattr(orchestrator_module, "save_message", fake_save_message)
+    monkeypatch.setattr(orchestrator_module, "render_response", fake_render_response)
+    monkeypatch.setattr(orchestrator_module, "route_turn", fake_route_turn)
+    monkeypatch.setitem(orchestrator_module.TOOL_REGISTRY, "basic_info_tool", _EchoTool())
+
+    return orchestrator_module.AgentOrchestrator(), states
 
 
 @pytest.mark.asyncio
-async def test_empty_message():
-    """Test handling of empty message"""
-    orchestrator = AgentOrchestrator()
-    
+async def test_empty_message_returns_graceful_reply(edge_testbed):
+    orchestrator, _ = edge_testbed
+
     response = await orchestrator.process_message(
-        thread_id="test-1",
+        thread_id=str(uuid.uuid4()),
         message="",
-        author_id="user-1"
+        author_id="user-1",
     )
-    
-    # Should handle gracefully
-    assert response.content != ""
-    assert response.error is None
+
+    assert response["content"] == "rendered"
+    assert response["is_complete"] is False
 
 
 @pytest.mark.asyncio
-async def test_very_long_message():
-    """Test handling of very long message"""
-    orchestrator = AgentOrchestrator()
-    
-    long_message = "My name is John " + "Smith " * 1000  # Very long name
-    
+async def test_very_long_message_does_not_crash(edge_testbed):
+    orchestrator, _ = edge_testbed
+    long_message = "My name is John " + ("Smith " * 1000)
+
     response = await orchestrator.process_message(
-        thread_id="test-2",
+        thread_id=str(uuid.uuid4()),
         message=long_message,
-        author_id="user-1"
-    )
-    
-    # Should handle gracefully
-    assert response.error is None
-
-
-@pytest.mark.asyncio
-async def test_invalid_phone_format():
-    """Test handling of invalid phone number"""
-    orchestrator = AgentOrchestrator()
-    
-    response = await orchestrator.process_message(
-        thread_id="test-3",
-        message="My name is John",
-        author_id="user-1"
-    )
-    state = response.conversation_state
-    
-    response = await orchestrator.process_message(
-        thread_id="test-3",
-        message="abc123",  # Invalid phone
         author_id="user-1",
-        conversation_state=state
     )
-    
-    # Should ask for clarification
-    assert "phone" in response.content.lower() or response.slots_filled == 1
+
+    assert response["content"].startswith("Echoed:")
+    assert response.get("tool_used") == "basic_info_tool"
 
 
 @pytest.mark.asyncio
-async def test_past_date():
-    """Test handling of past event date"""
-    orchestrator = AgentOrchestrator()
-    
-    # Fill name and phone first
+async def test_unicode_input_is_preserved(edge_testbed):
+    orchestrator, states = edge_testbed
+    thread_id = str(uuid.uuid4())
+
     response = await orchestrator.process_message(
-        thread_id="test-4",
-        message="My name is Jane",
-        author_id="user-1"
-    )
-    state = response.conversation_state
-    
-    response = await orchestrator.process_message(
-        thread_id="test-4",
-        message="555-111-2222",
+        thread_id=thread_id,
+        message="Jos\u00e9 Garc\u00eda-L\u00f3pez",
         author_id="user-1",
-        conversation_state=state
     )
-    state = response.conversation_state
-    
-    # Try past date
+
+    assert response["slots_filled"] >= 1
+    assert get_slot_value(states[thread_id]["slots"], "name") == "Jos\u00e9 Garc\u00eda-L\u00f3pez"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_failure_path_returns_safe_fallback(monkeypatch):
+    async def fake_init_db():
+        return None
+
+    async def fake_create_project_and_thread(*, thread_id, project_id, title, user_id):
+        return project_id or str(uuid.uuid4()), thread_id, str(uuid.uuid4())
+
+    async def fake_load_conversation_state(thread_id):
+        return None
+
+    async def fake_load_messages(thread_id):
+        return []
+
+    async def fake_save_conversation_state(*, thread_id, project_id, current_node, slots, is_completed):
+        return str(uuid.uuid4())
+
+    async def fake_save_message(**kwargs):
+        return None
+
+    async def fake_route_turn(*, message, history, state):
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[ToolCall(tool_name="basic_info_tool", reason="force error")],
+            confidence=1.0,
+        )
+
+    monkeypatch.setattr(orchestrator_module, "init_db", fake_init_db)
+    monkeypatch.setattr(orchestrator_module, "create_project_and_thread", fake_create_project_and_thread)
+    monkeypatch.setattr(orchestrator_module, "load_conversation_state", fake_load_conversation_state)
+    monkeypatch.setattr(orchestrator_module, "load_messages", fake_load_messages)
+    monkeypatch.setattr(orchestrator_module, "save_conversation_state", fake_save_conversation_state)
+    monkeypatch.setattr(orchestrator_module, "save_message", fake_save_message)
+    monkeypatch.setattr(orchestrator_module, "route_turn", fake_route_turn)
+    monkeypatch.setitem(orchestrator_module.TOOL_REGISTRY, "basic_info_tool", _EchoTool(raise_error=True))
+
+    orchestrator = orchestrator_module.AgentOrchestrator()
     response = await orchestrator.process_message(
-        thread_id="test-4",
-        message="January 1st, 2020",  # Past date
+        thread_id=str(uuid.uuid4()),
+        message="hello",
         author_id="user-1",
-        conversation_state=state
     )
-    
-    # Should reject and ask for future date
-    assert response.slots_filled == 2 or "future" in response.content.lower() or "past" in response.content.lower()
 
-
-@pytest.mark.asyncio
-async def test_guest_count_too_low():
-    """Test handling of guest count below minimum"""
-    orchestrator = AgentOrchestrator()
-    
-    # Navigate to guest count (simplified)
-    response = await orchestrator.process_message(
-        thread_id="test-5",
-        message="My name is Test User",
-        author_id="user-1"
-    )
-    
-    # The actual test would need to navigate through all slots
-    # This is a simplified version
-    assert response.error is None
-
-
-@pytest.mark.asyncio
-async def test_ambiguous_ai_modification():
-    """Test handling of ambiguous @AI modification"""
-    orchestrator = AgentOrchestrator()
-    
-    # Fill multiple slots
-    response = await orchestrator.process_message(
-        thread_id="test-6",
-        message="My name is Bob",
-        author_id="user-1"
-    )
-    state = response.conversation_state
-    
-    response = await orchestrator.process_message(
-        thread_id="test-6",
-        message="555-1234",
-        author_id="user-1",
-        conversation_state=state
-    )
-    state = response.conversation_state
-    
-    # Ambiguous modification
-    response = await orchestrator.process_message(
-        thread_id="test-6",
-        message="@AI change it",  # Ambiguous - what to change?
-        author_id="user-1",
-        conversation_state=state
-    )
-    
-    # Should ask for clarification or handle gracefully
-    assert response.error is None
-
-
-@pytest.mark.asyncio
-async def test_special_characters_in_input():
-    """Test handling of special characters"""
-    orchestrator = AgentOrchestrator()
-    
-    response = await orchestrator.process_message(
-        thread_id="test-7",
-        message="My name is José García-López",
-        author_id="user-1"
-    )
-    
-    # Should handle special characters
-    assert response.slots_filled == 1
-    assert response.error is None
-
-
-@pytest.mark.asyncio
-async def test_numeric_name():
-    """Test handling of numeric input for name"""
-    orchestrator = AgentOrchestrator()
-    
-    response = await orchestrator.process_message(
-        thread_id="test-8",
-        message="12345",
-        author_id="user-1"
-    )
-    
-    # Should handle gracefully (might ask for clarification)
-    assert response.error is None
-
-
-@pytest.mark.asyncio
-async def test_mixed_case_ai_tag():
-    """Test @AI tag with mixed case"""
-    orchestrator = AgentOrchestrator()
-    
-    response = await orchestrator.process_message(
-        thread_id="test-9",
-        message="My name is Test",
-        author_id="user-1"
-    )
-    state = response.conversation_state
-    
-    # Try different @AI variations
-    response = await orchestrator.process_message(
-        thread_id="test-9",
-        message="@ai change name to NewName",  # lowercase
-        author_id="user-1",
-        conversation_state=state
-    )
-    
-    # Should detect @AI regardless of case
-    assert response.error is None
-
-
-@pytest.mark.asyncio
-async def test_multiple_ai_tags_in_message():
-    """Test multiple @AI tags in one message"""
-    orchestrator = AgentOrchestrator()
-    
-    response = await orchestrator.process_message(
-        thread_id="test-10",
-        message="My name is Test",
-        author_id="user-1"
-    )
-    state = response.conversation_state
-    
-    response = await orchestrator.process_message(
-        thread_id="test-10",
-        message="555-1234",
-        author_id="user-1",
-        conversation_state=state
-    )
-    state = response.conversation_state
-    
-    # Multiple modifications
-    response = await orchestrator.process_message(
-        thread_id="test-10",
-        message="@AI change name to John and @AI change phone to 555-9999",
-        author_id="user-1",
-        conversation_state=state
-    )
-    
-    # Should handle gracefully
-    assert response.error is None
-
-
-@pytest.mark.asyncio
-async def test_conversation_with_typos():
-    """Test handling of messages with typos"""
-    orchestrator = AgentOrchestrator()
-    
-    response = await orchestrator.process_message(
-        thread_id="test-11",
-        message="My nmae is Jhon Smtih",  # Typos
-        author_id="user-1"
-    )
-    
-    # Should still extract name despite typos
-    assert response.error is None
-
-
-@pytest.mark.asyncio
-async def test_null_conversation_state():
-    """Test handling of null conversation state"""
-    orchestrator = AgentOrchestrator()
-    
-    response = await orchestrator.process_message(
-        thread_id="test-12",
-        message="My name is Test",
-        author_id="user-1",
-        conversation_state=None  # Explicitly None
-    )
-    
-    # Should initialize new conversation
-    assert response.slots_filled >= 0
-    assert response.error is None
-
-
-@pytest.mark.asyncio
-async def test_unicode_emoji_in_message():
-    """Test handling of emoji in messages"""
-    orchestrator = AgentOrchestrator()
-    
-    response = await orchestrator.process_message(
-        thread_id="test-13",
-        message="My name is Sarah 😊",
-        author_id="user-1"
-    )
-    
-    # Should handle emoji gracefully
-    assert response.error is None
+    assert "snag" in response["content"].lower()
+    assert response["current_node"] == PHASE_GREETING

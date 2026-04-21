@@ -19,12 +19,28 @@ _client: Prisma | None = None
 SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 
+async def _ensure_system_user(client: Prisma) -> None:
+    """Ensure the system user exists (needed for AI-authored messages FK)."""
+    existing = await client.users.find_unique(where={"id": SYSTEM_USER_ID})
+    if not existing:
+        await client.users.create(
+            data={
+                "id": SYSTEM_USER_ID,
+                "email": "system@catering-agent.internal",
+                "password_hash": "!disabled",
+                "status": "active",
+            }
+        )
+        logger.info("Created system user %s", SYSTEM_USER_ID)
+
+
 async def init_db():
     """Connect Prisma client."""
     global _client
     if _client is None:
         _client = Prisma()
         await _client.connect()
+        await _ensure_system_user(_client)
         logger.info("Prisma client connected")
 
 
@@ -188,7 +204,7 @@ async def load_conversation_state(thread_id: str) -> dict | None:
         "project_id": row.project_id,
         "thread_id": row.thread_id,
         "current_node": row.current_node,
-        "slots": row.slots or {},
+        "slots": row.slots,  # native JSONB, no json.loads needed
         "is_completed": row.is_completed,
     }
 
@@ -222,7 +238,9 @@ async def save_message(
     if sender_type == "ai":
         resolved_author = SYSTEM_USER_ID
     elif author_id and _UUID_RE.match(str(author_id)):
-        resolved_author = author_id
+        # Verify user exists locally — prod users may not exist in dev DB
+        user_exists = await client.users.find_unique(where={"id": str(author_id)})
+        resolved_author = str(author_id) if user_exists else None
     else:
         resolved_author = None
 
@@ -589,6 +607,13 @@ async def sync_slots_to_project(project_id: str, slots: dict, thread_id: str) ->
             addons.append(v if isinstance(v, str) else str(v))
 
     desserts = slot_val("desserts")
+    service_style = slot_val("service_style")
+    if isinstance(service_style, str):
+        service_style = {
+            "cocktail_hour": "cocktail hour",
+            "reception": "reception",
+            "both": "cocktail hour + reception",
+        }.get(service_style.lower(), service_style)
 
     summary_json: dict = {"thread_id": thread_id}
 
@@ -597,7 +622,7 @@ async def sync_slots_to_project(project_id: str, slots: dict, thread_id: str) ->
         "client_name": slot_val("name"),
         "event_type": slot_val("event_type"),
         "service_type": slot_val("service_type"),
-        "service_style": slot_val("service_style"),
+        "service_style": service_style,
         "venue_name": slot_val("venue"),
         "main_dishes": slot_val("selected_dishes"),
         "appetizers": slot_val("appetizers"),

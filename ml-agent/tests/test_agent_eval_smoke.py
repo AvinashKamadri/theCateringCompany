@@ -17,6 +17,7 @@ from agent.state import (
 )
 
 
+@pytest.mark.skip(reason="quick_route removed for purely intent-based routing")
 @pytest.mark.parametrize(
     ("phase", "message", "slot_fills", "expected_tool"),
     [

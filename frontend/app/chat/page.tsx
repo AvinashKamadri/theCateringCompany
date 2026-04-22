@@ -73,9 +73,12 @@ function removeSession(threadId: string) {
   } catch {}
 }
 
-/** Right-side event plan panel — hover-only, transparent glass sidebar */
-function EventPlanPanel({ slots }: { slots: Partial<ContractData> }) {
-  const [isExpanded, setIsExpanded] = useState(false);
+/** Right-side event plan panel */
+function EventPlanPanel({ slots, mobileOpen, onMobileToggle }: {
+  slots: Partial<ContractData>;
+  mobileOpen?: boolean;
+  onMobileToggle?: () => void;
+}) {
   const [itemsOpen, setItemsOpen] = useState(false);
   const hasDate     = !!slots.event_date;
   const hasGuests   = !!slots.guest_count;
@@ -97,6 +100,7 @@ function EventPlanPanel({ slots }: { slots: Partial<ContractData> }) {
     return null;
   };
 
+  // Collect food items
   const foodItems: string[] = [];
   const parseItems = (val?: string | string[]) => {
     if (!val || val === 'none' || val === 'no') return;
@@ -119,10 +123,10 @@ function EventPlanPanel({ slots }: { slots: Partial<ContractData> }) {
     <div className="space-y-5">
       {!hasAnyDetail ? (
         <div className="flex flex-col items-center justify-center py-12 text-center">
-          <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center mb-3">
-            <UtensilsCrossed className="w-5 h-5 text-white/40" />
+          <div className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center mb-3">
+            <UtensilsCrossed className="w-5 h-5 text-neutral-300" />
           </div>
-          <p className="text-sm text-white/50 leading-relaxed">
+          <p className="text-sm text-neutral-400 leading-relaxed">
             Your event details will<br />appear here as we chat.
           </p>
         </div>
@@ -132,56 +136,56 @@ function EventPlanPanel({ slots }: { slots: Partial<ContractData> }) {
             <div className="space-y-3">
               {hasName && (
                 <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-md bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <Users className="w-3.5 h-3.5 text-white/60" />
+                  <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <Users className="w-3.5 h-3.5 text-neutral-500" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold tracking-wider text-white/40 uppercase">Client</p>
-                    <p className="text-sm font-medium text-white/90 mt-0.5">{slots.name}</p>
+                    <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Client</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.name}</p>
                   </div>
                 </div>
               )}
               {hasEventType && (
                 <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-md bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <UtensilsCrossed className="w-3.5 h-3.5 text-white/60" />
+                  <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-500" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold tracking-wider text-white/40 uppercase">Event</p>
-                    <p className="text-sm font-medium text-white/90 mt-0.5">{slots.event_type}</p>
+                    <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Event</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.event_type}</p>
                   </div>
                 </div>
               )}
               {hasDate && (
                 <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-md bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <CalendarDays className="w-3.5 h-3.5 text-white/60" />
+                  <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <CalendarDays className="w-3.5 h-3.5 text-neutral-500" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold tracking-wider text-white/40 uppercase">Date</p>
-                    <p className="text-sm font-medium text-white/90 mt-0.5">{formatDate(slots.event_date!)}</p>
+                    <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Date</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{formatDate(slots.event_date!)}</p>
                   </div>
                 </div>
               )}
               {hasGuests && (
                 <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-md bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <Users className="w-3.5 h-3.5 text-white/60" />
+                  <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <Users className="w-3.5 h-3.5 text-neutral-500" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold tracking-wider text-white/40 uppercase">Guests</p>
-                    <p className="text-sm font-medium text-white/90 mt-0.5">{slots.guest_count} Attendees</p>
+                    <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Guests</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.guest_count} Attendees</p>
                   </div>
                 </div>
               )}
               {hasVenue && (
                 <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-md bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <MapPin className="w-3.5 h-3.5 text-white/60" />
+                  <div className="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <MapPin className="w-3.5 h-3.5 text-neutral-500" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold tracking-wider text-white/40 uppercase">Location</p>
-                    <p className="text-sm font-medium text-white/90 mt-0.5">{slots.venue}</p>
+                    <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase">Location</p>
+                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{slots.venue}</p>
                   </div>
                 </div>
               )}
@@ -191,33 +195,33 @@ function EventPlanPanel({ slots }: { slots: Partial<ContractData> }) {
           {foodItems.length > 0 && (
             <div>
               <div className="flex items-center justify-between mb-2">
-                <p className="text-[10px] font-semibold tracking-widest text-white/40 uppercase">Selected Items</p>
-                <span className="text-xs text-white/40 tabular-nums">{foodItems.length}</span>
+                <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">Selected Items</p>
+                <span className="text-xs text-neutral-400 tabular-nums">{foodItems.length}</span>
               </div>
               <div className="relative">
                 <div className={`space-y-2 overflow-hidden transition-all duration-300 ${itemsOpen ? 'max-h-[2000px]' : 'max-h-[198px]'}`}>
                   {foodItems.map((item, i) => {
                     const imgUrl = getMenuImageUrl(item);
                     return (
-                      <div key={i} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-white/10 border border-white/10">
+                      <div key={i} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100">
                         {imgUrl ? (
                           <img src={imgUrl} alt={item} className="w-8 h-8 rounded-md object-cover shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                         ) : (
-                          <div className="w-8 h-8 rounded-md bg-white/10 flex items-center justify-center shrink-0">
-                            <UtensilsCrossed className="w-3.5 h-3.5 text-white/40" />
+                          <div className="w-8 h-8 rounded-md bg-neutral-200 flex items-center justify-center shrink-0">
+                            <UtensilsCrossed className="w-3.5 h-3.5 text-neutral-400" />
                           </div>
                         )}
-                        <p className="text-sm text-white/80 font-medium leading-tight">{item}</p>
+                        <p className="text-sm text-neutral-800 font-medium leading-tight">{item}</p>
                       </div>
                     );
                   })}
                 </div>
                 {!itemsOpen && foodItems.length > 4 && (
-                  <div className="absolute bottom-0 left-0 right-0 h-16 bg-linear-to-t from-black/40 to-transparent pointer-events-none" />
+                  <div className="absolute bottom-0 left-0 right-0 h-16 bg-linear-to-t from-white to-transparent pointer-events-none" />
                 )}
               </div>
               {foodItems.length > 4 && (
-                <button onClick={() => setItemsOpen((o) => !o)} className="mt-1 w-full flex items-center justify-center gap-1 text-xs text-white/50 hover:text-white py-1 transition-colors">
+                <button onClick={() => setItemsOpen((o) => !o)} className="mt-1 w-full flex items-center justify-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 py-1 transition-colors">
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${itemsOpen ? 'rotate-180' : ''}`} />
                   {itemsOpen ? 'Show less' : `View all ${foodItems.length} items`}
                 </button>
@@ -227,43 +231,43 @@ function EventPlanPanel({ slots }: { slots: Partial<ContractData> }) {
 
           {slots.service_type && (
             <div>
-              <p className="text-[10px] font-semibold tracking-wider text-white/40 uppercase mb-1">Service</p>
-              <p className="text-sm text-white/80 capitalize">{slots.service_type.replace('-', ' ')}</p>
+              <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">Service</p>
+              <p className="text-sm text-neutral-800 capitalize">{slots.service_type.replace('-', ' ')}</p>
             </div>
           )}
           {slots.dietary_concerns && slots.dietary_concerns !== 'none' && (
             <div>
-              <p className="text-[10px] font-semibold tracking-wider text-white/40 uppercase mb-1">Dietary Notes</p>
-              <p className="text-sm text-white/80">{slots.dietary_concerns}</p>
+              <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">Dietary Notes</p>
+              <p className="text-sm text-neutral-800">{slots.dietary_concerns}</p>
             </div>
           )}
           {slots.special_requests && slots.special_requests !== 'none' && (
             <div>
-              <p className="text-[10px] font-semibold tracking-wider text-white/40 uppercase mb-1">Special Requests</p>
-              <p className="text-sm text-white/80">{slots.special_requests}</p>
+              <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-1">Special Requests</p>
+              <p className="text-sm text-neutral-800">{slots.special_requests}</p>
             </div>
           )}
-          <div className="pt-1 border-t border-white/10">
-            <p className="text-[10px] font-semibold tracking-wider text-white/40 uppercase mb-2">Full Intake Snapshot</p>
+          <div className="pt-1 border-t border-neutral-100">
+            <p className="text-[10px] font-semibold tracking-wider text-neutral-400 uppercase mb-2">Full Intake Snapshot</p>
             <div className="space-y-1.5 text-sm">
-              {isWedding && slots.partner_name && <p className="text-white/70"><span className="text-white/40">Partner:</span> {slots.partner_name}</p>}
-              {isCorporate && slots.company_name && <p className="text-white/70"><span className="text-white/40">Company:</span> {slots.company_name}</p>}
-              {isBirthday && slots.honoree_name && <p className="text-white/70"><span className="text-white/40">Honoree:</span> {slots.honoree_name}</p>}
-              {slots.email && <p className="text-white/70"><span className="text-white/40">Email:</span> {slots.email}</p>}
-              {slots.phone && <p className="text-white/70"><span className="text-white/40">Phone:</span> {slots.phone}</p>}
-              {slots.wedding_cake && slots.wedding_cake !== 'none' && <p className="text-white/70"><span className="text-white/40">Wedding cake:</span> {slots.wedding_cake}</p>}
-              {slots.meal_style && <p className="text-white/70"><span className="text-white/40">Meal style:</span> {slots.meal_style}</p>}
-              {slots.appetizer_style && <p className="text-white/70"><span className="text-white/40">Appetizer style:</span> {slots.appetizer_style}</p>}
-              {slots.tableware && <p className="text-white/70"><span className="text-white/40">Tableware:</span> {slots.tableware}</p>}
-              {slots.utensils && <p className="text-white/70"><span className="text-white/40">Utensils:</span> {slots.utensils}</p>}
-              {slotYesNo(slots.drinks) && <p className="text-white/70"><span className="text-white/40">Drinks:</span> {slotYesNo(slots.drinks)}</p>}
-              {slotYesNo(slots.bar_service) && <p className="text-white/70"><span className="text-white/40">Bar service:</span> {slotYesNo(slots.bar_service)}</p>}
-              {slots.bar_package && <p className="text-white/70"><span className="text-white/40">Bar package:</span> {slots.bar_package}</p>}
-              {slotYesNo(slots.coffee_service) && <p className="text-white/70"><span className="text-white/40">Coffee service:</span> {slotYesNo(slots.coffee_service)}</p>}
-              {slotYesNo(slots.linens) && <p className="text-white/70"><span className="text-white/40">Linens:</span> {slotYesNo(slots.linens)}</p>}
-              {slotList(slots.rentals).length > 0 && <p className="text-white/70"><span className="text-white/40">Rentals:</span> {slotList(slots.rentals).join(', ')}</p>}
-              {slots.additional_notes && slots.additional_notes !== 'none' && <p className="text-white/70"><span className="text-white/40">Additional notes:</span> {slots.additional_notes}</p>}
-              {slotYesNo(slots.followup_call_requested) && <p className="text-white/70"><span className="text-white/40">Follow-up call:</span> {slotYesNo(slots.followup_call_requested)}</p>}
+              {isWedding && slots.partner_name && <p className="text-neutral-700"><span className="text-neutral-400">Partner:</span> {slots.partner_name}</p>}
+              {isCorporate && slots.company_name && <p className="text-neutral-700"><span className="text-neutral-400">Company:</span> {slots.company_name}</p>}
+              {isBirthday && slots.honoree_name && <p className="text-neutral-700"><span className="text-neutral-400">Honoree:</span> {slots.honoree_name}</p>}
+              {slots.email && <p className="text-neutral-700"><span className="text-neutral-400">Email:</span> {slots.email}</p>}
+              {slots.phone && <p className="text-neutral-700"><span className="text-neutral-400">Phone:</span> {slots.phone}</p>}
+              {slots.wedding_cake && slots.wedding_cake !== 'none' && <p className="text-neutral-700"><span className="text-neutral-400">Wedding cake:</span> {slots.wedding_cake}</p>}
+              {slots.meal_style && <p className="text-neutral-700"><span className="text-neutral-400">Meal style:</span> {slots.meal_style}</p>}
+              {slots.appetizer_style && <p className="text-neutral-700"><span className="text-neutral-400">Appetizer style:</span> {slots.appetizer_style}</p>}
+              {slots.tableware && <p className="text-neutral-700"><span className="text-neutral-400">Tableware:</span> {slots.tableware}</p>}
+              {slots.utensils && <p className="text-neutral-700"><span className="text-neutral-400">Utensils:</span> {slots.utensils}</p>}
+              {slotYesNo(slots.drinks) && <p className="text-neutral-700"><span className="text-neutral-400">Drinks:</span> {slotYesNo(slots.drinks)}</p>}
+              {slotYesNo(slots.bar_service) && <p className="text-neutral-700"><span className="text-neutral-400">Bar service:</span> {slotYesNo(slots.bar_service)}</p>}
+              {slots.bar_package && <p className="text-neutral-700"><span className="text-neutral-400">Bar package:</span> {slots.bar_package}</p>}
+              {slotYesNo(slots.coffee_service) && <p className="text-neutral-700"><span className="text-neutral-400">Coffee service:</span> {slotYesNo(slots.coffee_service)}</p>}
+              {slotYesNo(slots.linens) && <p className="text-neutral-700"><span className="text-neutral-400">Linens:</span> {slotYesNo(slots.linens)}</p>}
+              {slotList(slots.rentals).length > 0 && <p className="text-neutral-700"><span className="text-neutral-400">Rentals:</span> {slotList(slots.rentals).join(', ')}</p>}
+              {slots.additional_notes && slots.additional_notes !== 'none' && <p className="text-neutral-700"><span className="text-neutral-400">Additional notes:</span> {slots.additional_notes}</p>}
+              {slotYesNo(slots.followup_call_requested) && <p className="text-neutral-700"><span className="text-neutral-400">Follow-up call:</span> {slotYesNo(slots.followup_call_requested)}</p>}
             </div>
           </div>
         </>
@@ -273,23 +277,26 @@ function EventPlanPanel({ slots }: { slots: Partial<ContractData> }) {
 
   return (
     <>
-      {/* Hover trigger strip on right edge */}
-      <div
-        className="fixed right-0 top-0 bottom-0 w-3 z-40 hover:bg-white/5 transition-colors"
-        onMouseEnter={() => setIsExpanded(true)}
-      />
-      {/* Transparent glass sidebar */}
-      <div
-        className={`fixed right-0 top-0 bottom-0 z-50 transition-transform duration-300 ease-in-out ${
-          isExpanded ? 'translate-x-0' : 'translate-x-full'
-        }`}
-        style={{ width: '320px' }}
-        onMouseLeave={() => setIsExpanded(false)}
-      >
-        <div className="h-full flex flex-col overflow-y-auto bg-black/40 backdrop-blur-2xl backdrop-saturate-150 border-l border-white/10">
-          <div className="px-5 pt-6 pb-4 border-b border-white/10 flex items-center justify-between">
-            <p className="text-[10px] font-semibold tracking-widest text-white/50 uppercase">Your Selections</p>
-            <button onClick={() => setIsExpanded(false)} className="text-white/50 hover:text-white transition-colors text-xs">Close</button>
+      {/* Mobile: slide-up bottom sheet (shown when mobileOpen) */}
+      {mobileOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={onMobileToggle} />
+          <div className="relative bg-white rounded-t-2xl max-h-[75vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-neutral-100 shrink-0">
+              <p className="text-[10px] font-semibold tracking-widest text-neutral-400 uppercase">Your Selections</p>
+              <button onClick={onMobileToggle} className="text-sm text-neutral-500 hover:text-black px-2 py-1">Close</button>
+            </div>
+            <div className="overflow-y-auto px-5 py-4 flex-1">{panelContent}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Desktop: right sidebar — frosted light panel over the chat bg so
+          the photo shows through with blur. Text stays dark for readability. */}
+      <div className="hidden lg:flex w-72 xl:w-80 flex-col shrink-0 relative">
+        <div className="flex flex-col overflow-y-auto flex-1 bg-white/70 backdrop-blur-xl backdrop-saturate-150 border-l border-neutral-200/60">
+          <div className="px-5 pt-6 pb-4 border-b border-neutral-200/60">
+            <p className="text-[10px] font-semibold tracking-widest text-neutral-500 uppercase">Your Selections</p>
           </div>
           <div className="px-5 py-5 flex-1">{panelContent}</div>
         </div>
@@ -314,6 +321,7 @@ function AiIntakeContent() {
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [currentSlots, setCurrentSlots] = useState<Partial<ContractData>>({});
   const [, setProgress] = useState<{ filled: number; total: number }>({ filled: 0, total: 20 });
+  const [mobileEventPlanOpen, setMobileEventPlanOpen] = useState(false);
 
   const isStaff = STAFF_DOMAINS.some((d) => user?.email?.toLowerCase().endsWith(d));
 
@@ -578,9 +586,9 @@ function AiIntakeContent() {
                       >
                         <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-sm font-semibold ${
                           s.isCompleted
-                            ? 'bg-linear-to-br from-emerald-500 to-emerald-700 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]'
+                            ? 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]'
                             : initial
-                              ? 'bg-linear-to-br from-neutral-700 to-neutral-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]'
+                              ? 'bg-gradient-to-br from-neutral-700 to-neutral-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]'
                               : 'bg-neutral-100 text-neutral-400'
                         }`}>
                           {s.loading
@@ -651,9 +659,25 @@ function AiIntakeContent() {
           )}
         </div>
 
-        {/* Right: event plan panel — hover-only transparent sidebar */}
+        {/* Right: event plan panel (desktop sidebar + mobile sheet).
+            Hidden on the session picker — only relevant while chatting. */}
         {view === 'chat' && (
-          <EventPlanPanel slots={currentSlots} />
+          <EventPlanPanel
+            slots={currentSlots}
+            mobileOpen={mobileEventPlanOpen}
+            onMobileToggle={() => setMobileEventPlanOpen((o) => !o)}
+          />
+        )}
+
+        {/* Mobile: floating pill to open event plan */}
+        {view === 'chat' && Object.keys(currentSlots).length > 0 && (
+          <button
+            onClick={() => setMobileEventPlanOpen(true)}
+            className="lg:hidden fixed bottom-24 right-4 z-40 flex items-center gap-1.5 bg-black text-white text-xs font-medium px-3 py-2 rounded-full shadow-lg"
+          >
+            <UtensilsCrossed className="w-3.5 h-3.5" />
+            Your Selections
+          </button>
         )}
       </div>
     </div>

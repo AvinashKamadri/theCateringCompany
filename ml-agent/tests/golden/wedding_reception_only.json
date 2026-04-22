@@ -1,0 +1,22 @@
+{
+  "description": "Wedding, reception only (no cocktail hour). Appetizers MUST still be shown.",
+  "turns": [
+    {"user_message": "Hi", "expected_phase_after": "S1_greeting", "expected_slot_deltas": {}},
+    {"user_message": "Syed Ali", "expected_slot_deltas": {"name": "Syed Ali"}},
+    {"user_message": "Wedding", "expected_slot_deltas": {"event_type": "Wedding"}},
+    {"user_message": "Sydney Sweeney", "expected_slot_deltas": {"partner_name": "Sydney Sweeney"}},
+    {"user_message": "no", "expected_slot_deltas": {"wedding_cake": "none"}},
+    {"user_message": "Dropoff", "expected_slot_deltas": {"service_type": "Dropoff"}},
+    {"user_message": "2026-12-31", "expected_slot_deltas": {"event_date": "2026-12-31"}},
+    {"user_message": "tbd_confirm_call", "expected_slot_deltas": {"venue": "TBD - Confirm on call"}},
+    {"user_message": "100", "expected_slot_deltas": {"guest_count": 100}},
+    {"user_message": "a@b.com", "expected_slot_deltas": {"email": "a@b.com"}},
+    {"user_message": "+1 5551234567", "expected_slot_deltas": {"phone": "+1 5551234567"}},
+    {
+      "user_message": "reception",
+      "expected_phase_after": "S8_cocktail_or_main",
+      "expected_slot_deltas": {"cocktail_hour": false, "service_style": "reception"},
+      "note": "Appetizers still need to be collected even when reception-only."
+    }
+  ]
+}

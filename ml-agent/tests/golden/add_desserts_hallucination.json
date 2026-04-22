@@ -1,0 +1,62 @@
+{
+  "description": "User says ADD DESSERTS. Model should reopen the desserts menu, not hallucinate items.",
+  "turns": [
+    {
+      "user_message": "Hi",
+      "expected_phase_after": "S1_greeting",
+      "expected_slot_deltas": {}
+    },
+    {
+      "user_message": "Syed",
+      "expected_phase_after": "S2_event_type",
+      "expected_slot_deltas": {"name": "Syed"}
+    },
+    {
+      "user_message": "Corporate",
+      "expected_phase_after": "S3_conditional",
+      "expected_slot_deltas": {"event_type": "Corporate"}
+    },
+    {
+      "user_message": "Acme Corp",
+      "expected_phase_after": "S4_service_type",
+      "expected_slot_deltas": {"company_name": "Acme Corp"}
+    },
+    {
+      "user_message": "Dropoff",
+      "expected_phase_after": "S5_event_date",
+      "expected_slot_deltas": {"service_type": "Dropoff"}
+    },
+    {
+      "user_message": "Next Friday",
+      "expected_phase_after": "S6_venue",
+      "expected_slot_deltas": {"event_date": "Next Friday"}
+    },
+    {
+      "user_message": "Office",
+      "expected_phase_after": "S7_guest_count",
+      "expected_slot_deltas": {"venue": "Office"}
+    },
+    {
+      "user_message": "50",
+      "expected_phase_after": "S8_transition",
+      "expected_slot_deltas": {"guest_count": "50"}
+    },
+    {
+      "user_message": "Yes, let's pick food",
+      "expected_phase_after": "S9_cocktail_hour"
+    },
+    {
+      "user_message": "Skip apps",
+      "expected_phase_after": "S10_main_menu"
+    },
+    {
+      "user_message": "I want the chicken and beef",
+      "expected_phase_after": "S11_dessert"
+    },
+    {
+      "user_message": "ADD DESSERTS",
+      "expected_phase_after": "S11_dessert",
+      "note": "Reopens dessert menu instead of hallucinating item names."
+    }
+  ]
+}

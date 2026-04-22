@@ -52,7 +52,6 @@ LIST_SLOT_REOPEN_PHRASES: dict[str, tuple[str, ...]] = {
         "start over on appetizers",
     ),
     "selected_dishes": (
-        "main menu",
         "mains menu",
         "show mains",
         "show main dishes",

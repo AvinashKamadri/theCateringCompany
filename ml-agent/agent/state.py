@@ -111,6 +111,12 @@ SLOT_NAMES: list[str] = [
     "dietary_concerns",
     "additional_notes",
     "followup_call_requested",
+
+    # --- Internal flow state (never shown to user) ---
+    # Stores the pending yes/no question so "yes"/"no" can be resolved
+    # deterministically without an LLM call.
+    # Shape: {question_id: str, yes_action: str, no_action: str}
+    "__pending_confirmation",
 ]
 
 

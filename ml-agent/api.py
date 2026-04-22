@@ -47,6 +47,42 @@ def _filled_slot_views(slots: dict | None) -> tuple[dict[str, object], dict[str,
     return public, internal
 
 
+def _summarize_slots_for_log(values: dict[str, object], *, max_value_chars: int = 90, max_list_items: int = 4) -> str:
+    """Make slot dicts readable in logs (truncate + compact list-like strings)."""
+    import re as _re
+
+    def _split_top_level_commas(text: str) -> list[str]:
+        return [p.strip() for p in _re.split(r",(?![^(]*\))", text) if p.strip()]
+
+    def _summarize_value(v: object) -> str:
+        if v is None:
+            return "None"
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (int, float)):
+            return str(v)
+
+        s = str(v).strip()
+        if not s:
+            return '""'
+
+        # Compact comma-separated menu/rental strings: show count + first few.
+        if "," in s and len(s) > max_value_chars:
+            parts = _split_top_level_commas(s)
+            if len(parts) >= 5:
+                head = ", ".join(parts[:max_list_items])
+                return f"[{len(parts)} items] {head}, …"
+
+        if len(s) > max_value_chars:
+            return s[: max_value_chars - 1] + "…"
+        return s
+
+    items = []
+    for k in sorted(values.keys()):
+        items.append(f"{k}={_summarize_value(values[k])}")
+    return "{" + ", ".join(items) + "}"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"\n{'='*50}")
@@ -141,8 +177,8 @@ async def chat(req: ChatRequest):
             req.project_id,
             existing_state.get("current_node") if existing_state else None,
             req.message,
-            before_public,
-            before_internal,
+            _summarize_slots_for_log(before_public),
+            _summarize_slots_for_log(before_internal),
         )
 
         result = await orchestrator.process_message(
@@ -151,6 +187,7 @@ async def chat(req: ChatRequest):
             author_id=req.author_id,
             project_id=req.project_id,
             user_id=resolved_user_id,
+            preloaded_state=existing_state,
         )
 
     contract_id = None
@@ -203,8 +240,8 @@ async def chat(req: ChatRequest):
         result.get("current_node"),
         result.get("slots_filled"),
         result.get("is_complete"),
-        after_public,
-        after_internal,
+        _summarize_slots_for_log(after_public),
+        _summarize_slots_for_log(after_internal),
     )
     if _project_id and _slots:
         try:
@@ -225,6 +262,7 @@ async def chat(req: ChatRequest):
     )
 
 
+
 @app.get("/conversation/{thread_id}")
 async def get_conversation(thread_id: str):
     """Get conversation state + all messages for a thread."""
@@ -242,8 +280,8 @@ async def get_conversation(thread_id: str):
         "conversation_fetch thread=%s current_node=%s public_slots=%s internal_slots=%s",
         thread_id,
         state["current_node"],
-        _public,
-        _internal,
+        _summarize_slots_for_log(_public),
+        _summarize_slots_for_log(_internal),
     )
 
     return {
@@ -273,8 +311,8 @@ async def get_slots(thread_id: str):
         "slot_fetch thread=%s current_node=%s public_slots=%s internal_slots=%s",
         thread_id,
         state["current_node"],
-        _public,
-        _internal,
+        _summarize_slots_for_log(_public),
+        _summarize_slots_for_log(_internal),
     )
 
     return {

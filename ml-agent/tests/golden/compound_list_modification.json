@@ -1,0 +1,32 @@
+{
+  "description": "User edits two list slots in one message: add to desserts AND remove from mains. Both deltas should apply in a single turn.",
+  "preconditions": {
+    "slots": {
+      "name": "Syed",
+      "event_type": "Birthday",
+      "honoree_name": "Test",
+      "service_type": "Dropoff",
+      "event_date": "2026-12-31",
+      "venue": "TBD - Confirm on call",
+      "guest_count": 100,
+      "email": "a@b.com",
+      "phone": "+1 5551234567",
+      "cocktail_hour": true,
+      "appetizer_style": "station",
+      "appetizers": "Charcuterie Boards",
+      "selected_dishes": "Souvlaki Bar, Ravioli Menu",
+      "meal_style": "buffet",
+      "desserts": "Fruit Tarts, Lemon Bars"
+    }
+  },
+  "turns": [
+    {
+      "user_message": "add 7 layer bars and remove souvlaki bar",
+      "expected_slot_deltas": {
+        "desserts": "Fruit Tarts ($5.25/pp), Lemon Bars ($5.25/pp), 7-Layer Bars ($5.25/pp)",
+        "selected_dishes": "Ravioli Menu ($31.99/pp)"
+      },
+      "note": "Known weakness: gpt-4.1-nano tends to extract only one action. If this fails, strengthen modification prompt or split into router hints."
+    }
+  ]
+}

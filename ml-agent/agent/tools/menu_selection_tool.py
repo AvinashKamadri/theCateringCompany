@@ -38,74 +38,114 @@ from agent.menu_resolver import (
 from agent.models import MenuSelectionExtraction
 from agent.state import (
     PHASE_COCKTAIL,
+    PHASE_CONDITIONAL_FOLLOWUP,
     PHASE_DESSERT,
     PHASE_DRINKS_BAR,
+    PHASE_EVENT_DATE,
+    PHASE_GREETING,
+    PHASE_GUEST_COUNT,
     PHASE_MAIN_MENU,
+    PHASE_SERVICE_TYPE,
     PHASE_TRANSITION,
+    PHASE_VENUE,
+    PHASE_WEDDING_CAKE,
     clear_slot,
     fill_slot,
     get_slot_value,
     is_filled,
 )
-from agent.tools.base import ToolResult
+from agent.tools.base import ToolResult, history_for_llm
 from agent.tools.structured_choice import normalize_structured_choice
 
 
 _SYSTEM_PROMPT = (
-    "You parse food selections from a catering customer's message. "
-    "Context: they're being asked to pick items from a numbered catalog. "
-    "Instructions:\n"
-    "- raw_items: list the item names or numbers the user mentioned. "
-    "Accept shorthand ('charcuterie', 'tikka', 'steak skewers'). "
-    "If user says 'option 2' or just '2', include that digit as a string. "
-    "CRITICAL: when the user's message contains multiple items separated by "
-    "commas, semicolons, or the word 'and', return EACH item as a SEPARATE "
-    "entry in raw_items. Never collapse a list into one compound string. "
-    "Example: 'Mac Shooters, White Bean Crostini, Parmesan Dip' → "
-    "raw_items=['Mac Shooters', 'White Bean Crostini', 'Parmesan Dip'].\n"
+    "# Role\n"
+    "You parse food selections from a catering customer's message. Context: they're being asked to pick items from a numbered catalog.\n\n"
+    "# Rules\n"
+    "- Extract ONLY what is explicitly stated. Never invent dish names.\n"
+    "- raw_items: list item names or numbers the user mentioned. Accept shorthand ('charcuterie', 'tikka').\n"
+    "  - If user says 'option 2' or just '2', include that digit as a string.\n"
+    "  - CRITICAL: split multiple items into separate entries. Never collapse a list into one compound string.\n"
     "- If user says 'all of them' or 'everything', return raw_items=['ALL'].\n"
-    "- is_decline: True if user explicitly skips a course ('no appetizers', 'skip dessert', "
-    "'full reception' meaning reception-only with no cocktail hour).\n"
-    "- menu_notes: any prep instruction or dietary handling note about the whole menu "
-    "('make everything halal', 'no pork in any dish', 'keep it nut-free'). "
-    "Only extract if explicitly stated. Do NOT put item names here.\n"
-    "- custom_menu: True ONLY if user says they want a fully custom menu "
-    "('nothing on here works', 'can you build something custom').\n"
-    "- meal_style: ALWAYS lowercase — 'plated' if served to seat, 'buffet' if self-serve. "
-    "Never output 'Plated' or 'Buffet' (capital). Map 'Plated'/'PLATED' → 'plated', 'Buffet'/'BUFFET' → 'buffet'.\n"
-    "- appetizer_style: ALWAYS lowercase — 'passed' if servers walk around, 'station' if fixed spot. "
-    "Map 'Passed Around'/'Passed around' → 'passed', 'Station' → 'station'.\n"
-    "- cocktail_hour: True if user wants cocktail hour or 'both' (cocktail + reception). "
-    "False if user says 'full reception' / 'reception only' (skip appetizers).\n"
-    "- category_hint: 'appetizers' | 'dishes' | 'desserts' — infer from context.\n"
-    "Never invent dish names."
+    "- is_decline: True only if user explicitly skips a course ('no appetizers', 'skip dessert', 'reception only').\n"
+    "- menu_notes: prep/dietary instruction about the whole menu ('no pork in any dish'). Do NOT put item names here.\n"
+    "- custom_menu: True only if user asks for a fully custom menu.\n"
+    "- meal_style: always lowercase 'plated' or 'buffet'.\n"
+    "- appetizer_style: always lowercase 'passed' or 'station'.\n"
+    "- cocktail_hour: True if user wants cocktail hour or 'both'. False for 'reception only' / 'full reception'.\n"
+    "- category_hint: 'appetizers' | 'dishes' | 'desserts' (infer from context).\n\n"
+    "# Examples\n"
+    "1. User: 'Mac Shooters, White Bean Crostini, Parmesan Dip'\n"
+    "   Extract: raw_items=['Mac Shooters','White Bean Crostini','Parmesan Dip']\n"
+    "2. User: 'option 2 and 5'\n"
+    "   Extract: raw_items=['2','5']\n"
+    "3. User: 'all of them'\n"
+    "   Extract: raw_items=['ALL']\n"
+    "4. User: 'PLATED'\n"
+    "   Extract: meal_style='plated'\n"
+    "5. User: 'reception only'\n"
+    "   Extract: cocktail_hour=False, is_decline=True\n"
 )
 
 
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    out: list[dict] = []
-    for m in history[-6:]:
-        role = "user" if getattr(m, "type", "") == "human" else "assistant"
-        out.append({"role": role, "content": m.content})
-    return out
+    return history_for_llm(history)
+
+
+def _wedding_cake_needed(slots: dict) -> bool:
+    """Return True if the wedding cake sub-flow still has unanswered questions."""
+    if not is_filled(slots, "__wedding_cake_gate"):
+        return True
+    if get_slot_value(slots, "__wedding_cake_gate") is False:
+        return False
+    return not (
+        is_filled(slots, "__wedding_cake_flavor")
+        and is_filled(slots, "__wedding_cake_filling")
+        and is_filled(slots, "__wedding_cake_buttercream")
+    )
 
 
 def _phase_of(slots: dict) -> str:
-    """Which menu phase are we in — drives what we extract against."""
+    """Which phase are we in — drives menu extraction and post-menu routing.
+
+    After all menu selections are done, routes through remaining basic info
+    (conditional, wedding cake, date, venue, guest count, service type) before
+    handing off to add-ons. This keeps basic_info_tool in control of those
+    phases while still letting menu_selection_tool signal the correct next step.
+    """
     if not is_filled(slots, "cocktail_hour"):
         return PHASE_COCKTAIL
-    if get_slot_value(slots, "cocktail_hour") and not is_filled(slots, "appetizers"):
+    # Appetizers always shown regardless of cocktail/reception choice
+    if not is_filled(slots, "appetizers"):
         return PHASE_COCKTAIL
-    # Ask passed/station after appetizers are picked (captured via options card)
-    if get_slot_value(slots, "cocktail_hour") and not is_filled(slots, "appetizer_style"):
+    if not is_filled(slots, "appetizer_style"):
         return PHASE_COCKTAIL
-    # Show main menu first; ask plated/buffet after dishes are confirmed
     if not is_filled(slots, "selected_dishes") and not get_slot_value(slots, "custom_menu"):
         return PHASE_MAIN_MENU
     if not is_filled(slots, "meal_style"):
         return PHASE_MAIN_MENU
     if not is_filled(slots, "desserts"):
         return PHASE_DESSERT
+
+    # Menu complete — route through remaining basic info before add-ons
+    event_type = (get_slot_value(slots, "event_type") or "").lower()
+    if "wedding" in event_type and not is_filled(slots, "partner_name"):
+        return PHASE_CONDITIONAL_FOLLOWUP
+    if "corporate" in event_type and not is_filled(slots, "company_name"):
+        return PHASE_CONDITIONAL_FOLLOWUP
+    if "birthday" in event_type and not is_filled(slots, "honoree_name"):
+        return PHASE_CONDITIONAL_FOLLOWUP
+    if "wedding" in event_type and _wedding_cake_needed(slots):
+        return PHASE_WEDDING_CAKE
+    if not is_filled(slots, "event_date"):
+        return PHASE_EVENT_DATE
+    if not is_filled(slots, "venue"):
+        return PHASE_VENUE
+    if not is_filled(slots, "guest_count"):
+        return PHASE_GUEST_COUNT
+    if not is_filled(slots, "service_type"):
+        return PHASE_SERVICE_TYPE
+
     return PHASE_DRINKS_BAR
 
 
@@ -655,8 +695,6 @@ class MenuSelectionTool:
         if len(combined_names) > _MAX_DESSERTS:
             return [("__dessert_overflow__", str(len(combined_names)), len(combined_names))]
 
-        combined_names = combined_names[:_MAX_DESSERTS]
-
         if not combined_names:
             return [("desserts", get_slot_value(slots, "desserts") or "", 0)]
 
@@ -727,6 +765,25 @@ def _next_target(fills: list[tuple[str, Any]], next_phase: str, slots: dict) -> 
         return "show_dessert_menu"
     if next_phase == PHASE_DRINKS_BAR:
         return "transition_to_addons"
+    # Post-menu basic info — basic_info_tool will handle the actual collection
+    if next_phase == PHASE_CONDITIONAL_FOLLOWUP:
+        event_type = (get_slot_value(slots, "event_type") or "").lower()
+        if "wedding" in event_type:
+            return "ask_partner_name"
+        if "corporate" in event_type:
+            return "ask_company_name"
+        if "birthday" in event_type:
+            return "ask_honoree_name"
+    if next_phase == PHASE_WEDDING_CAKE:
+        return "ask_wedding_cake"
+    if next_phase == PHASE_EVENT_DATE:
+        return "ask_event_date"
+    if next_phase == PHASE_VENUE:
+        return "ask_venue"
+    if next_phase == PHASE_GUEST_COUNT:
+        return "ask_guest_count"
+    if next_phase == PHASE_SERVICE_TYPE:
+        return "ask_service_type"
     return "continue"
 
 
@@ -778,6 +835,43 @@ async def _input_hint_for_menu_phase(phase: str, slots: dict) -> dict | None:
             is_wedding="wedding" in (get_slot_value(slots, "event_type") or "").lower()
         )
         return {"type": "menu_picker", "category": "desserts", "items": items, "max_select": 4}
+    # Post-menu basic info input hints — mirrors basic_info_tool._input_hint_for_phase
+    if phase == PHASE_CONDITIONAL_FOLLOWUP:
+        return None  # free-text name field
+    if phase == PHASE_WEDDING_CAKE:
+        return {
+            "type": "options",
+            "options": [{"value": "yes", "label": "Yes"}, {"value": "no", "label": "No thanks"}],
+        }
+    if phase == PHASE_EVENT_DATE:
+        return {
+            "type": "date",
+            "allow_skip": True,
+            "skip_label": "Confirm later",
+        }
+    if phase == PHASE_VENUE:
+        return {
+            "type": "options",
+            "subtype": "venue",
+            "options": [{"value": "tbd_confirm_call", "label": "Confirm venue on call"}],
+            "allow_text": True,
+        }
+    if phase == PHASE_GUEST_COUNT:
+        return {
+            "type": "options",
+            "subtype": "guest_count",
+            "options": [{"value": "tbd", "label": "TBD / Confirm later"}],
+            "allow_text": True,
+        }
+    if phase == PHASE_SERVICE_TYPE:
+        return {
+            "type": "options",
+            "options": [
+                {"value": "Onsite", "label": "Onsite - staff present at event"},
+                {"value": "Dropoff", "label": "Drop-off - delivery only, no staff"},
+                {"value": "skip", "label": "Confirm later"},
+            ],
+        }
     return None
 
 

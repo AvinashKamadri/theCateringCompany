@@ -316,6 +316,14 @@ class TurnRoutingSignals(BaseModel):
     the router decides what that means operationally.
     """
 
+    key_indicators: List[str] = Field(
+        default_factory=list,
+        description=(
+            "2-4 brief observations that led to your classification. "
+            "E.g.: ['user said mb (my bad)', 'event_type already filled as Birthday', "
+            "'message contradicts prior answer']. Reason BEFORE classifying."
+        ),
+    )
     intent: TurnIntent
     referenced_slot: Optional[str] = Field(
         default=None,

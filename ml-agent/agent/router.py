@@ -15,6 +15,7 @@ dispatches (or asks a clarifying question) based on that decision.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -22,6 +23,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 
 from agent.instructor_client import MODEL_ROUTER, extract
+from agent.tools.base import history_for_llm
 from agent.list_slot_reopen import explicit_reopen_list_slot, menu_section_for_phase
 from agent.models import OrchestratorDecision, TurnRoutingSignals
 from agent.prompt_registry import (
@@ -71,12 +73,24 @@ logger = logging.getLogger(__name__)
 CONFIDENCE_THRESHOLD = 0.80
 
 # Words that almost always mean "I want to change something already filled."
-_MOD_KEYWORDS = frozenset({
+# Hard markers: alone signal modification intent unambiguously.
+_HARD_MOD_KEYWORDS = frozenset({
     "change", "update", "replace", "swap", "remove", "delete", "edit",
-    "instead", "switch", "different", "wrong", "correct", "modify",
-    "fix", "actually", "no wait", "wait", "i meant", "cancel",
+    "switch", "different", "wrong", "correct", "modify", "fix",
     "take out", "take off", "add back", "bring back", "put back", "undo",
+    "not a", "not an", "it is a", "it's a",
 })
+
+# Soft markers: hedging words that only signal modification when paired with a hard marker
+# or an explicit removal/replacement verb. Alone they appear in first fills too
+# ("actually, chocolate please" as a first wedding-cake flavor answer).
+_SOFT_MOD_KEYWORDS = frozenset({
+    "actually", "no wait", "wait", "i meant", "cancel",
+    "mistake", "my bad", "mb", "sorry", "oops", "scratch that", "nevermind",
+    "never mind", "instead",
+})
+
+_MOD_KEYWORDS = _HARD_MOD_KEYWORDS | _SOFT_MOD_KEYWORDS
 
 _VENUE_TBD_TOKENS = frozenset({
     "tbd",
@@ -371,11 +385,49 @@ def _looks_like_modification_intent(message: str) -> bool:
     msg = _normalize_choice(message)
     if not msg:
         return False
-    if any(kw in msg for kw in _MOD_KEYWORDS):
+
+    has_hard = False
+    has_soft = False
+
+    for kw in _HARD_MOD_KEYWORDS:
+        if " " in kw:
+            if kw in msg:
+                has_hard = True
+                break
+        elif re.search(rf"\b{re.escape(kw)}\b", msg):
+            has_hard = True
+            break
+
+    if not has_hard:
+        for kw in _SOFT_MOD_KEYWORDS:
+            if " " in kw:
+                if kw in msg:
+                    has_soft = True
+                    break
+            elif re.search(rf"\b{re.escape(kw)}\b", msg):
+                has_soft = True
+                break
+
+    if has_hard:
         return True
+
+    # Soft markers alone only count as modification if paired with an
+    # explicit change/removal verb so "actually, I'd like salmon" (first fill)
+    # doesn't block the free-text autoroute.
+    if has_soft:
+        return bool(re.search(r"\b(?:remove|delete|drop|replace|swap|change|update|fix|edit)\b", msg))
+
     if re.search(r"\b(?:add|readd|re-add|bring|put)\b.*\bback\b", msg):
         return True
     if re.search(r"\b(?:remove|delete|drop|replace|swap)\b", msg):
+        return True
+    # "add X to/in menu" or "add [bar|cake|rentals|drinks|…]" outside a first-fill
+    # context. These are mid-flow additions to already-progressed intake, not answers.
+    if re.search(
+        r"\badd\b.{0,40}\b(?:bar|bar service|cocktail|appetizer|appetizers|dessert|desserts|"
+        r"rental|rentals|linen|linens|labor|staff|wedding cake|cake|drink|drinks)\b",
+        msg,
+    ):
         return True
     return False
 
@@ -397,65 +449,149 @@ def _looks_like_tbd_venue_answer(message: str) -> bool:
     return False
 
 
+_YES_TOKENS = frozenset({
+    "yes", "yep", "yeah", "yup", "sure", "ok", "okay", "of course",
+    "absolutely", "definitely", "please do", "i do", "yes please",
+    "yes ok", "sounds good", "go ahead", "please", "do it",
+})
+_NO_TOKENS = frozenset({
+    "no", "nope", "nah", "n", "no thanks", "no thank you", "skip",
+    "none", "not really", "no need", "pass", "nothing", "i dont",
+    "i don't", "neither", "no special requests", "no dietary concerns",
+    "no additional notes", "no, don't schedule a call", "no call needed",
+})
+
+
 def _quick_route(message: str, state: dict) -> str | None:
-    """Bypass the LLM for obvious cases. Returns tool name or None."""
-    msg = message.strip().lower()
+    """Bypass the LLM only for explicit internal state markers."""
+    slots = state["slots"]
+
+    if get_slot_value(slots, "__pending_modification_choice"):
+        return "modification_tool"
+    if get_slot_value(slots, "__pending_modification_request"):
+        return "modification_tool"
+    if get_slot_value(slots, "__pending_menu_choice"):
+        return "menu_selection_tool"
+
     phase = state.get("conversation_phase") or PHASE_GREETING
-    reopen_slot = explicit_reopen_list_slot(message, phase)
+    msg_lower = _normalize_choice(message)
 
-    if get_slot_value(state["slots"], "__pending_modification_choice"):
-        return "modification_tool"
-    if get_slot_value(state["slots"], "__pending_modification_request"):
-        return "modification_tool"
-    if get_slot_value(state["slots"], "__pending_menu_choice"):
-        return "menu_selection_tool"
-
-    if reopen_slot and _can_reopen_list_slot(reopen_slot, state):
+    # Review recap: "change" always goes to modification_tool so the user can
+    # pick what to modify. Never gate on finalization state — if the user says
+    # "change" at the recap, they want to edit, full stop.
+    if phase == PHASE_REVIEW and msg_lower in {
+        "change", "no, make changes", "i need to change something", "make changes",
+    }:
         return "modification_tool"
 
-    if _looks_like_wedding_cake_reopen(message, state):
-        return "modification_tool"
+    # Route bare yes/no directly to the tool that owns the pending gate
+    # question — no slot filling here. The tool itself handles the fill
+    # so that _next_target, cascade, and structured_answer all run in
+    # the correct order without a race condition.
+    pending = get_slot_value(slots, "__pending_confirmation")
+    if pending:
+        if msg_lower in _YES_TOKENS or msg_lower in _NO_TOKENS:
+            return pending.get("tool", "finalization_tool")
 
-    # Reopening a previous menu section from a later phase should route to the
-    # modification tool so the picker can be shown again without guessing items.
-    if phase in {PHASE_DRINKS_BAR, PHASE_TABLEWARE, PHASE_RENTALS, PHASE_LABOR, PHASE_SPECIAL_REQUESTS, PHASE_DIETARY, PHASE_FOLLOWUP, PHASE_REVIEW}:
+    # Free-text basic-info phases: the phase owner is always basic_info_tool,
+    # and the user's message is almost always a direct answer (name, date,
+    # venue, guest count, etc). Skipping the router LLM saves ~2s/turn on
+    # these phases. We still defer to the LLM when the message looks like a
+    # modification, a meta-command, or anything else ambiguous.
+    if phase in _FREE_TEXT_AUTOROUTE_PHASES:
+        # In free-text phases, soft markers (sorry, actually, wait, i meant…)
+        # almost always mean the user is correcting a prior answer, not giving
+        # a first fill. Defer to the LLM router which can detect the correction.
+        has_soft_marker = any(
+            (re.search(rf"\b{re.escape(kw)}\b", msg_lower) if " " not in kw else kw in msg_lower)
+            for kw in _SOFT_MOD_KEYWORDS
+        )
         if (
-            "dessert" in msg
-            or "appetizer" in msg
-            or "main menu" in msg
-            or "main dish" in msg
-            or "mains" in msg
-        ) and any(term in msg for term in {"show", "menu", "change", "actually", "add", "have", "want"}):
-            return "modification_tool"
+            msg_lower
+            and not _looks_like_modification_intent(message)
+            and not has_soft_marker
+            and not _looks_like_meta_command(msg_lower)
+            and not _contains_out_of_phase_topic(msg_lower)
+        ):
+            return "basic_info_tool"
 
-    # Plain continuations — just advance the current phase, no LLM needed.
-    if msg in _CONTINUATIONS:
-        return _fallback_tool(state)
-
-    if phase == PHASE_VENUE and _looks_like_tbd_venue_answer(message):
-        return "basic_info_tool"
-
-    if _looks_like_structured_basic_info_answer(message, state):
-        return "basic_info_tool"
-
-    if _looks_like_structured_menu_answer(message, state):
-        return "menu_selection_tool"
-
-    if _looks_like_structured_addons_answer(message, state):
-        return "add_ons_tool"
-
-    if _looks_like_structured_wedding_cake_answer(message, state):
-        return "basic_info_tool"
-
-    if _looks_like_structured_finalization_answer(message, state):
-        return "finalization_tool"
-
-    # Modification intent: keyword present AND at least one slot already filled.
-    if _looks_like_modification_intent(message):
-        if filled_slot_summary(state["slots"]):
-            return "modification_tool"
+    # Structured option-based answers — skip router LLM for known exact-match
+    # inputs. These detection functions existed but were never wired up here.
+    if msg_lower and not _looks_like_modification_intent(message) and not _looks_like_meta_command(msg_lower):
+        if _looks_like_structured_wedding_cake_answer(message, state):
+            return "basic_info_tool"
+        if _looks_like_structured_basic_info_answer(message, state):
+            return "basic_info_tool"
+        if _looks_like_structured_addons_answer(message, state):
+            return _PHASE_TO_TOOL.get(phase, "add_ons_tool")
+        if _looks_like_structured_menu_answer(message, state):
+            return "menu_selection_tool"
+        if _looks_like_structured_finalization_answer(message, state):
+            return "finalization_tool"
 
     return None
+
+
+_FREE_TEXT_AUTOROUTE_PHASES = frozenset({
+    PHASE_GREETING,
+    PHASE_EVENT_TYPE,
+    PHASE_CONDITIONAL_FOLLOWUP,
+    PHASE_EVENT_DATE,
+    PHASE_VENUE,
+    PHASE_GUEST_COUNT,
+})
+
+
+_META_COMMAND_MARKERS = (
+    "go back",
+    "start over",
+    "restart",
+    "reset",
+    "help",
+    "what can you",
+    "can you",
+    "show me",
+    "show the",
+    "let me see",
+    "?",
+)
+
+# Keywords that, when present in a free-text phase message, indicate the user
+# is simultaneously addressing an out-of-phase topic (e.g. "May 25, and add
+# appetizers"). In that case we defer to the LLM router so it can split intent.
+_OUT_OF_PHASE_MARKERS = frozenset({
+    "appetizer", "appetizers", "starter", "starters",
+    "main dish", "main dishes", "entree", "entrees",
+    "dessert", "desserts",
+    "bar service", "bar package", "drinks",
+    "tableware", "utensils", "linens", "rentals",
+    "wedding cake",
+    # Event-identity corrections in partner/honoree/company phases
+    "event type", "type of event", "event is", "it is a", "it's a",
+})
+
+
+def _looks_like_meta_command(msg_lower: str) -> bool:
+    """Conservative check for messages that should still hit the LLM router.
+
+    Question-asking, meta-commands, and anything that isn't clearly answering
+    the current question falls back to the LLM for safety.
+    """
+    if not msg_lower:
+        return False
+    for marker in _META_COMMAND_MARKERS:
+        if marker in msg_lower:
+            return True
+    return False
+
+
+def _contains_out_of_phase_topic(msg_lower: str) -> bool:
+    """Return True when a free-text answer also mentions a different intake section.
+
+    Prevents the free-text autoroute from silently swallowing multi-topic messages
+    like "May 25, and can we add appetizers too?" — those need the LLM router.
+    """
+    return any(marker in msg_lower for marker in _OUT_OF_PHASE_MARKERS)
 
 
 # Phase → owning Tool. Single source of truth for "who handles this phase".
@@ -487,11 +623,7 @@ _TURN_SIGNAL_SYSTEM_PROMPT = build_turn_signal_system_prompt(list(SLOT_NAMES))
 
 
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    out: list[dict] = []
-    for m in history[-8:]:
-        role = "user" if getattr(m, "type", "") == "human" else "assistant"
-        out.append({"role": role, "content": m.content})
-    return out
+    return history_for_llm(history, max_messages=8)
 
 
 def _context_block(state: dict) -> str:
@@ -517,27 +649,6 @@ def _fallback_tool(state: dict) -> str:
     if phase == PHASE_COMPLETE:
         return "finalization_tool"
     return _PHASE_TO_TOOL.get(phase, "basic_info_tool")
-
-
-async def _extract_turn_signals(
-    *,
-    message: str,
-    history: list[BaseMessage],
-    state: dict,
-) -> TurnRoutingSignals | None:
-    user_block = (
-        f"User message: {message}\n\n"
-        f"Conversation context:\n{_context_block(state)}"
-    )
-    with trace_scope(route_stage="turn_signals"):
-        return await extract(
-            schema=TurnRoutingSignals,
-            system=_TURN_SIGNAL_SYSTEM_PROMPT,
-            user_message=user_block,
-            history=_history_for_llm(history),
-            model=MODEL_ROUTER,
-            max_tokens=180,
-        )
 
 
 async def route(
@@ -569,11 +680,48 @@ async def route(
             confidence=1.0,
         )
 
-    signals = await _extract_turn_signals(message=message, history=history, state=state)
+    user_block = (
+        f"User message: {message}\n\n"
+        f"Conversation context:\n{_context_block(state)}"
+    )
+
+    # Fire both extractions simultaneously. On the confident-signals path we
+    # cancel the decision task (saves one full LLM round-trip). On the
+    # low-confidence path the decision result is already in-flight.
+    with trace_scope(route_stage="turn_signals"):
+        signals_task = asyncio.create_task(
+            extract(
+                schema=TurnRoutingSignals,
+                system=_TURN_SIGNAL_SYSTEM_PROMPT,
+                user_message=user_block,
+                history=_history_for_llm(history),
+                model=MODEL_ROUTER,
+                max_tokens=180,
+            )
+        )
+    with trace_scope(route_stage="decision"):
+        decision_task = asyncio.create_task(
+            extract(
+                schema=OrchestratorDecision,
+                system=ROUTER_SYSTEM_PROMPT,
+                user_message=user_block,
+                history=_history_for_llm(history),
+                model=MODEL_ROUTER,
+                max_tokens=200,
+            )
+        )
+
+    signals = await signals_task
+
+    def _cancel_decision() -> None:
+        if not decision_task.done():
+            decision_task.cancel()
+
     if isinstance(signals, TurnRoutingSignals) and signals.confidence >= CONFIDENCE_THRESHOLD:
         if signals.intent == "reopen_previous_section":
             slot = signals.referenced_slot
             if slot is None or _can_reopen_list_slot(slot, state):
+                _cancel_decision()
                 from agent.models import ToolCall as _TC
                 return OrchestratorDecision(
                     action="tool_call",
@@ -583,14 +731,19 @@ async def route(
         if signals.intent == "modify_existing":
             slot = signals.referenced_slot
             if slot is None or slot in SLOT_NAMES:
-                if slot is None or is_filled(state["slots"], slot):
-                    from agent.models import ToolCall as _TC
-                    return OrchestratorDecision(
-                        action="tool_call",
-                        tool_calls=[_TC(tool_name="modification_tool", reason=f"turn_signals:{signals.intent}")],
-                        confidence=signals.confidence,
-                    )
+                # Allow through even if the slot isn't filled yet — the user may
+                # be adding something they skipped earlier (e.g. "add bar in menu"
+                # in finalization phase when bar_package was never set). Intent
+                # wins over slot-fill state.
+                _cancel_decision()
+                from agent.models import ToolCall as _TC
+                return OrchestratorDecision(
+                    action="tool_call",
+                    tool_calls=[_TC(tool_name="modification_tool", reason=f"turn_signals:{signals.intent}")],
+                    confidence=signals.confidence,
+                )
         if signals.intent in {"answer_current_prompt", "continue_current_flow"}:
+            _cancel_decision()
             tool = _fallback_tool(state)
             from agent.models import ToolCall as _TC
             return OrchestratorDecision(
@@ -599,6 +752,7 @@ async def route(
                 confidence=signals.confidence,
             )
         if signals.intent == "provide_other_information" and signals.proposed_tool:
+            _cancel_decision()
             from agent.models import ToolCall as _TC
             return OrchestratorDecision(
                 action="tool_call",
@@ -606,26 +760,17 @@ async def route(
                 confidence=signals.confidence,
             )
         if signals.intent == "unclear":
+            _cancel_decision()
             return OrchestratorDecision(
                 action="clarify",
                 tool_calls=[],
                 confidence=signals.confidence,
             )
 
-    user_block = (
-        f"User message: {message}\n\n"
-        f"Conversation context:\n{_context_block(state)}"
-    )
-
-    with trace_scope(route_stage="decision"):
-        decision = await extract(
-            schema=OrchestratorDecision,
-            system=ROUTER_SYSTEM_PROMPT,
-            user_message=user_block,
-            history=_history_for_llm(history),
-            model=MODEL_ROUTER,
-            max_tokens=200,
-        )
+    try:
+        decision = await decision_task
+    except asyncio.CancelledError:
+        decision = None
 
     if decision is None:
         logger.warning("Router extraction returned None — using phase fallback")
@@ -664,22 +809,19 @@ async def route(
             phase in _PHASE_LOCKED
             and expected is not None
             and chosen != expected
-            and chosen != "modification_tool"
         ):
-            if _looks_like_modification_intent(message) and filled_slot_summary(state["slots"]):
+            # modification_tool is always allowed through — users can modify at
+            # any phase (the LLM already passed the 0.80 confidence gate above).
+            # Structured first-fill answers ("plated", "upgrade", "ADD DESSERTS")
+            # are caught by _quick_route before reaching this code, so
+            # high-confidence modification_tool picks here are genuine edits.
+            if chosen != "modification_tool":
                 logger.info(
-                    "phase_lock: overriding %s -> modification_tool for phase %s",
-                    chosen, phase,
+                    "phase_lock: overriding %s -> %s for phase %s",
+                    chosen, expected, phase,
                 )
                 from agent.models import ToolCall as _TC
-                decision.tool_calls = [_TC(tool_name="modification_tool", reason="phase_lock_modification")]
-                return decision
-            logger.info(
-                "phase_lock: overriding %s → %s for phase %s",
-                chosen, expected, phase,
-            )
-            from agent.models import ToolCall as _TC
-            decision.tool_calls = [_TC(tool_name=expected, reason="phase_lock")]
+                decision.tool_calls = [_TC(tool_name=expected, reason="phase_lock")]
 
     return decision
 

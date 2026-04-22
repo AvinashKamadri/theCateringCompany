@@ -8,7 +8,7 @@ if (-not (Test-Path ".\backend.env")) {
 }
 
 Write-Host "[1/3] building backend image..." -ForegroundColor Cyan
-docker compose build backend
+docker compose build backend 2>&1 | ForEach-Object { "$_" }
 if ($LASTEXITCODE -ne 0) { Write-Host "[ERROR] build failed - aborting." -ForegroundColor Red; exit 1 }
 
 Write-Host "[2/3] recreating container..." -ForegroundColor Cyan

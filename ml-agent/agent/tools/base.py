@@ -13,6 +13,27 @@ from typing import Any, Optional, Protocol
 
 from langchain_core.messages import BaseMessage
 
+_HISTORY_MAX_CHARS = 4_000  # ~1000 tokens; keeps long-conversation cost bounded
+
+
+def history_for_llm(history: list[BaseMessage], max_messages: int = 6) -> list[dict]:
+    """Convert LangChain messages to role/content dicts, capped by char budget.
+
+    Takes the most recent `max_messages`, then drops oldest entries until the
+    total character count fits in `_HISTORY_MAX_CHARS`. A single menu listing
+    can be 800+ chars, so a message-count cap alone doesn't bound token cost.
+    """
+    candidates = []
+    for m in history[-max_messages:]:
+        role = "user" if getattr(m, "type", "") == "human" else "assistant"
+        candidates.append({"role": role, "content": str(m.content or "")})
+
+    total = sum(len(m["content"]) for m in candidates)
+    while total > _HISTORY_MAX_CHARS and len(candidates) > 1:
+        dropped = candidates.pop(0)
+        total -= len(dropped["content"])
+    return candidates
+
 
 @dataclass
 class ToolResult:

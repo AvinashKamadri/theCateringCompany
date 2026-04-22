@@ -17,6 +17,7 @@ prior slots and emit a gentle fallback message.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import traceback
 from typing import Any, Dict, Optional
@@ -25,7 +26,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.response_generator import render as render_response
 from agent.router import route as route_turn
-from agent.trace_context import trace_scope
+from agent.trace_context import trace_scope, turn_scope
 from agent.tools.base import ToolResult
 from agent.state import (
     PHASE_GREETING,
@@ -63,10 +64,11 @@ class AgentOrchestrator:
         author_id: str = "user",
         project_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        preloaded_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         await self._ensure_init()
 
-        existing = await load_conversation_state(thread_id)
+        existing = preloaded_state if preloaded_state is not None else await load_conversation_state(thread_id)
 
         if existing:
             state_id = existing["id"]
@@ -84,23 +86,25 @@ class AgentOrchestrator:
             conversation_phase = PHASE_GREETING
             slots = initialize_empty_slots()
 
-        # Rebuild history from DB
-        db_messages = await load_messages(thread_id)
+        # Rebuild history from DB and persist the user's new message in
+        # parallel — neither depends on the other.
+        db_messages, _ = await asyncio.gather(
+            load_messages(thread_id),
+            save_message(
+                thread_id=thread_id,
+                project_id=project_id,
+                author_id=author_id,
+                sender_type="client",
+                content=message,
+                ai_conversation_state_id=state_id,
+            ),
+        )
         history = []
         for m in db_messages:
             if m["sender_type"] == "user":
                 history.append(HumanMessage(content=m["content"]))
             else:
                 history.append(AIMessage(content=m["content"]))
-
-        await save_message(
-            thread_id=thread_id,
-            project_id=project_id,
-            author_id=author_id,
-            sender_type="client",
-            content=message,
-            ai_conversation_state_id=state_id,
-        )
 
         state: Dict[str, Any] = {
             "messages": history + [HumanMessage(content=message)],
@@ -125,6 +129,7 @@ class AgentOrchestrator:
         )
 
         try:
+          with turn_scope(thread_id=thread_id):
             with trace_scope(
                 thread_id=thread_id,
                 project_id=project_id,
@@ -228,21 +233,27 @@ class AgentOrchestrator:
 
         is_complete = conversation_phase == "complete"
 
-        new_state_id = await save_conversation_state(
-            thread_id=thread_id,
-            project_id=project_id,
-            current_node=conversation_phase,
-            slots=slots,
-            is_completed=is_complete,
-        )
-
-        await save_message(
-            thread_id=thread_id,
-            project_id=project_id,
-            author_id="ai-agent",
-            sender_type="ai",
-            content=agent_content,
-            ai_conversation_state_id=new_state_id,
+        # save_conversation_state upserts by thread_id and returns the existing
+        # row's id when the row already exists — which it always does here,
+        # because either `existing` was loaded above or `create_project_and_thread`
+        # already created the row. So we can reuse `state_id` for the AI message
+        # FK and run both writes concurrently.
+        new_state_id, _ = await asyncio.gather(
+            save_conversation_state(
+                thread_id=thread_id,
+                project_id=project_id,
+                current_node=conversation_phase,
+                slots=slots,
+                is_completed=is_complete,
+            ),
+            save_message(
+                thread_id=thread_id,
+                project_id=project_id,
+                author_id="ai-agent",
+                sender_type="ai",
+                content=agent_content,
+                ai_conversation_state_id=state_id,
+            ),
         )
 
         slots_filled = sum(
@@ -265,3 +276,4 @@ class AgentOrchestrator:
             "input_hint": input_hint,
             "tool_used": tool_used,
         }
+

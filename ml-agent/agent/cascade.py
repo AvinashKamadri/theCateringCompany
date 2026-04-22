@@ -66,6 +66,12 @@ def apply_cascade(
                 if slots.get(dep, {}).get("filled"):
                     clear_slot(slots, dep)
                     effects.append((dep, "cleared (event type changed)"))
+        # Service type chosen for one event kind may not apply to the new kind
+        # (e.g. "drop-off" picked for a birthday becomes wrong for a wedding).
+        # Clear it so the user gets re-asked for the new event type.
+        if slots.get("service_type", {}).get("filled"):
+            clear_slot(slots, "service_type")
+            effects.append(("service_type", "cleared (event type changed — re-ask needed)"))
 
     # --- service_type == Dropoff clears ALL labor + disables bartender ---
     elif slot_name == "service_type":
@@ -100,13 +106,9 @@ def apply_cascade(
                 clear_slot(slots, "bar_package")
                 effects.append(("bar_package", "cleared (drinks declined)"))
 
-    # --- cocktail_hour == False clears appetizers + style ---
-    elif slot_name == "cocktail_hour":
-        if not new_value:
-            for s in ("appetizers", "appetizer_style"):
-                if slots.get(s, {}).get("filled"):
-                    clear_slot(slots, s)
-                    effects.append((s, "cleared (no cocktail hour)"))
+    # cocktail_hour no longer cascades. Appetizers are always collected
+    # regardless of whether the wedding has a cocktail hour, reception only,
+    # or both — the flag now only drives service_style / UI labeling.
 
     # --- custom_menu == True clears the catalog dish picks ---
     elif slot_name == "custom_menu":

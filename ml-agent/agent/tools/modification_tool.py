@@ -23,12 +23,13 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 
 from agent.ambiguous_choice import (
+    normalize_choice_text,
     replace_query_with_selection,
     resolve_choice_selection,
 )
 from agent.cascade import apply_cascade
 from agent.event_identity import filter_identity_fields
-from agent.instructor_client import MODEL_ROUTER, extract
+from agent.instructor_client import MODEL_ROUTER, extract, filter_extraction_fields
 from agent.list_slot_reopen import (
     GENERIC_REOPEN_MARKERS,
     LIST_SLOT_MENTION_PATTERNS,
@@ -88,9 +89,10 @@ from agent.tools.add_ons_tool import (
 from agent.tools.basic_info_tool import _normalize_tbd_venue
 from agent.tools.basic_info_tool import (
     _input_hint_for_phase as _basic_input_hint_for_phase,
+    _next_phase as _basic_next_phase,
     _phase_to_question as _basic_phase_to_question,
 )
-from agent.tools.base import ToolResult
+from agent.tools.base import ToolResult, history_for_llm
 from agent.tools.finalization_tool import (
     _client_facing_summary as _finalization_client_facing_summary,
     _direct_response_for_target as _finalization_direct_response_for_target,
@@ -107,8 +109,11 @@ from agent.tools.menu_selection_tool import (
 
 
 _SYSTEM_PROMPT = (
-    "The customer wants to change a previously provided answer. "
+    "# Role\n"
+    "You are a modification intent extractor. The customer wants to change a previously provided answer. "
     "Figure out WHICH slot and HOW.\n\n"
+    "# Rules\n"
+    "CRITICAL: Extract target_slot, action, and new_value ONLY. Do not guess or infer other changes.\n\n"
     "target_slot MUST be one of:\n"
     f"{', '.join(SLOT_NAMES)}\n\n"
     "Map natural language to slot names:\n"
@@ -124,14 +129,37 @@ _SYSTEM_PROMPT = (
     "- 'drinks' → drinks | 'coffee' → coffee_service\n"
     "- 'plates / tableware / china / disposable' → tableware\n"
     "- 'utensils / cutlery' → utensils\n"
-    "- 'linens' → linens\n\n"
+    "- 'linens' → rentals\n\n"
     "action: 'add', 'remove', 'replace', or 'reopen'.\n"
     "Use 'reopen' when the user wants to reselect an entire menu section, "
     "see that menu again, or start over on appetizers, mains, desserts, or rentals "
     "without naming concrete items.\n"
     "items_to_remove: for list slots on remove/replace, the exact items.\n"
     "items_to_add: for list slots on add/replace, the exact items.\n"
-    "new_value: for scalar slots, the new value as a string."
+    "new_value: for scalar slots, the new value as a string.\n\n"
+    "The user may be correcting a slot unrelated to current_phase. Do not let the phase bias target_slot selection.\n\n"
+    "# Examples\n"
+    "1. User: 'hey im sorry it is a birthday'\n"
+    "   Output: target_slot='event_type', action='replace', new_value='Birthday'\n"
+    "2. User: 'ADD DESSERTS'\n"
+    "   Output: target_slot='desserts', action='reopen'\n"
+    "3. User: 'add 7 layer bars'\n"
+    "   Output: target_slot='desserts', action='add', items_to_add=['7-Layer Bars']\n"
+    "4. User: 'remove the soup'\n"
+    "   Output: target_slot='appetizers', action='remove', items_to_remove=['soup']\n"
+    "5. User: 'actually change the date to may 5'\n"
+    "   Output: target_slot='event_date', action='replace', new_value='May 5'\n"
+    "6. User: 'swap the chicken for fish'\n"
+    "   Output: target_slot='selected_dishes', action='replace', items_to_remove=['chicken'], items_to_add=['fish']\n"
+    "7. User: 'start over on the rentals'\n"
+    "   Output: target_slot='rentals', action='reopen'\n"
+    "8. User: 'no i want 50 guests'\n"
+    "   Output: target_slot='guest_count', action='replace', new_value='50'\n"
+    "9. User: 'hey i was thinking if we can drop the cake'\n"
+    "   Output: target_slot='wedding_cake', action='remove', new_value=None\n"
+    "   (NOTE: 'drop the cake' = remove wedding_cake. NOT related to drop-off service.)\n"
+    "10. User: 'actually skip the wedding cake'\n"
+    "    Output: target_slot='wedding_cake', action='remove', new_value=None\n"
 )
 
 _SELECTION_GROUNDING_PROMPT = (
@@ -162,20 +190,15 @@ _LIST_SLOTS = {"appetizers", "selected_dishes", "desserts", "rentals"}
 _APPENDABLE_TEXT_SLOTS = {"special_requests", "dietary_concerns", "additional_notes"}
 _ADD_VERBS = r"add(?:\s+back)?|readd|bring\s+back|put\s+back|include"
 _REMOVE_VERBS = r"remove|delete|drop|take\s+off|take\s+out|cancel"
-_GENERIC_MODIFICATION_PATTERNS = (
-    r"\bi want to make (?:a )?modification\b",
-    r"\bi need to make (?:a )?modification\b",
-    r"\bcan i make (?:a )?modification\b",
-    r"\bi want to make (?:a )?change\b",
-    r"\bi need to make (?:a )?change\b",
-    r"\bcan i make (?:a )?change\b",
-    r"\bi want to change something\b",
-    r"\bi need to change something\b",
-    r"\bi want to modify something\b",
-    r"\bi need to modify something\b",
-    r"\bi want to update something\b",
-    r"\bi need to update something\b",
-)
+_GENERIC_MODIFICATION_VERBS = {
+    "change",
+    "changes",
+    "modify",
+    "modification",
+    "update",
+    "edit",
+    "alter",
+}
 _MODIFICATION_SUBJECT_ALIASES: dict[str, tuple[str, ...]] = {
     "name": ("name", "my name", "first name", "last name", "full name"),
     "email": ("email", "email address"),
@@ -198,12 +221,32 @@ _MODIFICATION_SUBJECT_ALIASES: dict[str, tuple[str, ...]] = {
     "coffee_service": ("coffee service", "coffee"),
     "tableware": ("tableware", "plates", "china", "disposable"),
     "utensils": ("utensils", "cutlery", "flatware"),
-    "linens": ("linens", "linen"),
-    "rentals": ("rentals", "rental"),
+    "rentals": ("rentals", "rental", "linens", "linen"),
     "special_requests": ("special requests", "special request"),
     "dietary_concerns": ("dietary", "dietary concerns", "allergies", "allergy"),
     "additional_notes": ("additional notes", "notes", "final notes", "note"),
 }
+
+
+def _name_is_ambiguous(state: dict, slots: dict) -> bool:
+    """Return True when 'name' and 'partner_name' are both plausible targets.
+
+    For weddings, 'the name is X' is always ambiguous — users routinely say
+    this at any point in the flow when correcting their partner's name.
+    """
+    event_type = (get_slot_value(slots, "event_type") or "").lower()
+    if "wedding" not in event_type:
+        return False
+    # For weddings, always ask rather than silently writing the wrong slot.
+    return True
+
+
+def _sanitize_slot_value(value: str) -> str:
+    """Strip JSON/schema artifacts that the LLM occasionally leaks into values.
+
+    Patterns seen in prod: trailing `}.`, `}`, `).` after a real value.
+    """
+    return re.sub(r'[\}\)]+\.?\s*$', '', value).strip()
 
 
 def _infer_note_slot_from_message(message: str) -> str | None:
@@ -220,11 +263,7 @@ def _infer_note_slot_from_message(message: str) -> str | None:
 
 
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    out: list[dict] = []
-    for m in history[-6:]:
-        role = "user" if getattr(m, "type", "") == "human" else "assistant"
-        out.append({"role": role, "content": m.content})
-    return out
+    return history_for_llm(history)
 
 
 def _normalize_mod_list_texts(texts: list[str], *, action: str) -> list[str]:
@@ -286,18 +325,25 @@ def _looks_like_direct_modification_command(message: str) -> bool:
 
 
 def _is_generic_modification_request(message: str) -> bool:
-    msg = (message or "").strip().lower()
-    if not msg:
+    raw = str(message or "").strip()
+    if not raw:
         return False
-    if _contains_specific_modification_details(msg):
+    if _contains_specific_modification_details(raw):
         return False
-    return any(re.search(pattern, msg) for pattern in _GENERIC_MODIFICATION_PATTERNS)
+    tokens = set(normalize_choice_text(raw).split())
+    return bool(tokens & _GENERIC_MODIFICATION_VERBS)
 
 
 def _resolve_modification_subject_slot(message: str) -> str | None:
     msg = (message or "").strip().lower()
     if not msg:
         return None
+
+    # Allow direct slot-name selection from UI option chips.
+    if msg in SLOT_NAMES:
+        if msg == "linens":
+            return "rentals"
+        return msg
 
     for slot, aliases in _MODIFICATION_SUBJECT_ALIASES.items():
         for alias in aliases:
@@ -374,14 +420,21 @@ class ModificationTool:
 
         # Surface the current list contents to the LLM so it can pick the
         # right target_slot and item names regardless of which phase we're in.
+        # Context goes in the user message — keeps the system prompt static
+        # so OpenAI's prompt cache hits across turns.
         context_block = _modification_context_block(slots, state)
-        system_with_ctx = _SYSTEM_PROMPT + "\n\n" + context_block if context_block else _SYSTEM_PROMPT
+        user_payload = (
+            f"User message: {message}\n\nContext:\n{context_block}"
+            if context_block
+            else message
+        )
 
         extracted = await extract(
             schema=ModificationExtraction,
-            system=system_with_ctx,
-            user_message=message,
+            system=_SYSTEM_PROMPT,
+            user_message=user_payload,
             history=_history_for_llm(history),
+            model=MODEL_ROUTER,
             max_tokens=1000,
         )
 
@@ -393,6 +446,34 @@ class ModificationTool:
             extracted.target_slot = inferred_note_slot
 
         target_slot = extracted.target_slot
+
+        # Name disambiguation: if the LLM picked "name" but we're in a wedding/
+        # conditional phase where partner_name is also a valid candidate, ask
+        # rather than silently overwriting the wrong slot.
+        if target_slot == "name" and _name_is_ambiguous(state, slots):
+            return self._ask_name_disambiguation(slots, state)
+
+        # Cross-section disambiguation: if "remove chicken" matches items in MORE
+        # than one slot (e.g. appetizers AND mains), ask the user to pick rather
+        # than silently guessing the wrong section.
+        if (
+            target_slot in _LIST_SLOTS
+            and extracted.action in {"remove", "replace"}
+            and extracted.items_to_remove
+        ):
+            probe = [t for t in extracted.items_to_remove if t]
+            cross_matches = _find_cross_slot_matches(probe, slots)
+            if cross_matches:
+                return self._cross_slot_choice_result(
+                    original_target=target_slot,
+                    action=extracted.action,
+                    query=probe[0],
+                    cross_matches=cross_matches,
+                    items_to_remove=probe,
+                    items_to_add=list(extracted.items_to_add or []),
+                    slots=slots,
+                    state=state,
+                )
 
         # Membership-based correction: if the items to remove/replace appear in
         # a DIFFERENT list slot than the LLM picked, re-route. The router-picked
@@ -428,12 +509,36 @@ class ModificationTool:
         if target_slot in _LIST_SLOTS:
             # If user asked to change a list slot without naming specific items
             # (e.g. "change my appetizers"), clear the slot and bounce back to
-            # the menu selector so they can re-pick from the catalog.
-            if (
+            # the menu selector so they can re-pick from the catalog. Also
+            # reopen when the LLM hallucinated items not actually named in the
+            # message (e.g. "ADD DESSERTS" -> LLM invents Fruit Tarts).
+            #
+            # CATALOG CHECK: before firing the reopen gate, verify whether any
+            # items_to_add actually resolve against the real menu catalog. If
+            # they do, the user is making an incremental add (e.g. "add maple
+            # bacon to appetizer menu") — not asking to reopen the picker.
+            # This prevents "menu" appearing in the message from triggering a
+            # full reopen when the user just wants to add a specific item.
+            should_reopen = (
                 extracted.action == "reopen"
                 or _is_unspecified_list_change(extracted)
                 or _is_generic_list_reopen_request(message, extracted)
-            ):
+                or _has_hallucinated_list_items(extracted, message)
+            )
+            if should_reopen and extracted.items_to_add and extracted.action in {"add", "replace"}:
+                # Desserts use a separate resolver — skip the catalog check
+                # for desserts and let the normal path handle them.
+                if target_slot != "desserts":
+                    menu = await self._menu_for_slot(target_slot, slots)
+                    resolution = await resolve_menu_items(
+                        extraction=", ".join(str(i) for i in extracted.items_to_add),
+                        menu=menu,
+                    )
+                    if resolution.matched_items:
+                        # At least one item resolved to a real catalog entry —
+                        # treat as incremental add, not a reopen.
+                        should_reopen = False
+            if should_reopen:
                 return await self._reopen_list_slot(target_slot, slots, state)
             return await self._apply_list_modification(extracted, slots, state, message=message)
 
@@ -468,16 +573,40 @@ class ModificationTool:
             add_texts = _normalize_mod_list_texts([str(mod.new_value)], action="add")
 
         if message and current_items and mod.action in {"remove", "replace"} and remove_texts:
+            # Restrict grounding to items whose names contain the query tokens.
+            # This prevents description-based false matches (e.g. "egg" matching
+            # "Caviar and Cream Crisp" because its description mentions roe/eggs).
+            # Fall back to full list only when no name-level match exists.
+            name_matched = [
+                item for item in current_items
+                if any(rt.lower() in item.lower() for rt in remove_texts)
+            ]
             grounded = await self._ground_selected_removals(
                 target_slot=target_slot,
                 message=message,
                 remove_texts=remove_texts,
-                current_items=current_items,
+                current_items=name_matched if name_matched else current_items,
                 menu=menu,
             )
             if grounded is not None:
                 if grounded.status == "resolved" and grounded.matched_names:
                     remove_texts = grounded.matched_names
+                    # If grounding resolved to multiple items, the user's query
+                    # was a partial word (e.g. "bacon") that hit several entries.
+                    # Force disambiguation regardless of what the LLM said.
+                    if len(remove_texts) > 1:
+                        ambiguous_query = grounded.reference_text or ", ".join(remove_texts)
+                        return self._ambiguous_list_choice_result(
+                            target_slot=target_slot,
+                            action=mod.action,
+                            choice_kind="remove",
+                            query=ambiguous_query,
+                            matches=grounded.matched_names,
+                            items_to_remove=remove_texts,
+                            items_to_add=add_texts,
+                            slots=slots,
+                            state=state,
+                        )
                 elif grounded.status == "ambiguous" and grounded.matched_names:
                     ambiguous_query = grounded.reference_text or ", ".join(remove_texts)
                     return self._ambiguous_list_choice_result(
@@ -519,7 +648,6 @@ class ModificationTool:
 
         # --- Add / replace phase ---
         added_items_resolved: list[dict] = []
-        additional_changes: list[dict[str, Any]] = []
         if add_texts:
             if target_slot == "desserts":
                 event_type = (get_slot_value(slots, "event_type") or "").lower()
@@ -562,17 +690,83 @@ class ModificationTool:
                         state=state,
                     )
                 added_items_resolved = menu_resolution.matched_items
-            if not added_items_resolved:
-                cross_slot_change = await self._resolve_cross_slot_addition(
+
+            # Item not found in stated slot — find the slot it actually belongs to
+            # and re-route the whole modification there. Never dual-write.
+            if not added_items_resolved and not removed_names:
+                correct_slot = await self._find_correct_slot_for_items(
                     add_texts=add_texts,
-                    source_slot=target_slot,
+                    exclude_slot=target_slot,
                     slots=slots,
                 )
-                if cross_slot_change:
-                    additional_changes.append(cross_slot_change)
+                if correct_slot:
+                    return await self._apply_list_modification(
+                        ModificationExtraction(
+                            target_slot=correct_slot,
+                            action=mod.action,
+                            items_to_add=list(mod.items_to_add or []),
+                            items_to_remove=list(mod.items_to_remove or []),
+                            new_value=mod.new_value,
+                        ),
+                        slots,
+                        state,
+                        message=message,
+                    )
+
+        # No-op guard: nothing was removed or added — skip the write entirely
+        if not removed_names and not added_items_resolved:
+            next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                slots=slots, state=state,
+            )
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "next_phase": next_phase,
+                    "next_question_target": next_target,
+                    "next_question_prompt": resume_prompt,
+                },
+                input_hint=input_hint,
+            )
 
         # Combine
         combined_names = list(remaining) + [i["name"] for i in added_items_resolved]
+
+        # Enforce dessert cap across modifications (menu_selection_tool already
+        # caps to 4). Without this, a previous "add dessert" modification can
+        # silently create 5+ desserts, and a later removal makes a hidden item
+        # appear in the UI (feels like we "added" something on remove).
+        if target_slot == "desserts":
+            _MAX_DESSERTS = 4
+            if len(combined_names) > _MAX_DESSERTS:
+                attempted = [i["name"] for i in added_items_resolved if i.get("name")]
+                attempted_text = f" (trying to add {', '.join(attempted)})" if attempted else ""
+                current_text = ", ".join(remaining) if remaining else "none"
+                prompt = (
+                    f"Desserts are limited to {_MAX_DESSERTS} items{attempted_text}. "
+                    f"Right now you have: {current_text}. "
+                    "Tell me which dessert to remove first."
+                )
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "error": "dessert_overflow",
+                        "max_desserts": _MAX_DESSERTS,
+                        "current_desserts": remaining,
+                        "attempted_additions": attempted,
+                    },
+                    input_hint={
+                        "type": "options",
+                        "options": [
+                            {"value": f"remove {name}", "label": f"Remove {name}"}
+                            for name in remaining
+                        ],
+                    }
+                    if remaining
+                    else None,
+                    direct_response=prompt,
+                )
 
         # Format using canonical menu prices
         final_value: str
@@ -586,18 +780,14 @@ class ModificationTool:
         elif target_slot == "rentals":
             final_value = ", ".join(combined_names) if combined_names else "none"
         else:
-            # appetizers / selected_dishes — re-resolve through main menu for prices
-            if combined_names:
-                joined = ", ".join(combined_names)
-                _, final_value = await resolve_to_db_items(joined, menu=menu)
-            else:
-                final_value = "none"
+            # appetizers / selected_dishes — use exact-name catalog lookup for
+            # existing items so we never re-resolve through fuzzy matching.
+            # Only newly added items come from `added_items_resolved` (already resolved).
+            final_value = _rebuild_list_value(combined_names, menu, added_items_resolved)
 
         old_value = get_slot_value(slots, target_slot)
         fill_slot(slots, target_slot, final_value)
         effects = apply_cascade(target_slot, old_value, final_value, slots)
-        for change in additional_changes:
-            effects.extend(change.pop("effects", []))
 
         direct = _list_mod_ack(
             target_slot=target_slot,
@@ -623,11 +813,11 @@ class ModificationTool:
                     "new_value": final_value,
                     "remaining_items": parse_slot_items(final_value) if final_value and str(final_value).lower() != "none" else [],
                     "mod_ack_text": direct,
-                    "additional_changes": additional_changes,
                 },
                 "cascade_effects": effects,
                 "next_phase": next_phase,
                 "next_question_target": next_target,
+                "next_question_prompt": resume_prompt,
             },
             input_hint=input_hint,
         )
@@ -645,6 +835,58 @@ class ModificationTool:
             return None
 
         matches = [str(v) for v in pending_choice.get("matches") or [] if str(v).strip()]
+        is_cross_slot_multi = (
+            pending_choice.get("type") == "cross_slot"
+            and pending_choice.get("multi")
+        )
+
+        if is_cross_slot_multi:
+            # Multi-select: message is comma-separated item names (e.g. "A, B, C")
+            raw_selections = [s.strip() for s in message.split(",") if s.strip()]
+            match_slots: dict = pending_choice.get("match_slots") or {}
+            # Resolve each raw selection against the known match names
+            match_key = {normalize_choice_text(k): k for k in match_slots}
+            resolved: list[str] = []
+            for raw in raw_selections:
+                canonical = match_key.get(normalize_choice_text(raw))
+                if canonical:
+                    resolved.append(canonical)
+            if not resolved:
+                return self._repeat_ambiguous_choice_result(
+                    state=state,
+                    target_slot=str(pending_choice.get("target_slot") or ""),
+                    choice_kind="remove",
+                    query=str(pending_choice.get("query") or ""),
+                    matches=matches,
+                )
+            clear_slot(slots, "__pending_modification_choice")
+            # Group selections by their slot and remove each group
+            by_slot: dict[str, list[str]] = {}
+            for item in resolved:
+                by_slot.setdefault(match_slots[item], []).append(item)
+            for slot_name, items in by_slot.items():
+                current = parse_slot_items(get_slot_value(slots, slot_name) or "")
+                norm_remove = {normalize_choice_text(i) for i in items}
+                kept = [i for i in current if normalize_choice_text(i) not in norm_remove]
+                fill_slot(slots, slot_name, ", ".join(kept) if kept else "")
+            # Build confirmation and resume
+            removed_summary = ", ".join(resolved)
+            _, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                slots=slots, state=state,
+            )
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "action": "remove",
+                    "removed_items": resolved,
+                    "next_question_target": next_target,
+                    "next_question_prompt": resume_prompt,
+                },
+                input_hint=input_hint,
+                direct_response=f"Removed {removed_summary}.",
+            )
+
         selected = resolve_choice_selection(message, matches)
         if not selected:
             return self._repeat_ambiguous_choice_result(
@@ -665,6 +907,12 @@ class ModificationTool:
             str(v) for v in (pending_choice.get("items_to_add") or []) if str(v).strip()
         ]
 
+        # For single cross-slot choice — derive the correct slot from match_slots.
+        target_slot = str(pending_choice.get("target_slot") or "")
+        if pending_choice.get("type") == "cross_slot":
+            match_slots = pending_choice.get("match_slots") or {}
+            target_slot = match_slots.get(selected, target_slot)
+
         if choice_kind == "remove":
             items_to_remove = replace_query_with_selection(
                 items_to_remove,
@@ -680,7 +928,7 @@ class ModificationTool:
 
         return await self._apply_list_modification(
             ModificationExtraction(
-                target_slot=str(pending_choice.get("target_slot") or ""),
+                target_slot=target_slot,
                 action=str(pending_choice.get("action") or "remove"),
                 items_to_remove=items_to_remove,
                 items_to_add=items_to_add,
@@ -704,6 +952,15 @@ class ModificationTool:
             return None
 
         stage = str(pending_request.get("stage") or "target")
+        if stage == "name_disambiguation":
+            clear_slot(slots, "__pending_modification_request")
+            msg_lower = message.strip().lower()
+            target_slot = "partner_name" if "partner" in msg_lower else "name"
+            return self._ask_for_target_value(
+                target_slot=target_slot,
+                slots=slots,
+                state=state,
+            )
         if stage == "target":
             if _looks_like_direct_modification_command(message):
                 clear_slot(slots, "__pending_modification_request")
@@ -748,13 +1005,50 @@ class ModificationTool:
             "__pending_modification_request",
             {"stage": "target"},
         )
+        preferred_order = [
+            "event_type",
+            "event_date",
+            "venue",
+            "guest_count",
+            "service_type",
+            "appetizers",
+            "selected_dishes",
+            "meal_style",
+            "desserts",
+            "wedding_cake",
+            "drinks",
+            "bar_service",
+            "bar_package",
+            "coffee_service",
+            "tableware",
+            "utensils",
+            "rentals",
+            "special_requests",
+            "dietary_concerns",
+            "additional_notes",
+            "followup_call_requested",
+        ]
+        options = []
+        for slot in preferred_order:
+            if slot in LOCKED_SLOTS or slot.startswith("__"):
+                continue
+            if not is_filled(slots, slot):
+                continue
+            label = _SLOT_LABELS.get(slot, slot.replace("_", " "))
+            options.append({"value": slot, "label": label.title()})
+            if len(options) >= 12:
+                break
         return ToolResult(
             state=state,
             response_context={
                 "tool": self.name,
                 "next_question_target": "ask_modification_target",
             },
-            direct_response="What would you like to modify?",
+            direct_response=(
+                "What would you like to change? "
+                "Pick one below, or type it (date, guest count, venue, menu, desserts, etc)."
+            ),
+            input_hint={"type": "options", "options": options} if options else None,
         )
 
     def _ask_for_target_value(
@@ -781,6 +1075,30 @@ class ModificationTool:
                 "modification_target_slot": target_slot,
             },
             direct_response=f"What would you like to change for your {label}?",
+        )
+
+    def _ask_name_disambiguation(
+        self,
+        slots: dict,
+        state: dict,
+    ) -> ToolResult:
+        fill_slot(slots, "__pending_modification_request", {
+            "stage": "name_disambiguation",
+        })
+        return ToolResult(
+            state=state,
+            response_context={
+                "tool": self.name,
+                "next_question_target": "ask_name_disambiguation",
+            },
+            input_hint={
+                "type": "options",
+                "options": [
+                    {"value": "my own name", "label": "My own name"},
+                    {"value": "my partner's name", "label": "My partner's name"},
+                ],
+            },
+            direct_response="Just to confirm — are you updating your own name or your partner's?",
         )
 
     def _reopen_wedding_cake(
@@ -866,6 +1184,31 @@ class ModificationTool:
             "effects": effects,
         }
 
+    async def _find_correct_slot_for_items(
+        self,
+        *,
+        add_texts: list[str],
+        exclude_slot: str,
+        slots: dict,
+    ) -> str | None:
+        """Find which list slot the items actually belong to, excluding the already-tried slot.
+
+        Returns the first slot where at least one item resolves, or None if no match found.
+        One modification = one slot. Callers re-route the whole modification here instead of
+        doing a silent cross-slot write.
+        """
+        for candidate in ("appetizers", "selected_dishes", "desserts"):
+            if candidate == exclude_slot:
+                continue
+            matched = await self._resolve_items_for_slot(
+                slot=candidate,
+                add_texts=add_texts,
+                slots=slots,
+            )
+            if matched:
+                return candidate
+        return None
+
     async def _resolve_items_for_slot(
         self,
         *,
@@ -940,6 +1283,55 @@ class ModificationTool:
             choice_kind=choice_kind,
             query=query,
             matches=matches,
+        )
+
+    def _cross_slot_choice_result(
+        self,
+        *,
+        original_target: str,
+        action: str,
+        query: str,
+        cross_matches: dict[str, str],
+        items_to_remove: list[str],
+        items_to_add: list[str],
+        slots: dict,
+        state: dict,
+    ) -> ToolResult:
+        fill_slot(slots, "__pending_modification_choice", {
+            "type": "cross_slot",
+            "multi": True,
+            "target_slot": original_target,
+            "action": action,
+            "choice_kind": "remove",
+            "query": query,
+            "matches": list(cross_matches.keys()),
+            "match_slots": cross_matches,
+            "items_to_remove": items_to_remove,
+            "items_to_add": items_to_add,
+        })
+        # Group items by section for display
+        grouped: dict[str, list[str]] = {}
+        for name, slot in cross_matches.items():
+            grouped.setdefault(slot, []).append(name)
+        menu_groups = [
+            {
+                "category": _SLOT_PRETTY.get(slot, slot).title(),
+                "items": [{"name": name} for name in names],
+            }
+            for slot, names in grouped.items()
+        ]
+        verb = "remove" if action in {"remove", "replace"} else "update"
+        prompt = f"I found '{query}' in multiple sections. Pick which ones to {verb}:"
+        return ToolResult(
+            state=state,
+            response_context={
+                "tool": self.name,
+                "error": "cross_slot_ambiguous",
+                "ambiguous_query": query,
+                "ambiguous_matches": list(cross_matches.keys()),
+            },
+            input_hint={"type": "menu_picker", "menu": menu_groups},
+            direct_response=prompt,
         )
 
     def _repeat_ambiguous_choice_result(
@@ -1022,9 +1414,80 @@ class ModificationTool:
 
         # For slots that have validators (date, enums), re-run full extraction
         # so Pydantic rejects invalid values instead of corrupting state.
+        if target_slot in {"email", "phone"}:
+            # Use EventDetailsExtraction so a single message like
+            # "my phone is X and email is Y" fills both fields at once.
+            contact_extracted = await extract(
+                schema=EventDetailsExtraction,
+                system=(
+                    "Extract ONLY contact info (phone and/or email) from the user message. "
+                    "Set all other fields to None. Preserve the exact value the user provided."
+                ),
+                user_message=message,
+                history=_history_for_llm(history),
+                model=MODEL_ROUTER,
+            )
+            applied: list[str] = []
+            if contact_extracted:
+                for contact_slot in ("phone", "email"):
+                    value = getattr(contact_extracted, contact_slot, None)
+                    if value:
+                        old = get_slot_value(slots, contact_slot)
+                        fill_slot(slots, contact_slot, str(value).strip())
+                        apply_cascade(contact_slot, old, value, slots)
+                        applied.append(contact_slot)
+
+            if not applied and new_value:
+                old = get_slot_value(slots, target_slot)
+                fill_slot(slots, target_slot, str(new_value).strip())
+                apply_cascade(target_slot, old, new_value, slots)
+                applied.append(target_slot)
+
+            if applied:
+                primary_slot = applied[0]
+                final_value = get_slot_value(slots, primary_slot)
+                if len(applied) == 1:
+                    ack_text = _scalar_mod_ack_text(
+                        target_slot=primary_slot,
+                        action=mod.action,
+                        new_value=final_value,
+                    )
+                else:
+                    parts = [
+                        _scalar_mod_ack_text(
+                            target_slot=s,
+                            action=mod.action,
+                            new_value=get_slot_value(slots, s),
+                        )
+                        for s in applied
+                    ]
+                    ack_text = " ".join(parts)
+                next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                    slots=slots,
+                    state=state,
+                )
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "modification": {
+                            "target_slot": primary_slot,
+                            "action": mod.action,
+                            "old_value": old_value,
+                            "new_value": final_value,
+                            "mod_ack_text": ack_text,
+                            "also_updated": applied[1:],
+                        },
+                        "next_phase": next_phase,
+                        "next_question_target": next_target,
+                        "next_question_prompt": resume_prompt,
+                    },
+                    input_hint=input_hint,
+                )
+
         if target_slot in {
             "event_date", "event_type", "service_type", "guest_count",
-            "email", "phone", "venue", "name",
+            "venue", "name",
             "partner_name", "company_name", "honoree_name",
         }:
             if target_slot == "venue":
@@ -1039,7 +1502,7 @@ class ModificationTool:
                         action=mod.action,
                         new_value=normalized_tbd_venue,
                     )
-                    next_phase, next_target, input_hint, _resume_prompt = await _resume_after_modification(
+                    next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
                         slots=slots,
                         state=state,
                     )
@@ -1056,6 +1519,7 @@ class ModificationTool:
                             },
                             "next_phase": next_phase,
                             "next_question_target": next_target,
+                            "next_question_prompt": resume_prompt,
                         },
                         input_hint=input_hint,
                     )
@@ -1063,15 +1527,19 @@ class ModificationTool:
             event_extracted = await extract(
                 schema=EventDetailsExtraction,
                 system=(
-                    "Extract the new value for an existing event detail. "
-                    "Only fill the field the user is changing. "
+                    f"Extract the new value for {target_slot} ONLY. "
+                    f"The user is changing {target_slot}. "
+                    f"Extract ONLY the {target_slot} field from the user message. "
+                    f"Set all other fields to None. "
                     "Apply all validators (future dates only, positive guest count)."
                 ),
                 user_message=message,
                 history=_history_for_llm(history),
+                model=MODEL_ROUTER,
             )
             if event_extracted is not None:
                 extracted_values = event_extracted.model_dump(exclude_none=True)
+                extracted_values = filter_extraction_fields(extracted_values, [target_slot])
                 effective_event_type = extracted_values.get("event_type") or get_slot_value(slots, "event_type")
                 extracted_values = filter_identity_fields(
                     extracted_values,
@@ -1080,8 +1548,7 @@ class ModificationTool:
 
                 for fname, value in extracted_values.items():
                     if fname != target_slot:
-                        # Accept any field the extractor picked up confidently
-                        pass
+                        continue
                     if fname == "event_date" and hasattr(value, "isoformat"):
                         value = value.isoformat()
                     old = get_slot_value(slots, fname)
@@ -1094,9 +1561,10 @@ class ModificationTool:
                     action=mod.action,
                     new_value=final_value,
                 )
-                next_phase, next_target, input_hint, _resume_prompt = await _resume_after_modification(
+                next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
                     slots=slots,
                     state=state,
+                    modified_slot=target_slot,
                 )
 
                 return ToolResult(
@@ -1112,6 +1580,7 @@ class ModificationTool:
                         },
                         "next_phase": next_phase,
                         "next_question_target": next_target,
+                        "next_question_prompt": resume_prompt,
                     },
                     input_hint=input_hint,
                 )
@@ -1152,13 +1621,14 @@ class ModificationTool:
                 input_hint=input_hint,
             )
         else:
+            new_value = _sanitize_slot_value(str(new_value))
             if (
                 target_slot in _APPENDABLE_TEXT_SLOTS
                 and mod.action == "add"
                 and old_value not in (None, "", "none")
             ):
                 old_text = str(old_value).strip()
-                new_text = str(new_value).strip()
+                new_text = new_value
                 if new_text.lower() in old_text.lower():
                     final = old_text
                 else:
@@ -1174,7 +1644,7 @@ class ModificationTool:
             action=mod.action,
             new_value=final,
         )
-        next_phase, next_target, input_hint, _resume_prompt = await _resume_after_modification(
+        next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
             slots=slots,
             state=state,
         )
@@ -1192,6 +1662,7 @@ class ModificationTool:
                 "cascade_effects": effects,
                 "next_phase": next_phase,
                 "next_question_target": next_target,
+                "next_question_prompt": resume_prompt,
             },
             input_hint=input_hint,
         )
@@ -1207,6 +1678,13 @@ class ModificationTool:
         appetizer_style, meal_style) also reset so the follow-up prompt fires."""
         old_value = get_slot_value(slots, target_slot)
         clear_slot(slots, target_slot)
+        if target_slot == "rentals":
+            # "Linens" is a rental subtype, stored separately for recap/UI. When
+            # the user redoes rentals, clear both so the next selection is clean.
+            if is_filled(slots, "linens"):
+                clear_slot(slots, "linens")
+            if is_filled(slots, "__gate_rentals"):
+                clear_slot(slots, "__gate_rentals")
         if target_slot == "desserts" and is_filled(slots, "__gate_desserts"):
             clear_slot(slots, "__gate_desserts")
         if target_slot == "appetizers" and is_filled(slots, "appetizer_style"):
@@ -1281,6 +1759,52 @@ class ModificationTool:
             # `resolve_desserts` directly.
             return {}
         return {}
+
+
+def _rebuild_list_value(
+    combined_names: list[str],
+    menu: dict[str, list[dict]],
+    added_items: list[dict],
+) -> str:
+    """Build a formatted slot value without re-resolving existing items through fuzzy DB lookup.
+
+    Strategy:
+    - Newly added items already have full price data from the resolver — use them directly.
+    - Remaining existing items are looked up by exact name in the menu catalog.
+    - If an existing name isn't found in the catalog (custom/stale), keep it as a plain name.
+
+    This prevents `resolve_to_db_items` fuzzy re-matching from corrupting data when
+    existing item names don't exactly match the current catalog.
+    """
+    if not combined_names:
+        return "none"
+
+    # Build exact-name catalog from the menu (no fuzzy matching)
+    catalog: dict[str, dict] = {}
+    for items in menu.values():
+        for item in items:
+            name = str(item.get("name") or "").strip()
+            if name:
+                catalog[name.lower()] = item
+
+    # Newly added items already resolved with full price data
+    added_by_name: dict[str, dict] = {
+        str(i.get("name") or "").lower(): i
+        for i in added_items
+        if i.get("name")
+    }
+
+    final_items: list[dict] = []
+    for name in combined_names:
+        name_lower = name.lower()
+        if name_lower in added_by_name:
+            final_items.append(added_by_name[name_lower])
+        elif name_lower in catalog:
+            final_items.append(catalog[name_lower])
+        else:
+            final_items.append({"name": name})
+
+    return format_items(final_items) if final_items else "none"
 
 
 def _serialize_menu(menu: dict[str, list[dict]]) -> list[dict]:
@@ -1362,18 +1886,31 @@ def _selected_item_catalog(
     return out
 
 
+_PHASE_ACTIVE_SLOT: dict[str, str] = {
+    PHASE_COCKTAIL: "appetizers",
+    PHASE_MAIN_MENU: "selected_dishes",
+    PHASE_DESSERT: "desserts",
+}
+
+
 def _modification_context_block(slots: dict, state: dict) -> str:
     lines: list[str] = []
-    phase = state.get("conversation_phase")
-    if phase:
-        lines.append(f"current_phase: {phase}")
-    current_section = menu_section_for_phase(phase)
-    if current_section:
-        lines.append(f"active_menu_section: {current_section}")
     lines.append(
         "If the user says they want to reselect, redo, start over, or see a whole menu section again "
         "without naming concrete items, use action='reopen' for that list slot."
     )
+
+    # Tell the LLM which list slot the user is currently filling so ambiguous
+    # "add X" requests (e.g. "add soups/salad" at main-menu phase) target the
+    # right slot instead of defaulting to appetizers.
+    phase = state.get("conversation_phase", "")
+    active_slot = _PHASE_ACTIVE_SLOT.get(phase)
+    if active_slot:
+        slot_label = {"appetizers": "appetizers", "selected_dishes": "main dishes", "desserts": "desserts"}[active_slot]
+        lines.append(
+            f"Current phase: {phase}. The user is actively building their {slot_label}. "
+            f"For 'add' requests with no explicit slot context, prefer target_slot='{active_slot}'."
+        )
 
     lists_context = _current_lists_context(slots)
     if lists_context:
@@ -1390,6 +1927,45 @@ def _is_unspecified_list_change(mod: ModificationExtraction) -> bool:
     has_add = bool(mod.items_to_add)
     has_value = mod.new_value is not None and str(mod.new_value).strip() != ""
     return not (has_remove or has_add or has_value)
+
+
+def _items_mentioned_in_message(items: list[str], message: str) -> bool:
+    """Return True if any item string appears (case-insensitive, token-level)
+    in the user's message. Used to detect LLM hallucination of list items."""
+    if not items or not message:
+        return False
+    msg_lower = message.lower()
+    for item in items:
+        if not item:
+            continue
+        # Try full phrase, then any significant word from the item name.
+        item_lower = str(item).lower().strip()
+        if not item_lower:
+            continue
+        if item_lower in msg_lower:
+            return True
+        # Token overlap: if any 4+ char word from the item appears in msg.
+        for token in re.split(r"[^a-z0-9]+", item_lower):
+            if len(token) >= 4 and token in msg_lower:
+                return True
+    return False
+
+
+def _has_hallucinated_list_items(mod: ModificationExtraction, message: str) -> bool:
+    """The LLM returned item names for a list-slot add/replace, but NONE of
+    them appear in the user's message. This happens when a vague command
+    like 'ADD DESSERTS' primes the model to invent reasonable-looking items
+    from the catalog instead of reopening the picker. Treat as unspecified."""
+    if mod.target_slot not in _LIST_SLOTS:
+        return False
+    if mod.action not in {"add", "replace"}:
+        return False
+    items = list(mod.items_to_add or [])
+    if mod.new_value and isinstance(mod.new_value, str):
+        items.append(mod.new_value)
+    if not items:
+        return False
+    return not _items_mentioned_in_message(items, message)
 
 
 def _is_generic_list_reopen_request(message: str, mod: ModificationExtraction) -> bool:
@@ -1449,7 +2025,7 @@ def _current_lists_context(slots: dict) -> str:
     so it names items correctly and picks the right target_slot."""
     lines: list[str] = ["CURRENT FILLED LISTS (use these exact item names):"]
     any_content = False
-    for slot in ("appetizers", "selected_dishes", "desserts", "rentals"):
+    for slot in ("appetizers", "desserts", "rentals", "selected_dishes"):
         val = get_slot_value(slots, slot)
         if not val or str(val).lower() == "none":
             continue
@@ -1465,6 +2041,32 @@ def _current_lists_context(slots: dict) -> str:
         "list contains X — do NOT guess based on the current conversation phase."
     )
     return "\n".join(lines)
+
+
+def _find_cross_slot_matches(probe_items: list[str], slots: dict) -> dict[str, str]:
+    """Return {item_name: slot_name} for probe items that match across multiple list slots.
+
+    Only populated when matches span MORE than one slot — single-slot hits return {}.
+    """
+    probe_lower = [p.strip().lower() for p in probe_items if p and p.strip()]
+    if not probe_lower:
+        return {}
+
+    per_slot: dict[str, list[str]] = {}
+    for slot in ("appetizers", "selected_dishes", "desserts"):
+        val = get_slot_value(slots, slot)
+        if not val or str(val).lower() == "none":
+            continue
+        for name in parse_slot_items(str(val)):
+            name_lower = name.lower()
+            for p in probe_lower:
+                if p in name_lower or name_lower in p:
+                    per_slot.setdefault(slot, []).append(name)
+                    break
+
+    if len(per_slot) < 2:
+        return {}
+    return {name: slot for slot, names in per_slot.items() for name in names}
 
 
 def _reroute_by_membership(mod: "ModificationExtraction", slots: dict) -> str | None:
@@ -1610,20 +2212,47 @@ async def _resume_after_modification(
     *,
     slots: dict,
     state: dict,
+    modified_slot: str | None = None,
 ) -> tuple[str | None, str | None, dict | None, str | None]:
     phase = state.get("conversation_phase")
 
-    if phase in {
+    # Intake (basic-info) phases — ALWAYS recompute from the current slot state
+    # rather than trusting the stale stored phase. A modification can flip
+    # event_type and cascade-clear dependent slots, so the stored phase is
+    # often wrong (e.g. pointing at service_type when wedding_cake is newly
+    # unfilled). basic_info_tool._next_phase walks the required-slot order
+    # and returns the true next gap.
+    _INTAKE_PHASES = {
         PHASE_GREETING,
         PHASE_EVENT_TYPE,
         PHASE_CONDITIONAL_FOLLOWUP,
+        PHASE_WEDDING_CAKE,
         PHASE_SERVICE_TYPE,
         PHASE_EVENT_DATE,
         PHASE_VENUE,
         PHASE_GUEST_COUNT,
-    }:
-        target = _basic_phase_to_question(phase, slots)
-        return phase, target, _basic_input_hint_for_phase(phase), None
+    }
+    # When event_type itself was just modified, the cascade may have cleared
+    # partner_name / honoree_name / company_name / service_type. Always recheck
+    # the full intake sequence in that case so the user is re-asked the now-
+    # relevant conditional slots before continuing — regardless of current phase.
+    if modified_slot == "event_type":
+        recomputed = _basic_next_phase(slots)
+        if recomputed in _INTAKE_PHASES:
+            state["conversation_phase"] = recomputed
+            target = _basic_phase_to_question(recomputed, slots)
+            return recomputed, target, _basic_input_hint_for_phase(recomputed, slots), None
+        if phase in _INTAKE_PHASES or phase is None:
+            phase = recomputed
+            state["conversation_phase"] = phase
+    elif phase in _INTAKE_PHASES or phase is None:
+        recomputed = _basic_next_phase(slots)
+        if recomputed in _INTAKE_PHASES:
+            state["conversation_phase"] = recomputed
+            target = _basic_phase_to_question(recomputed, slots)
+            return recomputed, target, _basic_input_hint_for_phase(recomputed, slots), None
+        phase = recomputed
+        state["conversation_phase"] = phase
 
     if phase in {PHASE_TRANSITION, PHASE_COCKTAIL, PHASE_MAIN_MENU, PHASE_DESSERT}:
         if phase == PHASE_TRANSITION:
@@ -1700,6 +2329,11 @@ _SLOT_LABELS = {
     "partner_name": "partner name",
     "company_name": "company name",
     "honoree_name": "honoree",
+    "appetizers": "appetizers",
+    "selected_dishes": "main dishes",
+    "meal_style": "meal style",
+    "desserts": "desserts",
+    "menu_notes": "menu notes",
     "wedding_cake": "wedding cake",
     "service_type": "service",
     "drinks": "drinks",
@@ -1708,11 +2342,12 @@ _SLOT_LABELS = {
     "coffee_service": "coffee service",
     "tableware": "tableware",
     "utensils": "utensils",
-    "linens": "linens",
+    "linens": "rentals (linens)",
     "rentals": "rentals",
     "special_requests": "special requests",
     "dietary_concerns": "dietary concerns",
     "additional_notes": "notes",
+    "followup_call_requested": "follow-up call",
 }
 
 

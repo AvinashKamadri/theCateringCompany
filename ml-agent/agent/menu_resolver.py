@@ -3,10 +3,31 @@
 from __future__ import annotations
 
 import re as _re
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional
 
 from database.db_manager import load_menu_by_category
+
+# ---------------------------------------------------------------------------
+# Process-level menu cache — menu data is static within a deployment so we
+# avoid hitting the DB on every tool call (3 callers per menu turn).
+# TTL is intentionally short enough to pick up a menu republish within minutes.
+# ---------------------------------------------------------------------------
+_MENU_CACHE: dict | None = None
+_MENU_CACHE_AT: float = 0.0
+_MENU_CACHE_TTL: float = 120.0  # seconds
+
+
+async def _load_cached_menu() -> dict:
+    global _MENU_CACHE, _MENU_CACHE_AT
+    now = time.monotonic()
+    if _MENU_CACHE is not None and now - _MENU_CACHE_AT < _MENU_CACHE_TTL:
+        return _MENU_CACHE
+    fresh = await load_menu_by_category()
+    _MENU_CACHE = fresh
+    _MENU_CACHE_AT = now
+    return fresh
 
 
 def is_appetizer_category(cat_name: str) -> bool:
@@ -61,7 +82,7 @@ def is_dessert_category(cat_name: str) -> bool:
 
 
 async def load_main_dish_menu() -> dict[str, list[dict]]:
-    menu = await load_menu_by_category()
+    menu = await _load_cached_menu()
     return {
         cat: items
         for cat, items in menu.items()
@@ -70,13 +91,13 @@ async def load_main_dish_menu() -> dict[str, list[dict]]:
 
 
 async def load_appetizer_menu() -> dict[str, list[dict]]:
-    menu = await load_menu_by_category()
+    menu = await _load_cached_menu()
     return {cat: items for cat, items in menu.items() if is_appetizer_category(cat)}
 
 
 async def load_dessert_menu_expanded(is_wedding: bool = False) -> list[dict]:
     """Flat list of desserts with mini-dessert bundle expanded into sub-items."""
-    menu = await load_menu_by_category()
+    menu = await _load_cached_menu()
     out: list[dict] = []
     for cat_name, cat_items in menu.items():
         if not is_dessert_category(cat_name):
@@ -256,7 +277,7 @@ async def resolve_menu_items(
     existing_names: Optional[Iterable[str]] = None,
 ) -> MenuResolution:
     if menu is None:
-        menu = await load_menu_by_category()
+        menu = await _load_cached_menu()
 
     if isinstance(extraction, str):
         raw_text = extraction

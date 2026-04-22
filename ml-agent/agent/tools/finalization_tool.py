@@ -30,38 +30,41 @@ from agent.state import (
     PHASE_FOLLOWUP,
     PHASE_REVIEW,
     PHASE_SPECIAL_REQUESTS,
+    clear_slot,
     fill_slot,
     get_slot_value,
     is_filled,
 )
-from agent.tools.base import ToolResult
+from agent.tools.base import ToolResult, history_for_llm
 from agent.tools.structured_choice import normalize_structured_choice
 from tools.pricing import calculate_event_pricing
 
 
 _SYSTEM_PROMPT = (
-    "You parse the customer's wrap-up responses for a catering order.\n"
-    "The user may answer the current question directly, decline it, or volunteer "
-    "other wrap-up details early. Capture any wrap-up facts that are explicitly "
-    "stated without inventing anything.\n"
-    "- special_requests: any free-form requests (decor, timing, allergies wording). "
-    "IMPORTANT: if the user says 'no', 'none', 'nope', 'skip', 'nothing', 'no special requests', "
-    "or any clear decline, set special_requests to the string 'none' (not null/None).\n"
-    "- dietary_concerns: allergies / restrictions stated ('vegan', 'nut allergy'). "
-    "If user says no dietary concerns / no restrictions, set to the string 'none'.\n"
-    "- additional_notes: anything else the customer wants the staff to see.\n"
+    "# Role\n"
+    "You parse the customer's wrap-up responses for a catering order.\n\n"
+    "# Rules\n"
+    "- The user may answer the current question, decline it, or volunteer other wrap-up details early.\n"
+    "- Capture facts explicitly stated without inventing anything.\n"
+    "- special_requests: free-form requests. If user clearly declines, set to the string 'none' (not null).\n"
+    "- dietary_concerns: allergies/restrictions. If user clearly declines, set to the string 'none'.\n"
+    "- additional_notes: anything else the customer wants staff to see.\n"
     "- followup_call_requested: True if they want a human call; False if they decline.\n"
-    "- confirm_final: True ONLY if user explicitly confirms the summary is correct "
-    "('yes looks good', 'confirm', 'send it'). Never guess."
+    "- confirm_final: True ONLY if user explicitly confirms the summary is correct ('confirm', 'send it', 'looks good'). Never guess.\n\n"
+    "# Examples\n"
+    "1. User: 'no special requests'\n"
+    "   Extract: special_requests='none'\n"
+    "2. User: 'nut allergy'\n"
+    "   Extract: dietary_concerns='nut allergy'\n"
+    "3. User: 'no dietary restrictions'\n"
+    "   Extract: dietary_concerns='none'\n"
+    "4. User: 'looks good, send it'\n"
+    "   Extract: confirm_final=True\n"
 )
 
 
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    out: list[dict] = []
-    for m in history[-6:]:
-        role = "user" if getattr(m, "type", "") == "human" else "assistant"
-        out.append({"role": role, "content": m.content})
-    return out
+    return history_for_llm(history)
 
 
 def _next_target(slots: dict) -> str:
@@ -107,6 +110,30 @@ def _allowed_fields_for_target(target: str) -> set[str]:
     return set()
 
 
+# Exact-match only — no prefix matching. Messages like "yes i have diabetes"
+# intentionally fall through to LLM extraction, which fills the content slot
+# directly (e.g. dietary_concerns="diabetes") without losing the content.
+_GATE_YES_EXACT = frozenset({
+    "yes", "yep", "yeah", "yup", "sure", "ok", "okay", "of course",
+    "absolutely", "definitely", "please do", "i do", "yes please",
+    "yes ok", "sounds good", "go ahead", "please", "do it",
+})
+_GATE_NO_EXACT = frozenset({
+    "no", "nope", "nah", "n", "no thanks", "no thank you", "skip",
+    "none", "not really", "no need", "pass", "nothing", "i dont",
+    "i don't", "neither", "no special requests", "no dietary concerns",
+    "no additional notes", "no, don't schedule a call", "no call needed",
+})
+
+
+def _is_gate_yes(msg: str) -> bool:
+    return msg in _GATE_YES_EXACT
+
+
+def _is_gate_no(msg: str) -> bool:
+    return msg in _GATE_NO_EXACT
+
+
 def _apply_structured_answer(
     *,
     target: str,
@@ -114,59 +141,42 @@ def _apply_structured_answer(
     slots: dict,
     fills: list[tuple[str, Any]],
 ) -> bool:
-    yes_values = {
-        "yes",
-        "yes, i have a special request",
-        "yes, i have dietary concerns",
-        "yes, add a note",
-        "yes, schedule a call",
-        "yes, please call me",
-    }
-    no_values = {
-        "no",
-        "no special requests",
-        "no dietary concerns",
-        "no additional notes",
-        "no, don't schedule a call",
-        "no, no call needed",
-    }
-
     if target == "ask_special_requests_gate":
-        if message_lower in yes_values:
+        if _is_gate_yes(message_lower):
             fill_slot(slots, "__gate_special_requests", True)
             fills.append(("__gate_special_requests", True))
             return True
-        if message_lower in no_values:
+        if _is_gate_no(message_lower):
             fill_slot(slots, "special_requests", "none")
             fills.append(("special_requests", "none"))
             return True
 
     if target == "ask_dietary_gate":
-        if message_lower in yes_values:
+        if _is_gate_yes(message_lower):
             fill_slot(slots, "__gate_dietary", True)
             fills.append(("__gate_dietary", True))
             return True
-        if message_lower in no_values:
+        if _is_gate_no(message_lower):
             fill_slot(slots, "dietary_concerns", "none")
             fills.append(("dietary_concerns", "none"))
             return True
 
     if target == "ask_additional_notes_gate":
-        if message_lower in yes_values:
+        if _is_gate_yes(message_lower):
             fill_slot(slots, "__gate_additional_notes", True)
             fills.append(("__gate_additional_notes", True))
             return True
-        if message_lower in no_values:
+        if _is_gate_no(message_lower):
             fill_slot(slots, "additional_notes", "none")
             fills.append(("additional_notes", "none"))
             return True
 
     if target == "ask_followup_call":
-        if message_lower in yes_values:
+        if _is_gate_yes(message_lower):
             fill_slot(slots, "followup_call_requested", True)
             fills.append(("followup_call_requested", True))
             return True
-        if message_lower in no_values:
+        if _is_gate_no(message_lower):
             fill_slot(slots, "followup_call_requested", False)
             fills.append(("followup_call_requested", False))
             return True
@@ -334,6 +344,29 @@ class FinalizationTool:
         next_phase = _phase_of(slots)
         state["conversation_phase"] = next_phase
 
+        # Store which yes/no question is pending so the router can resolve
+        # bare "yes"/"no" replies without an LLM call.
+        _GATE_TARGETS = {
+            "ask_special_requests_gate": ("__gate_special_requests", "special_requests"),
+            "ask_dietary_gate": ("__gate_dietary", "dietary_concerns"),
+            "ask_additional_notes_gate": ("__gate_additional_notes", "additional_notes"),
+            "ask_followup_call": (None, "followup_call_requested"),
+        }
+        if next_target in _GATE_TARGETS:
+            gate_slot, content_slot = _GATE_TARGETS[next_target]
+            fill_slot(slots, "__pending_confirmation", {
+                "question_id": next_target,
+                "tool": "finalization_tool",
+                "yes_action": "open_gate" if gate_slot else "set_true",
+                "no_action": "skip",
+                "gate_slot": gate_slot,
+                "content_slot": content_slot,
+            })
+        else:
+            # Clear pending confirmation when no longer on a gate question
+            if is_filled(slots, "__pending_confirmation"):
+                clear_slot(slots, "__pending_confirmation")
+
         response_context: dict[str, Any] = {
             "tool": self.name,
             "filled_this_turn": fills,
@@ -476,17 +509,24 @@ class _ReviewConfirmClassification(BaseModel):
 
 
 _CLASSIFIER_SYSTEM = (
-    "You decide whether the customer is confirming their final catering order "
-    "as displayed, or pushing back / asking for changes.\n"
-    "The assistant has just shown a full recap and asked 'are we good to submit this?'.\n"
-    "Return is_confirming=True for ANY clear affirmative — this includes:\n"
-    "  'yes', 'ok', 'okay', 'sure', 'yep', 'yeah', 'looks good', 'we good',\n"
-    "  'yes we good', 'send it', 'confirm', 'go ahead', 'perfect', 'great',\n"
-    "  'all good', 'lets go', \"that's fine\", 'sounds good', 'do it'.\n"
-    "Return is_confirming=False ONLY if the customer explicitly wants to change\n"
-    "something, asks a question, or expresses doubt ('actually...', 'wait',\n"
-    "'can you change', 'I want to add', 'remove the', 'what about').\n"
-    "When in doubt, lean True — the customer has already reviewed the full recap."
+    "# Role\n"
+    "You decide whether the customer is confirming their final catering order as displayed, or pushing back / asking for changes.\n\n"
+    "# Rules\n"
+    "- The assistant has just shown a full recap and asked 'are we good to submit this?'.\n"
+    "- Return is_confirming=True only for a clear affirmative.\n"
+    "- Return is_confirming=False if the customer asks a question, requests changes, expresses doubt, or is ambiguous.\n"
+    "- When in doubt, lean False (avoid premature submission).\n\n"
+    "# Examples\n"
+    "1. User: 'yes'\n"
+    "   Output: is_confirming=True\n"
+    "2. User: 'looks good, send it'\n"
+    "   Output: is_confirming=True\n"
+    "3. User: 'actually can you change the venue'\n"
+    "   Output: is_confirming=False\n"
+    "4. User: 'wait what is included?'\n"
+    "   Output: is_confirming=False\n"
+    "5. User: 'not sure'\n"
+    "   Output: is_confirming=False\n"
 )
 
 
@@ -563,11 +603,21 @@ def _apply_extracted_fields(
     slots: dict,
     fills: list[tuple[str, Any]],
 ) -> bool:
-    confirm_final = bool(extracted.confirm_final) if "confirm_final" in _allowed_fields_for_target(target) and extracted.confirm_final else False
+    allowed = _allowed_fields_for_target(target)
+    confirm_final = bool(extracted.confirm_final) if "confirm_final" in allowed and extracted.confirm_final else False
+
+    # When asking for the actual content ("tell me your dietary concern"),
+    # a bare affirmative like "yes" is not a concern — it's the user still
+    # agreeing to the gate. Reject these so the tool re-asks for real content.
+    _BARE_AFFIRMATIVES = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "y", "yes please"}
 
     for slot_name in ("special_requests", "dietary_concerns", "additional_notes"):
+        if slot_name not in allowed:
+            continue
         value = getattr(extracted, slot_name, None)
         if value is None:
+            continue
+        if target.startswith("collect_") and str(value).strip().lower() in _BARE_AFFIRMATIVES:
             continue
         _append_text_value(
             slot_name=slot_name,
@@ -576,7 +626,7 @@ def _apply_extracted_fields(
             fills=fills,
         )
 
-    if extracted.followup_call_requested is not None:
+    if "followup_call_requested" in allowed and extracted.followup_call_requested is not None:
         current_value = get_slot_value(slots, "followup_call_requested")
         new_value = bool(extracted.followup_call_requested)
         if current_value is None or bool(current_value) != new_value:

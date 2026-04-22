@@ -233,6 +233,37 @@ def test_tableware_gate_accepts_no_tableware_and_advances_to_utensils():
     assert _next_target(slots) == "ask_utensils"
 
 
+def test_quick_route_review_change_routes_to_modification_tool():
+    slots = initialize_empty_slots()
+    for key, value in {
+        "name": "Syed Ali",
+        "email": "syed@example.com",
+        "phone": "+11234567890",
+        "event_type": "Birthday",
+        "event_date": "2026-04-30",
+        "venue": "Pearluxe Tower",
+        "guest_count": 55,
+        "service_type": "Dropoff",
+        "meal_style": "buffet",
+        "selected_dishes": "Burger Bar ($23.99/per_person)",
+        "tableware": "standard_disposable",
+        "special_requests": "none",
+        "dietary_concerns": "none",
+        "additional_notes": "none",
+        "followup_call_requested": False,
+    }.items():
+        fill_slot(slots, key, value)
+
+    state = {
+        "conversation_phase": PHASE_REVIEW,
+        "slots": slots,
+    }
+
+    assert _quick_route("change", state) == "modification_tool"
+    assert _quick_route("I need to change something", state) == "modification_tool"
+    assert _quick_route("confirm", state) == "finalization_tool"
+
+
 def test_apply_structured_answer_accepts_prefixed_add_ons_choices():
     slots = initialize_empty_slots()
     fill_slot(slots, "drinks", True)
@@ -1934,8 +1965,31 @@ async def test_modification_tool_generic_request_asks_what_to_modify(monkeypatch
         state={"slots": slots, "conversation_phase": PHASE_SPECIAL_REQUESTS},
     )
 
-    assert result.direct_response == "What would you like to modify?"
+    assert (result.direct_response or "").lower().startswith("what would you like to change")
     assert get_slot_value(slots, "__pending_modification_request") == {"stage": "target"}
+    assert result.input_hint is not None
+    assert result.input_hint["type"] == "options"
+    assert {"value": "selected_dishes", "label": "Main Dishes"} in result.input_hint["options"]
+
+
+@pytest.mark.asyncio
+async def test_modification_tool_generic_change_variants_ask_target(monkeypatch):
+    async def fail_extract(**kwargs):
+        raise AssertionError("extract should not run for a generic modification request")
+
+    monkeypatch.setattr("agent.tools.modification_tool.extract", fail_extract)
+
+    tool = ModificationTool()
+    for msg in ("change", "change?", "I want to change", "i'd like to modify"):
+        slots = initialize_empty_slots()
+        fill_slot(slots, "event_date", "2026-04-30")
+        result = await tool.run(
+            message=msg,
+            history=[],
+            state={"slots": slots, "conversation_phase": PHASE_EVENT_DATE},
+        )
+        assert (result.direct_response or "").lower().startswith("what would you like to change")
+        assert get_slot_value(slots, "__pending_modification_request") == {"stage": "target"}
 
 
 @pytest.mark.asyncio
@@ -1968,8 +2022,37 @@ async def test_modification_tool_pending_generic_request_reopens_appetizers(monk
     assert get_slot_value(slots, "__pending_modification_request") is None
     assert get_slot_value(slots, "appetizers") is None
     assert get_slot_value(slots, "appetizer_style") is None
-    assert result.response_context["next_phase"] == PHASE_COCKTAIL
-    assert "Here are the appetizer options" in (result.direct_response or "")
+
+
+@pytest.mark.asyncio
+async def test_modification_tool_pending_generic_request_reopens_rentals_when_user_says_linens(monkeypatch):
+    slots = initialize_empty_slots()
+    fill_slot(slots, "rentals", "Linens, Tables")
+    fill_slot(slots, "linens", True)
+    fill_slot(slots, "__gate_rentals", True)
+    fill_slot(slots, "__pending_modification_request", {"stage": "target"})
+
+    async def fake_render_slot_menu(self, target_slot, slots):
+        assert target_slot == "rentals"
+        return (
+            "Here are the rental options:\n1. Linens\n2. Tables\n3. Chairs",
+            {"type": "options", "options": [{"value": "Linens", "label": "Linens"}]},
+        )
+
+    monkeypatch.setattr(ModificationTool, "_render_slot_menu", fake_render_slot_menu)
+
+    tool = ModificationTool()
+    result = await tool.run(
+        message="linens",
+        history=[],
+        state={"slots": slots, "conversation_phase": PHASE_SPECIAL_REQUESTS},
+    )
+
+    assert get_slot_value(slots, "__pending_modification_request") is None
+    assert get_slot_value(slots, "rentals") is None
+    assert get_slot_value(slots, "linens") is None
+    assert get_slot_value(slots, "__gate_rentals") is None
+    assert "rental options" in (result.direct_response or "").lower()
 
 
 @pytest.mark.asyncio
@@ -2163,6 +2246,50 @@ async def test_modification_tool_grounding_blocks_false_positive_partial_removal
         "matches": ["Deviled Egg", "Caviar Egg"],
         "items_to_remove": ["egg"],
         "items_to_add": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_modification_tool_enforces_max_four_desserts_on_add(monkeypatch):
+    from types import SimpleNamespace
+
+    slots = initialize_empty_slots()
+    fill_slot(
+        slots,
+        "desserts",
+        "Brownies ($2.00/per_person), 7-Layer Bars ($2.00/per_person), Flavored Mousse Cup ($2.00/per_person), Fruit Tarts ($2.00/per_person)",
+    )
+
+    async def fake_resolve_dessert_choices(raw_names, **kwargs):
+        return SimpleNamespace(
+            ambiguous_choices=[],
+            matched_items=[{"name": "Blondies", "unit_price": 2.0, "price_type": "per_person"}],
+        )
+
+    monkeypatch.setattr("agent.tools.modification_tool.resolve_dessert_choices", fake_resolve_dessert_choices)
+
+    tool = ModificationTool()
+    result = await tool._apply_list_modification(
+        ModificationExtraction(
+            target_slot="desserts",
+            action="add",
+            items_to_add=["Blondies"],
+        ),
+        slots,
+        {"conversation_phase": PHASE_REVIEW, "slots": slots},
+    )
+
+    assert result.response_context.get("error") == "dessert_overflow"
+    assert "limited to 4" in (result.direct_response or "").lower()
+    assert "Blondies" not in (get_slot_value(slots, "desserts") or "")
+    assert result.input_hint == {
+        "type": "options",
+        "options": [
+            {"value": "remove Brownies", "label": "Remove Brownies"},
+            {"value": "remove 7-Layer Bars", "label": "Remove 7-Layer Bars"},
+            {"value": "remove Flavored Mousse Cup", "label": "Remove Flavored Mousse Cup"},
+            {"value": "remove Fruit Tarts", "label": "Remove Fruit Tarts"},
+        ],
     }
 
 

@@ -38,10 +38,17 @@ from agent.menu_resolver import (
 from agent.models import MenuSelectionExtraction
 from agent.state import (
     PHASE_COCKTAIL,
+    PHASE_CONDITIONAL_FOLLOWUP,
     PHASE_DESSERT,
     PHASE_DRINKS_BAR,
+    PHASE_EVENT_DATE,
+    PHASE_GREETING,
+    PHASE_GUEST_COUNT,
     PHASE_MAIN_MENU,
+    PHASE_SERVICE_TYPE,
     PHASE_TRANSITION,
+    PHASE_VENUE,
+    PHASE_WEDDING_CAKE,
     clear_slot,
     fill_slot,
     get_slot_value,
@@ -85,25 +92,60 @@ def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
     return history_for_llm(history)
 
 
+def _wedding_cake_needed(slots: dict) -> bool:
+    """Return True if the wedding cake sub-flow still has unanswered questions."""
+    if not is_filled(slots, "__wedding_cake_gate"):
+        return True
+    if get_slot_value(slots, "__wedding_cake_gate") is False:
+        return False
+    return not (
+        is_filled(slots, "__wedding_cake_flavor")
+        and is_filled(slots, "__wedding_cake_filling")
+        and is_filled(slots, "__wedding_cake_buttercream")
+    )
+
+
 def _phase_of(slots: dict) -> str:
-    """Which menu phase are we in — drives what we extract against."""
+    """Which phase are we in — drives menu extraction and post-menu routing.
+
+    After all menu selections are done, routes through remaining basic info
+    (conditional, wedding cake, date, venue, guest count, service type) before
+    handing off to add-ons. This keeps basic_info_tool in control of those
+    phases while still letting menu_selection_tool signal the correct next step.
+    """
     if not is_filled(slots, "cocktail_hour"):
         return PHASE_COCKTAIL
-    # Appetizers are always shown regardless of cocktail_hour/reception/both.
-    # The cocktail_hour flag only affects UI labeling + service_style; it no
-    # longer gates whether we collect appetizer picks.
+    # Appetizers always shown regardless of cocktail/reception choice
     if not is_filled(slots, "appetizers"):
         return PHASE_COCKTAIL
-    # Ask passed/station after appetizers are picked (captured via options card)
     if not is_filled(slots, "appetizer_style"):
         return PHASE_COCKTAIL
-    # Show main menu first; ask plated/buffet after dishes are confirmed
     if not is_filled(slots, "selected_dishes") and not get_slot_value(slots, "custom_menu"):
         return PHASE_MAIN_MENU
     if not is_filled(slots, "meal_style"):
         return PHASE_MAIN_MENU
     if not is_filled(slots, "desserts"):
         return PHASE_DESSERT
+
+    # Menu complete — route through remaining basic info before add-ons
+    event_type = (get_slot_value(slots, "event_type") or "").lower()
+    if "wedding" in event_type and not is_filled(slots, "partner_name"):
+        return PHASE_CONDITIONAL_FOLLOWUP
+    if "corporate" in event_type and not is_filled(slots, "company_name"):
+        return PHASE_CONDITIONAL_FOLLOWUP
+    if "birthday" in event_type and not is_filled(slots, "honoree_name"):
+        return PHASE_CONDITIONAL_FOLLOWUP
+    if "wedding" in event_type and _wedding_cake_needed(slots):
+        return PHASE_WEDDING_CAKE
+    if not is_filled(slots, "event_date"):
+        return PHASE_EVENT_DATE
+    if not is_filled(slots, "venue"):
+        return PHASE_VENUE
+    if not is_filled(slots, "guest_count"):
+        return PHASE_GUEST_COUNT
+    if not is_filled(slots, "service_type"):
+        return PHASE_SERVICE_TYPE
+
     return PHASE_DRINKS_BAR
 
 
@@ -723,6 +765,25 @@ def _next_target(fills: list[tuple[str, Any]], next_phase: str, slots: dict) -> 
         return "show_dessert_menu"
     if next_phase == PHASE_DRINKS_BAR:
         return "transition_to_addons"
+    # Post-menu basic info — basic_info_tool will handle the actual collection
+    if next_phase == PHASE_CONDITIONAL_FOLLOWUP:
+        event_type = (get_slot_value(slots, "event_type") or "").lower()
+        if "wedding" in event_type:
+            return "ask_partner_name"
+        if "corporate" in event_type:
+            return "ask_company_name"
+        if "birthday" in event_type:
+            return "ask_honoree_name"
+    if next_phase == PHASE_WEDDING_CAKE:
+        return "ask_wedding_cake"
+    if next_phase == PHASE_EVENT_DATE:
+        return "ask_event_date"
+    if next_phase == PHASE_VENUE:
+        return "ask_venue"
+    if next_phase == PHASE_GUEST_COUNT:
+        return "ask_guest_count"
+    if next_phase == PHASE_SERVICE_TYPE:
+        return "ask_service_type"
     return "continue"
 
 
@@ -774,6 +835,43 @@ async def _input_hint_for_menu_phase(phase: str, slots: dict) -> dict | None:
             is_wedding="wedding" in (get_slot_value(slots, "event_type") or "").lower()
         )
         return {"type": "menu_picker", "category": "desserts", "items": items, "max_select": 4}
+    # Post-menu basic info input hints — mirrors basic_info_tool._input_hint_for_phase
+    if phase == PHASE_CONDITIONAL_FOLLOWUP:
+        return None  # free-text name field
+    if phase == PHASE_WEDDING_CAKE:
+        return {
+            "type": "options",
+            "options": [{"value": "yes", "label": "Yes"}, {"value": "no", "label": "No thanks"}],
+        }
+    if phase == PHASE_EVENT_DATE:
+        return {
+            "type": "date",
+            "allow_skip": True,
+            "skip_label": "Confirm later",
+        }
+    if phase == PHASE_VENUE:
+        return {
+            "type": "options",
+            "subtype": "venue",
+            "options": [{"value": "tbd_confirm_call", "label": "Confirm venue on call"}],
+            "allow_text": True,
+        }
+    if phase == PHASE_GUEST_COUNT:
+        return {
+            "type": "options",
+            "subtype": "guest_count",
+            "options": [{"value": "tbd", "label": "TBD / Confirm later"}],
+            "allow_text": True,
+        }
+    if phase == PHASE_SERVICE_TYPE:
+        return {
+            "type": "options",
+            "options": [
+                {"value": "Onsite", "label": "Onsite - staff present at event"},
+                {"value": "Dropoff", "label": "Drop-off - delivery only, no staff"},
+                {"value": "skip", "label": "Confirm later"},
+            ],
+        }
     return None
 
 

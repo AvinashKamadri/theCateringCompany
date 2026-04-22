@@ -280,8 +280,9 @@ _TEMPLATE_ONLY_TARGETS = frozenset({
     # Flavor/filling/buttercream are removed so the LLM can say
     # "Funfetti — great pick! What filling would you like?" etc.
     "ask_wedding_cake",
-    # Menu transitions
+    # Menu transitions and gates
     "ask_service_style",
+    "ask_dessert_gate",
     "transition_to_menu",
     "transition_to_addons",
     "transition_to_special_requests",
@@ -370,7 +371,7 @@ def _modification_prompt(ctx: dict[str, Any], state: dict[str, Any] | None = Non
     if action == "reopen":
         return f"Let's revisit your {label}. What would you like to pick?"
 
-    follow_up = _next_prompt(ctx, state)
+    follow_up = _next_prompt(ctx, state) or (ctx.get("next_question_prompt") or "")
 
     if removed or added:
         parts: list[str] = []

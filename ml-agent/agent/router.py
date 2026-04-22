@@ -86,7 +86,7 @@ _HARD_MOD_KEYWORDS = frozenset({
 # ("actually, chocolate please" as a first wedding-cake flavor answer).
 _SOFT_MOD_KEYWORDS = frozenset({
     "actually", "no wait", "wait", "i meant", "cancel",
-    "mistake", "my bad", "sorry", "oops", "scratch that", "nevermind",
+    "mistake", "my bad", "mb", "sorry", "oops", "scratch that", "nevermind",
     "never mind", "instead",
 })
 
@@ -473,13 +473,23 @@ def _quick_route(message: str, state: dict) -> str | None:
     if get_slot_value(slots, "__pending_menu_choice"):
         return "menu_selection_tool"
 
+    phase = state.get("conversation_phase") or PHASE_GREETING
+    msg_lower = _normalize_choice(message)
+
+    # Review recap: "change" always goes to modification_tool so the user can
+    # pick what to modify. Never gate on finalization state — if the user says
+    # "change" at the recap, they want to edit, full stop.
+    if phase == PHASE_REVIEW and msg_lower in {
+        "change", "no, make changes", "i need to change something", "make changes",
+    }:
+        return "modification_tool"
+
     # Route bare yes/no directly to the tool that owns the pending gate
     # question — no slot filling here. The tool itself handles the fill
     # so that _next_target, cascade, and structured_answer all run in
     # the correct order without a race condition.
     pending = get_slot_value(slots, "__pending_confirmation")
     if pending:
-        msg_lower = _normalize_choice(message)
         if msg_lower in _YES_TOKENS or msg_lower in _NO_TOKENS:
             return pending.get("tool", "finalization_tool")
 
@@ -488,8 +498,6 @@ def _quick_route(message: str, state: dict) -> str | None:
     # venue, guest count, etc). Skipping the router LLM saves ~2s/turn on
     # these phases. We still defer to the LLM when the message looks like a
     # modification, a meta-command, or anything else ambiguous.
-    phase = state.get("conversation_phase") or PHASE_GREETING
-    msg_lower = _normalize_choice(message)
     if phase in _FREE_TEXT_AUTOROUTE_PHASES:
         # In free-text phases, soft markers (sorry, actually, wait, i meant…)
         # almost always mean the user is correcting a prior answer, not giving
@@ -558,6 +566,8 @@ _OUT_OF_PHASE_MARKERS = frozenset({
     "bar service", "bar package", "drinks",
     "tableware", "utensils", "linens", "rentals",
     "wedding cake",
+    # Event-identity corrections in partner/honoree/company phases
+    "event type", "type of event", "event is", "it is a", "it's a",
 })
 
 

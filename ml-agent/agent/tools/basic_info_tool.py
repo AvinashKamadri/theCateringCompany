@@ -24,6 +24,7 @@ from agent.instructor_client import extract, filter_extraction_fields
 from agent.models import EventDetailsExtraction
 from agent.state import (
     PHASE_CONDITIONAL_FOLLOWUP,
+    PHASE_DRINKS_BAR,
     PHASE_EVENT_DATE,
     PHASE_EVENT_TYPE,
     PHASE_GREETING,
@@ -89,6 +90,7 @@ _BASIC_FOLLOWUP_FILLER = {
     "nice", "ok", "okay", "cool", "sounds good", "great", "perfect",
     "got it", "works", "that works", "awesome", "sweet",
 }
+
 
 _WEDDING_CAKE_FLAVORS = {
     "yellow", "white", "almond", "chocolate", "carrot", "red velvet",
@@ -169,12 +171,44 @@ def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
     return history_for_llm(history)
 
 
+def _menu_is_complete(slots: dict) -> bool:
+    """Return True when all core menu selections have been collected."""
+    if not is_filled(slots, "cocktail_hour"):
+        return False
+    if not is_filled(slots, "appetizers"):
+        return False
+    if not is_filled(slots, "appetizer_style"):
+        return False
+    if not is_filled(slots, "selected_dishes") and not get_slot_value(slots, "custom_menu"):
+        return False
+    if not is_filled(slots, "meal_style"):
+        return False
+    if not is_filled(slots, "desserts"):
+        return False
+    return True
+
+
 def _next_phase(slots: dict) -> str:
-    """Return the phase that represents the first missing basic-info slot."""
+    """Return the phase that represents the first missing basic-info slot.
+
+    Flow order:
+      1. name → email → phone → event_type   (always first)
+      2. conditional (partner/company/honoree name)
+      3. appetizers → mains → desserts         (jump to menu early)
+      4. wedding_cake → event_date → venue → guest_count → service_type
+      5. PHASE_DRINKS_BAR                      (all basic info done)
+    """
+    # 1. Core identity — collected before anything else
     if not is_filled(slots, "name"):
+        return PHASE_GREETING
+    if not is_filled(slots, "email"):
+        return PHASE_GREETING
+    if not is_filled(slots, "phone"):
         return PHASE_GREETING
     if not is_filled(slots, "event_type"):
         return PHASE_EVENT_TYPE
+
+    # 2. Conditional followup immediately after event type
     event_type = get_slot_value(slots, "event_type")
     if event_type == "Wedding" and not is_filled(slots, "partner_name"):
         return PHASE_CONDITIONAL_FOLLOWUP
@@ -182,21 +216,25 @@ def _next_phase(slots: dict) -> str:
         return PHASE_CONDITIONAL_FOLLOWUP
     if event_type == "Birthday" and not is_filled(slots, "honoree_name"):
         return PHASE_CONDITIONAL_FOLLOWUP
+
+    # 3. Jump to menu
+    if not _menu_is_complete(slots):
+        return PHASE_TRANSITION
+
+    # 4. Post-menu basic info
     if event_type == "Wedding" and _wedding_cake_stage(slots) is not None:
         return PHASE_WEDDING_CAKE
-    if not is_filled(slots, "service_type"):
-        return PHASE_SERVICE_TYPE
     if not is_filled(slots, "event_date"):
         return PHASE_EVENT_DATE
     if not is_filled(slots, "venue"):
         return PHASE_VENUE
     if not is_filled(slots, "guest_count"):
         return PHASE_GUEST_COUNT
-    if not is_filled(slots, "email"):
-        return PHASE_GREETING
-    if not is_filled(slots, "phone"):
-        return PHASE_GREETING
-    return PHASE_TRANSITION
+    if not is_filled(slots, "service_type"):
+        return PHASE_SERVICE_TYPE
+
+    # 5. All basic info done — hand off to add-ons
+    return PHASE_DRINKS_BAR
 
 
 class BasicInfoTool:
@@ -236,6 +274,21 @@ class BasicInfoTool:
             filled_this_turn.append(("service_type", _svc))
             cascade_effects.extend(apply_cascade("service_type", None, _svc, slots))
             _skip_extraction = True
+        elif not is_filled(slots, "service_type") and _msg_lower in {
+            "skip", "confirm later", "tbd", "i'll confirm later", "not sure yet",
+        }:
+            fill_slot(slots, "service_type", "TBD")
+            filled_this_turn.append(("service_type", "TBD"))
+            _skip_extraction = True
+
+        if state.get("conversation_phase") == PHASE_EVENT_DATE and not is_filled(slots, "event_date"):
+            if _msg_lower in {
+                "skip", "confirm later", "tbd", "i'll confirm later", "not sure yet",
+                "skip for now", "decide later",
+            }:
+                fill_slot(slots, "event_date", "TBD")
+                filled_this_turn.append(("event_date", "TBD"))
+                _skip_extraction = True
 
         if state.get("conversation_phase") == PHASE_VENUE and not is_filled(slots, "venue"):
             normalized_tbd_venue = _normalize_tbd_venue(_msg_lower)
@@ -261,22 +314,9 @@ class BasicInfoTool:
         if state.get("conversation_phase") == PHASE_CONDITIONAL_FOLLOWUP:
             if _msg_lower in _BASIC_FOLLOWUP_FILLER:
                 _skip_extraction = True
-            else:
-                # Deterministic fill: at this phase the user is answering exactly
-                # one conditional question. The LLM over-extracts into `name`
-                # because the answer looks like a person's name — skip it.
-                _event_type = get_slot_value(slots, "event_type") or ""
-                _conditional_slot = None
-                if _event_type == "Wedding" and not is_filled(slots, "partner_name"):
-                    _conditional_slot = "partner_name"
-                elif _event_type == "Corporate" and not is_filled(slots, "company_name"):
-                    _conditional_slot = "company_name"
-                elif not is_filled(slots, "honoree_name"):
-                    _conditional_slot = "honoree_name"
-                if _conditional_slot and message.strip():
-                    fill_slot(slots, _conditional_slot, message.strip())
-                    filled_this_turn.append((_conditional_slot, message.strip()))
-                    _skip_extraction = True
+            # LLM extraction runs normally — _PHASE_ALLOWED_FIELDS filters the
+            # result to only partner_name / company_name / honoree_name, so
+            # any `name` over-extraction is discarded automatically.
 
         if state.get("conversation_phase") == PHASE_WEDDING_CAKE:
             cake_stage = _wedding_cake_stage(slots)
@@ -410,6 +450,8 @@ def _phase_to_question(phase: str, slots: dict) -> str:
         if event_type == "Wedding":
             return "ask_service_style"
         return "transition_to_menu"
+    if phase == PHASE_DRINKS_BAR:
+        return "transition_to_addons"
     return "continue"
 
 
@@ -439,6 +481,7 @@ def _input_hint_for_phase(phase: str, slots: dict | None = None) -> dict | None:
             "options": [
                 {"value": "Onsite", "label": "Onsite - staff present at event"},
                 {"value": "Dropoff", "label": "Drop-off - delivery only, no staff"},
+                {"value": "skip", "label": "Confirm later"},
             ],
         }
     if phase == PHASE_WEDDING_CAKE:
@@ -477,7 +520,11 @@ def _input_hint_for_phase(phase: str, slots: dict | None = None) -> dict | None:
                 ]],
             }
     if phase == PHASE_EVENT_DATE:
-        return {"type": "date"}
+        return {
+            "type": "date",
+            "allow_skip": True,
+            "skip_label": "Confirm later",
+        }
     if phase == PHASE_VENUE:
         return {
             "type": "options",
@@ -503,6 +550,14 @@ def _input_hint_for_phase(phase: str, slots: dict | None = None) -> dict | None:
                 {"value": "cocktail hour", "label": "Cocktail hour"},
                 {"value": "reception", "label": "Reception"},
                 {"value": "both", "label": "Both"},
+            ],
+        }
+    if phase == PHASE_DRINKS_BAR:
+        return {
+            "type": "options",
+            "options": [
+                {"value": "yes", "label": "Yes, add drinks or bar"},
+                {"value": "no", "label": "No thanks"},
             ],
         }
     return None

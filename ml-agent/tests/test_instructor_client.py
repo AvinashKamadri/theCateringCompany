@@ -67,9 +67,8 @@ async def test_extract_uses_responses_api_with_json_schema(monkeypatch):
     assert captured["metadata"]["tool"] == "router"
     assert captured["metadata"]["target"] == "ask_service_type"
     assert captured["metadata"]["schema"] == "_MiniSchema"
-    assert captured["prompt_cache_key"].startswith("catering_ml_agent|extract|gpt-test|_MiniSchema|router|S4_service_type|")
+    assert len(captured["prompt_cache_key"]) == 64
     assert captured["safety_identifier"].startswith("catering_")
-
 
 @pytest.mark.asyncio
 async def test_generate_text_uses_responses_api(monkeypatch):
@@ -101,9 +100,8 @@ async def test_generate_text_uses_responses_api(monkeypatch):
     assert captured["metadata"]["tool"] == "response_generator"
     assert captured["metadata"]["phase"] == "S16_special_requests"
     assert captured["metadata"]["thread_id"] == "thread-1"
-    assert captured["prompt_cache_key"].startswith("catering_ml_agent|generate_text|gpt-test|text|response_generator|S16_special_requests|")
+    assert len(captured["prompt_cache_key"]) == 64
     assert captured["safety_identifier"].startswith("catering_")
-
 
 @pytest.mark.asyncio
 async def test_extract_falls_back_to_chat_completions_when_responses_fails(monkeypatch):

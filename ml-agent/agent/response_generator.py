@@ -19,12 +19,67 @@ from pydantic import BaseModel, Field
 from agent.instructor_client import MODEL_RESPONSE, extract, generate_text
 from agent.prompt_registry import RESPONSE_SYSTEM_PROMPT, fallback_prompt_for_target
 from agent.state import filled_slot_summary, get_slot_value, unfilled_required
+from agent.tone_detector import detect_tone, guidance_for_tone
 from agent.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
 
-_RESPONSE_MAX_TOKENS = 1400
+_RESPONSE_MAX_TOKENS = 250
 _SYSTEM_PROMPT = RESPONSE_SYSTEM_PROMPT
+
+# Minimum keyword presence per next_question_target. If the LLM's reply for an
+# intake question is missing all of these, we discard it and fall back to the
+# deterministic prompt. Prevents the model from riffing into a wrap-up ("we'll
+# be in touch") when it should be asking the next question.
+_TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
+    # Keep these permissive — they're a last-resort sanity check, not a style
+    # enforcer. The rule: the reply must at least mention the thing we're
+    # trying to collect. Misses here cause legitimate replies to be discarded
+    # and replaced with stiff fallbacks.
+    "ask_name": ("name",),
+    "ask_email": ("email",),
+    "ask_phone": ("phone", "number"),
+    "ask_event_type": ("event", "wedding", "birthday", "corporate", "planning", "celebration", "kind of"),
+    "ask_partner_name": ("partner", "spouse", "fiance"),
+    "ask_company_name": ("company", "organization", "business"),
+    "ask_honoree_name": ("who", "honoree", "celebrating", "celebration", "for"),
+    "ask_service_type": ("drop", "onsite", "on-site", "on site", "service", "staff", "setup"),
+    "ask_event_date": ("date", "when", "day"),
+    "ask_venue": ("venue", "where", "location", "held", "address"),
+    "ask_guest_count": ("guest", "headcount", "expecting", "how many", "people", "attendees"),
+}
+
+# Phrases the LLM should NEVER emit unless the intake is actually complete.
+_WRAP_UP_PHRASES: tuple[str, ...] = (
+    "hear from our office",
+    "hear from our team",
+    "24-48 hours",
+    "24 to 48 hours",
+    "we'll be in touch",
+    "we will be in touch",
+    "reach out shortly",
+    "make your event a success",
+    "all set!",
+)
+
+
+def _reply_fails_guardrail(text: str, ctx: dict[str, Any], status: str) -> bool:
+    """Return True if the LLM reply should be discarded in favor of the fallback."""
+    if not text:
+        return False
+    lower = text.lower()
+
+    if status != "pending_staff_review":
+        for phrase in _WRAP_UP_PHRASES:
+            if phrase in lower:
+                return True
+
+    target = str(ctx.get("next_question_target") or "")
+    required = _TARGET_KEYWORDS.get(target)
+    if required and not any(k in lower for k in required):
+        return True
+
+    return False
 
 class GeneratedReply(BaseModel):
     """Structured user-facing reply for the next assistant turn."""
@@ -113,6 +168,16 @@ async def render(
         )
         return _fallback(ctx, tool_result.state)
 
+    status = get_slot_value(tool_result.state.get("slots", {}), "conversation_status") or "active"
+    if _reply_fails_guardrail(text, ctx, status):
+        logger.warning(
+            "render_source=guardrail_fallback tool=%s target=%s discarded=%r",
+            ctx.get("tool", "-"),
+            ctx.get("next_question_target", "-"),
+            text[:160],
+        )
+        return _fallback(ctx, tool_result.state)
+
     logger.info(
         "render_source=%s tool=%s target=%s",
         "llm_structured" if structured else "llm_text_fallback",
@@ -138,8 +203,16 @@ def _build_user_block(
         for key, value in filled_slots.items()
     }
 
+    tone = detect_tone(history, user_message)
+    ctx_for_capture = tool_result.response_context or {}
+    filled_this_turn = ctx_for_capture.get("filled_this_turn") or []
+    nothing_captured = not filled_this_turn and not ctx_for_capture.get("modification")
+
     payload = {
         "user_message": user_message,
+        "tone_profile": tone,
+        "tone_guidance": guidance_for_tone(tone),
+        "nothing_was_captured": nothing_captured,
         "context": _sanitize(tool_result.response_context or {}),
         "conversation": {
             "phase": state.get("conversation_phase"),
@@ -202,8 +275,40 @@ def _should_force_menu_progress_render(ctx: dict[str, Any]) -> bool:
     )
 
 
+_TEMPLATE_ONLY_TARGETS = frozenset({
+    # Wedding cake gate: yes/no only, no acknowledgment needed.
+    # Flavor/filling/buttercream are removed so the LLM can say
+    # "Funfetti — great pick! What filling would you like?" etc.
+    "ask_wedding_cake",
+    # Menu transitions
+    "ask_service_style",
+    "transition_to_menu",
+    "transition_to_addons",
+    "transition_to_special_requests",
+    # Add-ons — all structured option selections
+    "ask_drinks_interest",
+    "ask_drinks_setup",
+    "ask_bar_package",
+    "ask_tableware_gate",
+    "ask_tableware",
+    "ask_utensils",
+    "ask_rentals_gate",
+    "ask_labor_services",
+    # Finalization gate questions (yes/no, not free-text collection)
+    "ask_special_requests_gate",
+    "ask_dietary_gate",
+    "ask_additional_notes_gate",
+    "ask_followup_call",
+    # Finalization collection — user already said "yes" to the gate, just
+    # ask for the content directly. LLM would re-ask the gate question.
+    "collect_special_requests",
+    "collect_dietary_concerns",
+    "collect_additional_notes",
+})
+
+
 def _should_force_direct_prompt(ctx: dict[str, Any]) -> bool:
-    return str(ctx.get("next_question_target") or "") == "ask_service_style"
+    return str(ctx.get("next_question_target") or "") in _TEMPLATE_ONLY_TARGETS
 
 
 def _direct_prompt_text(ctx: dict[str, Any], state: dict[str, Any] | None = None) -> str:
@@ -322,6 +427,20 @@ def _modification_label(target: str) -> str:
         "guest_count": "guest count",
         "event_date": "event date",
         "service_type": "service type",
+        "meal_style": "meal style",
+        "appetizer_style": "appetizer style",
+        "service_style": "service style",
+        "cocktail_hour": "cocktail hour",
+        "tableware": "tableware",
+        "utensils": "utensils",
+        "bar_package": "bar package",
+        "bar_service": "bar service",
+        "coffee_service": "coffee service",
+        "wedding_cake": "wedding cake",
+        "partner_name": "partner's name",
+        "company_name": "company name",
+        "honoree_name": "honoree's name",
+        "event_type": "event type",
     }.get(target, target.replace("_", " "))
 
 

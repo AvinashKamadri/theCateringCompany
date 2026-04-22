@@ -1,0 +1,46 @@
+{
+  "description": "Dietary flow: gate=yes, then actual content. Bare 'yes' after the gate must NOT be filled as dietary_concerns value.",
+  "preconditions": {
+    "phase": "S17_dietary",
+    "slots": {
+      "name": "Syed",
+      "event_type": "Wedding",
+      "partner_name": "Sydney",
+      "wedding_cake": "none",
+      "service_type": "Dropoff",
+      "event_date": "2026-12-31",
+      "venue": "TBD - Confirm on call",
+      "guest_count": 100,
+      "email": "a@b.com",
+      "phone": "+1 5551234567",
+      "cocktail_hour": false,
+      "service_style": "reception",
+      "appetizers": "Charcuterie Boards",
+      "appetizer_style": "station",
+      "selected_dishes": "Ravioli Menu",
+      "meal_style": "buffet",
+      "desserts": "Lemon Bars",
+      "drinks": false,
+      "tableware": "china",
+      "utensils": "eco_biodegradable",
+      "linens": true,
+      "rentals": "Linens",
+      "special_requests": "none"
+    },
+    "internal_slots": {
+      "__gate_dietary": true
+    }
+  },
+  "turns": [
+    {
+      "user_message": "Yes",
+      "expected_phase_after": "S17_dietary",
+      "expected_slot_deltas": {},
+      "note": "After __gate_dietary=true and target=collect_dietary_concerns, 'Yes' must be rejected. dietary_concerns must NOT be filled with 'yes'."
+    },
+    {
+      "user_message": "nut allergy",
+      "expected_slot_deltas": {"dietary_concerns": "nut allergy"}
+    }
+  ]
+}

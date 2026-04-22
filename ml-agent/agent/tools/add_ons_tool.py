@@ -25,42 +25,51 @@ from agent.state import (
     PHASE_RENTALS,
     PHASE_SPECIAL_REQUESTS,
     PHASE_TABLEWARE,
+    clear_slot,
     fill_slot,
     get_slot_value,
     is_filled,
 )
-from agent.tools.base import ToolResult
+from agent.tools.base import ToolResult, history_for_llm
 from agent.tools.structured_choice import normalize_structured_choice
 
 
 _SYSTEM_PROMPT = (
-    "You parse drink/bar/rental/labor selections from a catering customer's message. "
-    "Extract ONLY what is explicitly said. Use conversation history to resolve short "
-    "affirmatives ('yes', 'yup', 'ok', 'sure', 'yes lets go') — if the prior AI turn "
-    "asked about a specific slot, treat the affirmative as confirming that slot.\n\n"
-    "- drinks: True if they want drinks at all. True also for 'yes'/'yup'/'ok' when "
-    "AI's prior message asked whether they want drinks.\n"
+    "# Role\n"
+    "You parse drink/bar/rental/labor selections from a catering customer's message.\n\n"
+    "# Rules\n"
+    "- Extract ONLY what is explicitly said. Never guess.\n"
+    "- Use conversation history to resolve short affirmatives ('yes', 'ok') only when the prior AI turn asked about a specific slot.\n"
+    "- Return None for anything not explicitly stated.\n"
+    "- drinks: True if they want drinks at all.\n"
     "- bar_service: True if they want a bar setup.\n"
     "- bar_package: 'beer_wine' | 'beer_wine_signature' | 'full_open_bar'.\n"
     "- coffee_service: True if they want a coffee bar.\n"
-    "- tableware — map these EXACT labels the frontend sends:\n"
-    "  'Standard Disposable (included)' or 'standard_disposable' → standard_disposable\n"
-    "  'Silver Disposable' or 'silver_disposable' → silver_disposable\n"
-    "  'Gold Disposable' or 'gold_disposable' → gold_disposable\n"
-    "  'Premium Disposable (gold/silver)' or 'Premium Disposable' → gold_disposable\n"
-    "  'Full China' or 'china' or 'real china' → china\n"
-    "  'No tableware needed' or 'no_tableware' or 'none' → no_tableware\n"
-    "- utensils — map these EXACT labels:\n"
-    "  'Standard plastic (included)' or 'standard_plastic' or '1' (when asked utensils) → standard_plastic\n"
-    "  'Eco / biodegradable' or 'eco_biodegradable' or '2' → eco_biodegradable\n"
-    "  'Bamboo' or 'bamboo' or '3' → bamboo\n"
-    "- linens: True if they want linen rentals. Also True for 'yes'/'yup' when AI asked about linens.\n"
-    "- rentals: ALWAYS return as a JSON array of strings, never a single string. "
-    "For 'Tables, Chairs' or 'Tables and Chairs' extract ['Tables', 'Chairs']. "
-    "For 'Tables' alone extract ['Tables']. For 'none' or 'no rentals' extract [].\n"
+    "- tableware: map these EXACT labels the frontend sends (also accept normalized keys):\n"
+    "  'Standard Disposable (included)'/'standard_disposable' -> standard_disposable\n"
+    "  'Silver Disposable'/'silver_disposable' -> silver_disposable\n"
+    "  'Gold Disposable'/'gold_disposable' -> gold_disposable\n"
+    "  'Premium Disposable (gold/silver)'/'Premium Disposable' -> gold_disposable\n"
+    "  'Full China'/'china'/'real china' -> china\n"
+    "  'No tableware needed'/'no_tableware'/'none' -> no_tableware\n"
+    "- utensils: map these EXACT labels (also accept 1/2/3 only when the user is answering utensils):\n"
+    "  'Standard plastic (included)'/'standard_plastic'/'1' -> standard_plastic\n"
+    "  'Eco / biodegradable'/'eco_biodegradable'/'2' -> eco_biodegradable\n"
+    "  'Bamboo'/'bamboo'/'3' -> bamboo\n"
+    "- linens: True if they want linen rentals.\n"
+    "- rentals: ALWAYS return as a JSON array of strings, never a single string.\n"
+    "  - 'Tables and Chairs' -> ['Tables','Chairs']; 'none'/'no rentals' -> [].\n"
     "- labor_*: True if they want that staffing service.\n"
-    "- travel_fee: 'tier1_150' < 30 min, 'tier2_250' < 1 hr, 'tier3_375plus' extended.\n"
-    "Never guess. Return None for anything not explicitly stated."
+    "- travel_fee: 'tier1_150' < 30 min, 'tier2_250' < 1 hr, 'tier3_375plus' extended.\n\n"
+    "# Examples\n"
+    "1. User: 'yes' (after AI asked about linens)\n"
+    "   Extract: linens=True\n"
+    "2. User: 'Full China'\n"
+    "   Extract: tableware='china'\n"
+    "3. User: '2' (when asked utensils)\n"
+    "   Extract: utensils='eco_biodegradable'\n"
+    "4. User: 'Tables and chairs'\n"
+    "   Extract: rentals=['Tables','Chairs']\n"
 )
 
 
@@ -180,11 +189,7 @@ _UTENSILS_MAP: dict[str, str] = {
     "bamboo": "bamboo",
 }
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    out: list[dict] = []
-    for m in history[-6:]:
-        role = "user" if getattr(m, "type", "") == "human" else "assistant"
-        out.append({"role": role, "content": m.content})
-    return out
+    return history_for_llm(history)
 
 
 def _phase_of(slots: dict) -> str:
@@ -258,6 +263,11 @@ class AddOnsTool:
                     fills.append(("rentals", final_value))
                     continue
 
+                if field_name == "bar_package" and isinstance(value, str):
+                    value = _BAR_PACKAGE_MAP.get(value.lower().strip())
+                    if not value:
+                        continue
+
                 old_value = get_slot_value(slots, field_name)
                 fill_slot(slots, field_name, value)
                 fills.append((field_name, value))
@@ -266,6 +276,27 @@ class AddOnsTool:
         next_target = _next_target(slots)
         next_phase = _phase_of(slots)
         state["conversation_phase"] = next_phase
+
+        # Store which yes/no question is pending so the router can resolve
+        # bare "yes"/"no" replies without an LLM call.
+        _GATE_TARGETS = {
+            "ask_drinks_interest": (None, "drinks"),
+            "ask_tableware_gate": ("__gate_tableware", "tableware"),
+            "ask_rentals_gate": ("__gate_rentals", "rentals"),
+        }
+        if next_target in _GATE_TARGETS:
+            gate_slot, content_slot = _GATE_TARGETS[next_target]
+            fill_slot(slots, "__pending_confirmation", {
+                "question_id": next_target,
+                "tool": "add_ons_tool",
+                "yes_action": "open_gate" if gate_slot else "set_true",
+                "no_action": "skip",
+                "gate_slot": gate_slot,
+                "content_slot": content_slot,
+            })
+        else:
+            if is_filled(slots, "__pending_confirmation"):
+                clear_slot(slots, "__pending_confirmation")
 
         response_context = {
             "tool": self.name,

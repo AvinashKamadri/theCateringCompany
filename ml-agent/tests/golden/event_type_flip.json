@@ -1,0 +1,26 @@
+{
+  "description": "Event-type modification thrashing: Wedding -> Birthday -> Wedding. Must recompute phase correctly after each flip and land at wedding_cake.",
+  "turns": [
+    {"user_message": "Hi", "expected_phase_after": "S1_greeting"},
+    {"user_message": "Syed", "expected_slot_deltas": {"name": "Syed"}},
+    {"user_message": "Wedding", "expected_slot_deltas": {"event_type": "Wedding"}},
+    {
+      "user_message": "hey sorry actually a birthday",
+      "expected_phase_after": "S3_conditional",
+      "expected_slot_deltas": {"event_type": "Birthday"},
+      "note": "Modification tool should flip event_type and clear partner_name."
+    },
+    {
+      "user_message": "my bad, it is a wedding",
+      "expected_phase_after": "S3_conditional",
+      "expected_slot_deltas": {"event_type": "Wedding"},
+      "note": "Flip back, now asks partner_name again."
+    },
+    {
+      "user_message": "Sydney Sweeney",
+      "expected_phase_after": "S3b_wedding_cake",
+      "expected_slot_deltas": {"partner_name": "Sydney Sweeney"},
+      "note": "Must advance to wedding_cake, not skip ahead to service_type."
+    }
+  ]
+}

@@ -151,6 +151,7 @@ async def chat(req: ChatRequest):
             author_id=req.author_id,
             project_id=req.project_id,
             user_id=resolved_user_id,
+            preloaded_state=existing_state,
         )
 
     contract_id = None
@@ -223,6 +224,7 @@ async def chat(req: ChatRequest):
         contract_id=contract_id,
         input_hint=result.get("input_hint"),
     )
+
 
 
 @app.get("/conversation/{thread_id}")

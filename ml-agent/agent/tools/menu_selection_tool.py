@@ -47,57 +47,55 @@ from agent.state import (
     get_slot_value,
     is_filled,
 )
-from agent.tools.base import ToolResult
+from agent.tools.base import ToolResult, history_for_llm
 from agent.tools.structured_choice import normalize_structured_choice
 
 
 _SYSTEM_PROMPT = (
-    "You parse food selections from a catering customer's message. "
-    "Context: they're being asked to pick items from a numbered catalog. "
-    "Instructions:\n"
-    "- raw_items: list the item names or numbers the user mentioned. "
-    "Accept shorthand ('charcuterie', 'tikka', 'steak skewers'). "
-    "If user says 'option 2' or just '2', include that digit as a string. "
-    "CRITICAL: when the user's message contains multiple items separated by "
-    "commas, semicolons, or the word 'and', return EACH item as a SEPARATE "
-    "entry in raw_items. Never collapse a list into one compound string. "
-    "Example: 'Mac Shooters, White Bean Crostini, Parmesan Dip' → "
-    "raw_items=['Mac Shooters', 'White Bean Crostini', 'Parmesan Dip'].\n"
+    "# Role\n"
+    "You parse food selections from a catering customer's message. Context: they're being asked to pick items from a numbered catalog.\n\n"
+    "# Rules\n"
+    "- Extract ONLY what is explicitly stated. Never invent dish names.\n"
+    "- raw_items: list item names or numbers the user mentioned. Accept shorthand ('charcuterie', 'tikka').\n"
+    "  - If user says 'option 2' or just '2', include that digit as a string.\n"
+    "  - CRITICAL: split multiple items into separate entries. Never collapse a list into one compound string.\n"
     "- If user says 'all of them' or 'everything', return raw_items=['ALL'].\n"
-    "- is_decline: True if user explicitly skips a course ('no appetizers', 'skip dessert', "
-    "'full reception' meaning reception-only with no cocktail hour).\n"
-    "- menu_notes: any prep instruction or dietary handling note about the whole menu "
-    "('make everything halal', 'no pork in any dish', 'keep it nut-free'). "
-    "Only extract if explicitly stated. Do NOT put item names here.\n"
-    "- custom_menu: True ONLY if user says they want a fully custom menu "
-    "('nothing on here works', 'can you build something custom').\n"
-    "- meal_style: ALWAYS lowercase — 'plated' if served to seat, 'buffet' if self-serve. "
-    "Never output 'Plated' or 'Buffet' (capital). Map 'Plated'/'PLATED' → 'plated', 'Buffet'/'BUFFET' → 'buffet'.\n"
-    "- appetizer_style: ALWAYS lowercase — 'passed' if servers walk around, 'station' if fixed spot. "
-    "Map 'Passed Around'/'Passed around' → 'passed', 'Station' → 'station'.\n"
-    "- cocktail_hour: True if user wants cocktail hour or 'both' (cocktail + reception). "
-    "False if user says 'full reception' / 'reception only' (skip appetizers).\n"
-    "- category_hint: 'appetizers' | 'dishes' | 'desserts' — infer from context.\n"
-    "Never invent dish names."
+    "- is_decline: True only if user explicitly skips a course ('no appetizers', 'skip dessert', 'reception only').\n"
+    "- menu_notes: prep/dietary instruction about the whole menu ('no pork in any dish'). Do NOT put item names here.\n"
+    "- custom_menu: True only if user asks for a fully custom menu.\n"
+    "- meal_style: always lowercase 'plated' or 'buffet'.\n"
+    "- appetizer_style: always lowercase 'passed' or 'station'.\n"
+    "- cocktail_hour: True if user wants cocktail hour or 'both'. False for 'reception only' / 'full reception'.\n"
+    "- category_hint: 'appetizers' | 'dishes' | 'desserts' (infer from context).\n\n"
+    "# Examples\n"
+    "1. User: 'Mac Shooters, White Bean Crostini, Parmesan Dip'\n"
+    "   Extract: raw_items=['Mac Shooters','White Bean Crostini','Parmesan Dip']\n"
+    "2. User: 'option 2 and 5'\n"
+    "   Extract: raw_items=['2','5']\n"
+    "3. User: 'all of them'\n"
+    "   Extract: raw_items=['ALL']\n"
+    "4. User: 'PLATED'\n"
+    "   Extract: meal_style='plated'\n"
+    "5. User: 'reception only'\n"
+    "   Extract: cocktail_hour=False, is_decline=True\n"
 )
 
 
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    out: list[dict] = []
-    for m in history[-6:]:
-        role = "user" if getattr(m, "type", "") == "human" else "assistant"
-        out.append({"role": role, "content": m.content})
-    return out
+    return history_for_llm(history)
 
 
 def _phase_of(slots: dict) -> str:
     """Which menu phase are we in — drives what we extract against."""
     if not is_filled(slots, "cocktail_hour"):
         return PHASE_COCKTAIL
-    if get_slot_value(slots, "cocktail_hour") and not is_filled(slots, "appetizers"):
+    # Appetizers are always shown regardless of cocktail_hour/reception/both.
+    # The cocktail_hour flag only affects UI labeling + service_style; it no
+    # longer gates whether we collect appetizer picks.
+    if not is_filled(slots, "appetizers"):
         return PHASE_COCKTAIL
     # Ask passed/station after appetizers are picked (captured via options card)
-    if get_slot_value(slots, "cocktail_hour") and not is_filled(slots, "appetizer_style"):
+    if not is_filled(slots, "appetizer_style"):
         return PHASE_COCKTAIL
     # Show main menu first; ask plated/buffet after dishes are confirmed
     if not is_filled(slots, "selected_dishes") and not get_slot_value(slots, "custom_menu"):
@@ -654,8 +652,6 @@ class MenuSelectionTool:
         _MAX_DESSERTS = 4
         if len(combined_names) > _MAX_DESSERTS:
             return [("__dessert_overflow__", str(len(combined_names)), len(combined_names))]
-
-        combined_names = combined_names[:_MAX_DESSERTS]
 
         if not combined_names:
             return [("desserts", get_slot_value(slots, "desserts") or "", 0)]

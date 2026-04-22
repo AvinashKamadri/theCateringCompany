@@ -1,0 +1,52 @@
+{
+  "description": "Multi-flip while in wedding_cake context: Wedding -> Birthday -> Wedding. Ensures event_type corrections do not get phase-biased into cake edits.",
+  "turns": [
+    {
+      "user_message": "Hi, I need catering",
+      "expected_phase_after": "S1_greeting",
+      "expected_slot_deltas": {}
+    },
+    {
+      "user_message": "Syed Ali",
+      "expected_phase_after": "S2_event_type",
+      "expected_slot_deltas": {
+        "name": "Syed Ali"
+      }
+    },
+    {
+      "user_message": "Wedding",
+      "expected_phase_after": "S3_conditional",
+      "expected_slot_deltas": {
+        "event_type": "Wedding"
+      }
+    },
+    {
+      "user_message": "Sydney Sweeney",
+      "expected_phase_after": "S3b_wedding_cake",
+      "expected_slot_deltas": {
+        "partner_name": "Sydney Sweeney"
+      }
+    },
+    {
+      "user_message": "hey im sorry it is a birthday",
+      "expected_phase_after": "S3_conditional",
+      "expected_slot_deltas": {
+        "event_type": "Birthday"
+      }
+    },
+    {
+      "user_message": "my bad, it is a wedding",
+      "expected_phase_after": "S3_conditional",
+      "expected_slot_deltas": {
+        "event_type": "Wedding"
+      }
+    },
+    {
+      "user_message": "Sydney Sweeney",
+      "expected_phase_after": "S3b_wedding_cake",
+      "expected_slot_deltas": {
+        "partner_name": "Sydney Sweeney"
+      }
+    }
+  ]
+}

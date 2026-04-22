@@ -9,6 +9,7 @@ Category matching is fully DB-driven:
   5. Partial item name match (last resort)
 """
 
+import asyncio
 import logging
 from database.db_manager import load_pricing_packages, load_menu_items
 from config.business_rules import config
@@ -19,9 +20,11 @@ logger = logging.getLogger(__name__)
 async def match_pricing_package(
     event_type: str,
     guest_count: int,
+    packages: list[dict] | None = None,
 ) -> dict | None:
     """Find the best pricing package for event type and guest count."""
-    packages = await load_pricing_packages()
+    if packages is None:
+        packages = await load_pricing_packages()
     if not packages:
         return None
 
@@ -120,9 +123,13 @@ async def calculate_event_pricing(
 
     Returns a breakdown dict with line items, subtotals, and grand total.
     """
-    all_items = await load_menu_items()
+    all_items, _packages = await asyncio.gather(
+        load_menu_items(),
+        load_pricing_packages(),
+    )
     items_by_name = {item["name"].lower(): item for item in all_items}
     cat_index = _build_category_index(all_items)
+    _packages_cache = _packages
 
     line_items = []
     seen_items = set()  # avoid duplicates
@@ -282,8 +289,8 @@ async def calculate_event_pricing(
                     })
                     break
 
-    # Pricing package (base rate)
-    package = await match_pricing_package(event_type, guest_count)
+    # Pricing package (base rate) — packages already loaded in parallel above
+    package = await match_pricing_package(event_type, guest_count, packages=_packages_cache)
 
     # Service surcharge for on-site
     service_surcharge = config.calculate_service_surcharge(guest_count, service_type)

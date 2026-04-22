@@ -16,14 +16,20 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, List, Optional, Type, TypeVar
 
 from dotenv import load_dotenv
+import httpx
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ValidationError
 
-from agent.trace_context import build_openai_request_tags
+from agent.trace_context import (
+    build_openai_request_tags,
+    increment_llm_call,
+    record_token_usage,
+)
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
@@ -35,14 +41,26 @@ if not _api_key:
 
 
 # ---- Pinned model snapshots (env-overridable) ------------------------------
-MODEL_EXTRACT  = os.getenv("ML_MODEL_EXTRACT",  "gpt-5.4-mini-2026-03-17")
-MODEL_ROUTER   = os.getenv("ML_MODEL_ROUTER",   "gpt-5.4-2026-03-05")
+MODEL_EXTRACT = os.getenv("ML_MODEL_EXTRACT", "gpt-5.4-mini-2026-03-17")
+MODEL_ROUTER = os.getenv("ML_MODEL_ROUTER", "gpt-5.4-2026-03-05")
 MODEL_RESPONSE = os.getenv("ML_MODEL_RESPONSE", "gpt-5.4-2026-03-05")
 MODEL_WARMUP   = os.getenv("ML_MODEL_WARMUP",   MODEL_EXTRACT)
 
 
+def filter_extraction_fields(extracted_dict: dict, allowed_fields: list[str] | None = None) -> dict:
+    """Filter extracted fields to only include allowed ones (GPT-4.1 mini over-extraction fix)."""
+    if allowed_fields is None:
+        return extracted_dict
+    return {k: v for k, v in extracted_dict.items() if k in allowed_fields}
+
+
 # ---- Single raw async client -----------------------------------------------
-_raw_async = AsyncOpenAI(api_key=_api_key)
+# 30s total, 5s connect. Default is 600s — a hung OpenAI request would block
+# the entire turn. On timeout the fallback path takes over.
+_raw_async = AsyncOpenAI(
+    api_key=_api_key,
+    timeout=httpx.Timeout(30.0, connect=5.0),
+)
 raw_async_client = _raw_async
 
 # Legacy aliases — some modules import these names directly
@@ -53,19 +71,74 @@ sync_client  = None  # unused after migration; kept so old imports don't crash
 T = TypeVar("T", bound=BaseModel)
 
 
+# Per-process cache: Pydantic schema class → fully-strict JSON schema dict.
+# The schema never changes at runtime, so rebuilding it on every LLM call is
+# wasted CPU. Hit rate approaches 100% after the first call per schema.
+_SCHEMA_CACHE: dict[Type[BaseModel], dict[str, object]] = {}
+_TEXT_FORMAT_CACHE: dict[Type[BaseModel], dict[str, object]] = {}
+_TOOL_DEF_CACHE: dict[Type[BaseModel], dict[str, object]] = {}
+
+
+def _record_response_usage(response: Any) -> None:
+    """Pull token usage off an OpenAI response object (Responses or Chat) and
+    record it in the per-turn counter. Silent on missing fields so this is
+    safe to call on any response-like object."""
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        input_tokens = getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", 0) or 0
+        output_tokens = getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", 0) or 0
+        cached = 0
+        details = getattr(usage, "input_tokens_details", None) or getattr(usage, "prompt_tokens_details", None)
+        if details is not None:
+            cached = getattr(details, "cached_tokens", 0) or 0
+        record_token_usage(
+            input_tokens=int(input_tokens),
+            output_tokens=int(output_tokens),
+            cached_input_tokens=int(cached),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("token usage capture failed: %s", exc)
+
+
 def _build_json_schema(schema: Type[T]) -> dict[str, object]:
-    """Convert a Pydantic model into a strict JSON schema payload."""
+    """Convert a Pydantic model into a strict JSON schema payload (cached)."""
+    cached = _SCHEMA_CACHE.get(schema)
+    if cached is not None:
+        return cached
     json_schema = schema.model_json_schema()
     json_schema.pop("title", None)
-    json_schema["additionalProperties"] = False
-    # Ensure all properties are in required array for strict mode
-    if "properties" in json_schema:
-        json_schema["required"] = list(json_schema["properties"].keys())
+    _enforce_strict_schema(json_schema)
+    _SCHEMA_CACHE[schema] = json_schema
     return json_schema
 
 
+def _enforce_strict_schema(obj: Any) -> None:
+    """Recursively add additionalProperties: false and required array to all objects."""
+    if isinstance(obj, dict):
+        if "type" in obj and obj["type"] == "object":
+            obj["additionalProperties"] = False
+            if "properties" in obj:
+                obj["required"] = list(obj["properties"].keys())
+        for composite_key in ("anyOf", "oneOf", "allOf"):
+            if composite_key in obj and isinstance(obj[composite_key], list):
+                for item in obj[composite_key]:
+                    if isinstance(item, dict):
+                        if "type" not in item and "enum" not in item and "$ref" not in item:
+                            item["type"] = "string"
+        for value in obj.values():
+            _enforce_strict_schema(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _enforce_strict_schema(item)
+
+
 def _text_format_for_schema(schema: Type[T]) -> dict[str, object]:
-    return {
+    cached = _TEXT_FORMAT_CACHE.get(schema)
+    if cached is not None:
+        return cached
+    fmt = {
         "format": {
             "type": "json_schema",
             "name": schema.__name__,
@@ -74,10 +147,15 @@ def _text_format_for_schema(schema: Type[T]) -> dict[str, object]:
             "strict": True,
         }
     }
+    _TEXT_FORMAT_CACHE[schema] = fmt
+    return fmt
 
 
 def _build_function_tool_def(schema: Type[T]) -> dict[str, object]:
-    return {
+    cached = _TOOL_DEF_CACHE.get(schema)
+    if cached is not None:
+        return cached
+    tool_def = {
         "type": "function",
         "function": {
             "name": schema.__name__,
@@ -86,6 +164,8 @@ def _build_function_tool_def(schema: Type[T]) -> dict[str, object]:
             "strict": True,
         }
     }
+    _TOOL_DEF_CACHE[schema] = tool_def
+    return tool_def
 
 
 def _response_input(
@@ -132,7 +212,9 @@ async def _extract_via_chat_completions(
         max_completion_tokens=max_tokens,
         messages=messages,
         user=request_tags["prompt_cache_key"],
+        temperature=0,
     )
+    _record_response_usage(response)
     choice = response.choices[0]
     tool_calls = choice.message.tool_calls
     if not tool_calls:
@@ -174,7 +256,7 @@ async def extract(
     user_message: str,
     history: Optional[List[dict]] = None,
     model: Optional[str] = None,
-    max_tokens: int = 500,
+    max_tokens: int = 250,
     max_retries: int = 2,
 ) -> Optional[T]:
     """Extract structured data using the Responses API with strict JSON schema.
@@ -198,12 +280,14 @@ async def extract(
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
+            increment_llm_call()
             logger.info(
                 "openai_extract_request schema=%s model=%s attempt=%d",
                 schema.__name__,
                 _model,
                 attempt + 1,
             )
+            _t0 = time.monotonic()
             response = await _raw_async.responses.create(
                 model=_model,
                 instructions=system,
@@ -213,19 +297,26 @@ async def extract(
                 metadata=request_tags["metadata"],
                 prompt_cache_key=request_tags["prompt_cache_key"],
                 safety_identifier=request_tags["safety_identifier"],
-                service_tier="auto",
+                service_tier="default",
                 store=False,
+                temperature=0,
             )
+            _elapsed_ms = int((time.monotonic() - _t0) * 1000)
+            _record_response_usage(response)
             output_text = (getattr(response, "output_text", None) or "").strip()
             if not output_text:
-                logger.warning("No structured output in response for %s (attempt %d)", schema.__name__, attempt + 1)
+                logger.warning(
+                    "No structured output in response for %s (attempt %d, %dms)",
+                    schema.__name__, attempt + 1, _elapsed_ms,
+                )
                 continue
             result = schema.model_validate_json(output_text)
             logger.info(
-                "openai_extract_response schema=%s model=%s response_id=%s",
+                "openai_extract_response schema=%s model=%s response_id=%s elapsed_ms=%d",
                 schema.__name__,
                 _model,
                 getattr(response, "id", None) or "-",
+                _elapsed_ms,
             )
             return result
         except ValidationError as e:
@@ -257,9 +348,18 @@ _WARMUP_DONE = False
 
 
 async def warmup() -> None:
-    """Pre-flight check: verify the model is reachable and structured outputs work."""
+    """Pre-flight check: verify the model is reachable and structured outputs work.
+
+    Disabled by default in production. Set ML_ENABLE_WARMUP=true to run at boot.
+    The OpenAI prompt cache has a 5-minute TTL so warmup goes cold before the
+    first real turn arrives anyway — pay the cost only when iterating locally.
+    """
     global _WARMUP_DONE
     if _WARMUP_DONE:
+        return
+    if os.getenv("ML_ENABLE_WARMUP", "false").strip().lower() not in {"1", "true", "yes"}:
+        _WARMUP_DONE = True
+        logger.info("Warmup skipped (set ML_ENABLE_WARMUP=true to enable)")
         return
 
     from agent.models import (
@@ -317,7 +417,9 @@ async def generate_text(
         model=_model,
     )
     try:
+        increment_llm_call()
         logger.info("openai_text_request model=%s", _model)
+        _t0 = time.monotonic()
         resp = await _raw_async.responses.create(
             model=_model,
             instructions=system,
@@ -326,14 +428,16 @@ async def generate_text(
             metadata=request_tags["metadata"],
             prompt_cache_key=request_tags["prompt_cache_key"],
             safety_identifier=request_tags["safety_identifier"],
-            service_tier="auto",
+            service_tier="default",
             temperature=temperature,
             store=False,
         )
+        _record_response_usage(resp)
         logger.info(
-            "openai_text_response model=%s response_id=%s",
+            "openai_text_response model=%s response_id=%s elapsed_ms=%d",
             _model,
             getattr(resp, "id", None) or "-",
+            int((time.monotonic() - _t0) * 1000),
         )
         return (getattr(resp, "output_text", None) or "").strip()
     except Exception as e:

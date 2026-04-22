@@ -53,10 +53,34 @@ sync_client  = None  # unused after migration; kept so old imports don't crash
 T = TypeVar("T", bound=BaseModel)
 
 
+def _enforce_strict_object_schema(node: Any) -> None:
+    """Walk a JSON schema dict and apply OpenAI strict-mode requirements.
+
+    Strict mode requires every object schema to:
+    1. Declare additionalProperties: false
+    2. List every key from `properties` in `required` (nullable fields stay
+       in required and carry their own null-union type — do not drop them).
+
+    Recurses into $defs, properties, items, anyOf/oneOf/allOf.
+    """
+    if isinstance(node, dict):
+        if node.get("type") == "object" or "properties" in node:
+            node["additionalProperties"] = False
+            props = node.get("properties")
+            if isinstance(props, dict):
+                node["required"] = list(props.keys())
+        for value in node.values():
+            _enforce_strict_object_schema(value)
+    elif isinstance(node, list):
+        for item in node:
+            _enforce_strict_object_schema(item)
+
+
 def _build_json_schema(schema: Type[T]) -> dict[str, object]:
     """Convert a Pydantic model into a strict JSON schema payload."""
     json_schema = schema.model_json_schema()
     json_schema.pop("title", None)
+    _enforce_strict_object_schema(json_schema)
     return json_schema
 
 
@@ -73,12 +97,26 @@ def _text_format_for_schema(schema: Type[T]) -> dict[str, object]:
 
 
 def _build_function_tool_def(schema: Type[T]) -> dict[str, object]:
+    """Responses API shape: flat {type, name, description, parameters, strict}."""
     return {
         "type": "function",
         "name": schema.__name__,
         "description": (schema.__doc__ or "").strip().split("\n")[0],
         "parameters": _build_json_schema(schema),
         "strict": True,
+    }
+
+
+def _build_chat_function_tool_def(schema: Type[T]) -> dict[str, object]:
+    """chat.completions shape: {type: 'function', function: {name, description, parameters, strict}}."""
+    return {
+        "type": "function",
+        "function": {
+            "name": schema.__name__,
+            "description": (schema.__doc__ or "").strip().split("\n")[0],
+            "parameters": _build_json_schema(schema),
+            "strict": True,
+        },
     }
 
 
@@ -121,7 +159,7 @@ async def _extract_via_chat_completions(
 
     response = await _raw_async.chat.completions.create(
         model=model or MODEL_EXTRACT,
-        tools=[_build_function_tool_def(schema)],
+        tools=[_build_chat_function_tool_def(schema)],
         tool_choice={"type": "function", "function": {"name": schema.__name__}},
         max_completion_tokens=max_tokens,
         messages=messages,

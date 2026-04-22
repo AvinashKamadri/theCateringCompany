@@ -649,10 +649,12 @@ function OptionCard({
   item,
   selected,
   onToggle,
+  widthClass = 'w-full',
 }: {
   item: ListItem;
   selected: boolean;
   onToggle: () => void;
+  widthClass?: string;
 }) {
   const imgUrl = item.price ? getMenuImageUrl(item.name) : null; // Only show images for food items (with prices)
   const [imgError, setImgError] = React.useState(false);
@@ -662,7 +664,7 @@ function OptionCard({
   return (
     <button
       onClick={onToggle}
-      className={`relative flex flex-col items-start rounded-xl border-2 overflow-hidden text-left transition-all focus:outline-none w-full ${
+      className={`relative flex flex-col items-start rounded-xl border-2 overflow-hidden text-left transition-all focus:outline-none ${widthClass} ${
         hasImg ? '' : (item.description ? 'min-h-[80px]' : 'h-20')
       } ${
         selected
@@ -703,10 +705,12 @@ function MenuItemCard({
   item,
   selected,
   onToggle,
+  widthClass = 'w-full',
 }: {
   item: ListItem;
   selected: boolean;
   onToggle: () => void;
+  widthClass?: string;
 }) {
   const imgUrl = getMenuImageUrl(item.name);
   const [imgError, setImgError] = React.useState(false);
@@ -715,7 +719,7 @@ function MenuItemCard({
   return (
     <button
       onClick={onToggle}
-      className={`relative flex flex-col rounded-xl border-2 overflow-hidden text-left transition-all focus:outline-none bg-white ${
+      className={`relative flex flex-col rounded-xl border-2 overflow-hidden text-left transition-all focus:outline-none bg-white ${widthClass} ${
         selected
           ? 'border-black ring-2 ring-black/15 shadow-md'
           : 'border-neutral-200 hover:border-neutral-400'
@@ -750,7 +754,7 @@ function MenuItemCard({
   );
 }
 
-// --- Unified list UI ----------------------------------------------------------
+// --- Unified list UI — horizontal scrollable ---------------------------------
 
 function ItemSelector({
   items,
@@ -767,8 +771,6 @@ function ItemSelector({
   onSelectionChange: (names: string[]) => void;
   multi: boolean;
   maxSelect?: number;
-  /** If set and `multi` is false, clicking an option immediately sends that
-   *  choice instead of waiting for the user to press Send. */
   onAutoSend?: (name: string) => void;
 }) {
   const toggle = (name: string) => {
@@ -779,8 +781,6 @@ function ItemSelector({
       } else if (!maxSelect || selected.length < maxSelect) {
         const next = [...selected, name];
         onSelectionChange(next);
-        // If this selection just filled the required count, auto-send after
-        // a brief moment so the user can still back out if it was a misclick.
         if (onAutoSend && maxSelect && next.length === maxSelect) {
           window.setTimeout(() => onAutoSend(next.join(', ')), 450);
         }
@@ -792,46 +792,48 @@ function ItemSelector({
     }
   };
 
-  if (multi) {
-    if (categories && categories.length >= 2) {
-      return (
-        <div className="mt-2 w-full space-y-4">
-          {categories.map((group) => (
-            <div key={group.category}>
-              {group.category && (
-                <p className="inline-block bg-white rounded-md border border-neutral-200 px-2.5 py-1 text-xs font-bold text-neutral-900 uppercase tracking-wider mb-2 shadow-sm">
-                  {group.category}
-                </p>
-              )}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {group.items.map((item) => (
-                  <MenuItemCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
-                ))}
-              </div>
-            </div>
-          ))}
-          {selected.length > 0 && (
-            <p className="mt-2">
-              <span className="inline-block bg-white/85 backdrop-blur-sm rounded-md px-2 py-0.5 text-xs text-neutral-700 shadow-sm">
-                <span className="font-semibold text-neutral-900">{selected.length}</span>
-                {maxSelect ? `/${maxSelect}` : ''} selected — hit Send to confirm
-              </span>
-            </p>
+  const CARD_WIDTH = 'w-36 sm:w-44';
+
+  const renderCards = (cardItems: ListItem[]) => (
+    <div className="flex gap-3 overflow-x-auto pb-3 snap-x snap-mandatory scrollbar-thin">
+      {cardItems.map((item) => (
+        <div key={item.name} className={`snap-start shrink-0 ${CARD_WIDTH}`}>
+          {multi ? (
+            <MenuItemCard
+              item={item}
+              selected={selected.includes(item.name)}
+              onToggle={() => toggle(item.name)}
+              widthClass="w-full"
+            />
+          ) : (
+            <OptionCard
+              item={item}
+              selected={selected.includes(item.name)}
+              onToggle={() => toggle(item.name)}
+              widthClass="w-full"
+            />
           )}
         </div>
-      );
-    }
+      ))}
+    </div>
+  );
 
+  if (multi && categories && categories.length >= 2) {
     return (
-      <div className="mt-2 w-full">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-          {items.map((item) => (
-            <MenuItemCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
-          ))}
-        </div>
+      <div className="mt-4 w-full space-y-5">
+        {categories.map((group) => (
+          <div key={group.category}>
+            {group.category && (
+              <p className="text-xs font-bold text-neutral-900 uppercase tracking-wider mb-2 px-1">
+                {group.category}
+              </p>
+            )}
+            {renderCards(group.items)}
+          </div>
+        ))}
         {selected.length > 0 && (
-          <p className="mt-2">
-            <span className="inline-block bg-white/90 backdrop-blur-sm rounded-md px-2 py-0.5 text-xs text-neutral-700 shadow-sm">
+          <p className="px-1">
+            <span className="inline-block bg-white/85 backdrop-blur-sm rounded-md px-2.5 py-1 text-xs text-neutral-700 shadow-sm">
               <span className="font-semibold text-neutral-900">{selected.length}</span>
               {maxSelect ? `/${maxSelect}` : ''} selected — hit Send to confirm
             </span>
@@ -842,16 +844,19 @@ function ItemSelector({
   }
 
   return (
-    <div className="mt-2 w-full">
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        {items.map((item) => (
-          <OptionCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
-        ))}
-      </div>
+    <div className="mt-4 w-full">
+      {renderCards(items)}
       {selected.length > 0 && (
-        <p className="mt-1">
-          <span className="inline-block bg-white/85 backdrop-blur-sm rounded-md px-2 py-0.5 text-xs text-neutral-700 shadow-sm">
-            Hit Send to confirm
+        <p className="px-1 mt-2">
+          <span className="inline-block bg-white/85 backdrop-blur-sm rounded-md px-2.5 py-1 text-xs text-neutral-700 shadow-sm">
+            {multi ? (
+              <>
+                <span className="font-semibold text-neutral-900">{selected.length}</span>
+                {maxSelect ? `/${maxSelect}` : ''} selected — hit Send to confirm
+              </>
+            ) : (
+              'Hit Send to confirm'
+            )}
           </span>
         </p>
       )}
@@ -1556,6 +1561,24 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     handleSendMessage(`I'm interested in ${selectedOption}`);
   };
 
+  /** Extract the core question sentence for the big header display. */
+  function extractQuestionHeader(intro: string): string {
+    const sentences = intro.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 3);
+    const question = sentences.find((s) => s.trim().endsWith('?'));
+    if (question) return question.trim();
+    if (sentences.length > 0) return sentences[sentences.length - 1].trim();
+    return intro.trim();
+  }
+
+  /** Determine if the current (latest) AI message has interactive cards. */
+  const currentAiMsg = [...state.messages].reverse().find((m) => m.role === 'ai');
+  const hasCurrentOptions = (() => {
+    if (!currentAiMsg) return false;
+    const hintPicker = pickerFromInputHint(currentAiMsg.inputHint);
+    const listItems = hintPicker?.items ?? parseListItems(currentAiMsg.content);
+    return !!listItems && listItems.length > 0;
+  })();
+
   return (
     <>
       <CommandDialog
@@ -1573,140 +1596,95 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           />
         )}
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4">
-          {state.messages.map((msg, idx) => {
-            const userInitial = userName.charAt(0).toUpperCase();
-            const time = msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const isActive = idx === activeMenuMsgIdx;
-            const hintPicker = isActive ? pickerFromInputHint(msg.inputHint) : null;
-            const listItems = isActive ? (hintPicker?.items ?? parseListItems(msg.content)) : null;
-            const categorizedItems = isActive
-              ? (hintPicker?.categories ?? (listItems ? (parseCategorizedItems(msg.content) ?? groupItemsByCategory(listItems)) : null))
-              : null;
-            const inlineSelectionSnapshot = msg.role === 'ai' ? parseInlineSelectionSnapshot(msg.content) : null;
+        {/* Current question — big centered view, no scrollable chat history */}
+        <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 flex flex-col items-center">
+          {(() => {
+            const lastAiMsg = [...state.messages].reverse().find((m) => m.role === 'ai');
+            const lastUserMsg = [...state.messages].reverse().find((m) => m.role === 'user');
+
+            if (state.isLoading && !lastAiMsg) {
+              return (
+                <div className="flex-1 flex flex-col items-center justify-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-neutral-300" />
+                  <p className="text-sm text-neutral-400 mt-3">Starting up...</p>
+                </div>
+              );
+            }
+
+            if (!lastAiMsg) return null;
+
+            const { intro } = splitAtList(lastAiMsg.content);
+            const hintPicker = pickerFromInputHint(lastAiMsg.inputHint);
+            const listItems = hintPicker?.items ?? parseListItems(lastAiMsg.content);
+            const categorizedItems = hintPicker?.categories ?? (listItems ? (parseCategorizedItems(lastAiMsg.content) ?? groupItemsByCategory(listItems)) : null);
+            const hasNewQuestion = !!hintPicker || /^\s*\d+\./m.test(lastAiMsg.content) || detectInlineChoices(lastAiMsg.content) !== null;
+            const isConfirm = isConfirmationMessage(intro) && !hasNewQuestion;
+            const isAckEcho = isAckEchoMessage(intro);
+            const inlineSelectionSnapshot = parseInlineSelectionSnapshot(lastAiMsg.content);
             const inlineSelectionCategories = inlineSelectionSnapshot
               ? (groupItemsByCategory(inlineSelectionSnapshot.items) ?? undefined)
               : undefined;
 
-            if (msg.role === 'ai' && listItems) {
-              const { intro } = splitAtList(msg.content);
-              const isAckEcho = isAckEchoMessage(intro);
+            const multi = hintPicker?.multi ?? (!!listItems && isMultiSelect(listItems, lastAiMsg.content));
+            const isDesserts =
+              /\bdesserts?\b/i.test(intro) ||
+              /\bsweet(en)?\b/i.test(intro) ||
+              /pick (up to|at most)?\s*4\b/i.test(lastAiMsg.content) ||
+              (!!listItems && !listItems.some((i) => i.price) && listItems.length <= 8 && listItems.length > 6);
+            const maxSelect = hintPicker?.maxSelect ?? (isDesserts ? 4 : undefined);
 
-              // Agent acknowledged the prior answer and tacked on an
-              // open-ended question — the list below is stale options from
-              // the previous turn. Render intro only.
-              if (isAckEcho) {
-                return (
-                  <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
-                    <div className="flex flex-col items-center gap-1 shrink-0">
-                      <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
-                        <Sparkles className="w-3.5 h-3.5 text-white" />
-                      </div>
-                      <span className="text-[10px] text-neutral-400">AI</span>
-                    </div>
-                    <div className="tc-bubble-ai max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-neutral-900">
-                      <MarkdownMessage content={intro} />
-                      <span className="text-xs mt-1 block text-neutral-400">{time}</span>
-                    </div>
+            return (
+              <div className="flex flex-col items-center w-full max-w-5xl">
+                {/* Subtle user answer chip */}
+                {lastUserMsg && (
+                  <div className="mb-6 px-4 py-1.5 rounded-full bg-neutral-100 text-neutral-500 text-xs font-medium">
+                    You: {lastUserMsg.content}
                   </div>
-                );
-              }
+                )}
 
-              // Only suppress cards for pure confirmations — if the message also
-              // presents a new numbered list or inline yes/no choices, always show cards.
-              const hasNewQuestion = !!hintPicker || /^\s*\d+\./m.test(msg.content) || detectInlineChoices(msg.content) !== null;
-              const isConfirm = isConfirmationMessage(intro) && !hasNewQuestion;
-
-              // Confirmation messages: render as plain read-only list, not interactive cards
-              if (isConfirm) {
-                return (
-                  <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
-                    <div className="flex flex-col items-center gap-1 shrink-0">
-                      <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
-                        <Sparkles className="w-3.5 h-3.5 text-white" />
-                      </div>
-                      <span className="text-[10px] text-neutral-400">AI</span>
-                    </div>
-                    <div className="tc-bubble-ai max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-neutral-900">
-                      <MarkdownMessage content={msg.content} />
-                      <span className="text-xs mt-1 block text-neutral-400">{time}</span>
-                    </div>
+                {/* AI avatar + name */}
+                <div className="flex items-center gap-2 mb-6">
+                  <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center">
+                    <Sparkles className="w-4 h-4 text-white" />
                   </div>
-                );
-              }
-
-              const multi = hintPicker?.multi ?? isMultiSelect(listItems, msg.content);
-              // Cap desserts at 4: detect by intro text OR by shape of the list.
-              const isDesserts =
-                /\bdesserts?\b/i.test(intro) ||
-                /\bsweet(en)?\b/i.test(intro) ||
-                /pick (up to|at most)?\s*4\b/i.test(msg.content) ||
-                (!listItems.some((i) => i.price) && listItems.length <= 8 && listItems.length > 6);
-              const maxSelect = hintPicker?.maxSelect ?? (isDesserts ? 4 : undefined);
-
-              return (
-                <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
-                  <div className="flex flex-col items-center gap-1 shrink-0">
-                    <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
-                      <Sparkles className="w-3.5 h-3.5 text-white" />
-                    </div>
-                    <span className="text-[10px] text-neutral-400">AI</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    {intro && (
-                      <div className="rounded-2xl px-4 py-3 bg-neutral-100 text-neutral-900 mb-2 inline-block max-w-[90%]">
-                        <MarkdownMessage content={intro} />
-                      </div>
-                    )}
-                    <ItemSelector
-                      items={listItems}
-                      categories={categorizedItems ?? undefined}
-                      selected={menuSelections}
-                      onSelectionChange={handleMenuSelectionChange}
-                      multi={multi}
-                      maxSelect={maxSelect}
-                      /* Single-select OR multi-select with a strict maxSelect
-                       *  (e.g. desserts capped at 4) auto-sends. Menu and
-                       *  appetizers are multi WITHOUT maxSelect ? no auto-send,
-                       *  user must press Send manually. */
-                      onAutoSend={(value) => handleSendMessage(normalizeCardValue(value))}
-                    />
-                    <span className="mt-1 inline-block bg-white/85 backdrop-blur-sm rounded-md px-2 py-0.5 text-xs text-neutral-600 shadow-sm">{time}</span>
-                  </div>
+                  <span className="text-sm font-semibold text-neutral-900">Catering Assistant</span>
                 </div>
-              );
-            }
 
-            if (msg.role === 'user') {
-              return (
-                <div key={idx} className="flex justify-end gap-2.5 tc-msg-user">
-                  <div className="tc-bubble-user max-w-[85%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-white">
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                    <span className="text-xs mt-1 block text-neutral-400">{time}</span>
-                  </div>
-                  <div className="flex flex-col items-center gap-1 shrink-0">
-                    <div className="w-7 h-7 rounded-full bg-neutral-800 flex items-center justify-center">
-                      <span className="text-xs font-bold text-white">{userInitial}</span>
-                    </div>
-                    <span className="text-[10px] text-neutral-400">You</span>
-                  </div>
-                </div>
-              );
-            }
+                {/* Big question header */}
+                {!isAckEcho && !inlineSelectionSnapshot && !isConfirm && (
+                  <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-neutral-900 text-center leading-tight mb-4 max-w-3xl">
+                    {extractQuestionHeader(intro)}
+                  </h1>
+                )}
 
-            if (inlineSelectionSnapshot) {
-              return (
-                <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
-                  <div className="flex flex-col items-center gap-1 shrink-0">
-                    <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
-                      <Sparkles className="w-3.5 h-3.5 text-white" />
-                    </div>
-                    <span className="text-[10px] text-neutral-400">AI</span>
+                {/* Paragraph text */}
+                {intro && intro !== extractQuestionHeader(intro) && !isAckEcho && !inlineSelectionSnapshot && !isConfirm && (
+                  <p className="text-base sm:text-lg text-neutral-500 text-center max-w-2xl mb-8 leading-relaxed">
+                    {intro}
+                  </p>
+                )}
+
+                {/* Ack echo — just show intro text */}
+                {isAckEcho && (
+                  <div className="text-center max-w-2xl text-neutral-700 text-lg mb-6">
+                    <MarkdownMessage content={intro} />
                   </div>
-                  <div className="tc-bubble-ai max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-neutral-900">
+                )}
+
+                {/* Confirmation / plain text */}
+                {isConfirm && (
+                  <div className="text-center max-w-2xl text-neutral-700 text-lg mb-6">
+                    <MarkdownMessage content={lastAiMsg.content} />
+                  </div>
+                )}
+
+                {/* Inline selection snapshot */}
+                {inlineSelectionSnapshot && (
+                  <div className="w-full max-w-2xl mb-6">
                     {inlineSelectionSnapshot.before && (
-                      <MarkdownMessage content={inlineSelectionSnapshot.before} />
+                      <div className="text-center text-lg text-neutral-900 font-bold mb-4">
+                        {inlineSelectionSnapshot.before}
+                      </div>
                     )}
                     <ReadOnlySelectionSnapshot
                       label={inlineSelectionSnapshot.label}
@@ -1714,34 +1692,33 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       categories={inlineSelectionCategories}
                     />
                     {inlineSelectionSnapshot.after && (
-                      <div className="mt-3">
+                      <div className="mt-4 text-center text-neutral-500">
                         <MarkdownMessage content={inlineSelectionSnapshot.after} />
                       </div>
                     )}
-                    <span className="text-xs mt-2 block text-neutral-400">{time}</span>
                   </div>
-                </div>
-              );
-            }
+                )}
 
-            return (
-              <div key={idx} className="flex justify-start gap-2.5 tc-msg-ai">
-                <div className="flex flex-col items-center gap-1 shrink-0">
-                  <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
-                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                {/* Horizontal cards for interactive options */}
+                {!isConfirm && !isAckEcho && listItems && listItems.length > 0 && !inlineSelectionSnapshot && (
+                  <div className="w-full max-w-5xl mb-4">
+                    <ItemSelector
+                      items={listItems}
+                      categories={categorizedItems ?? undefined}
+                      selected={menuSelections}
+                      onSelectionChange={handleMenuSelectionChange}
+                      multi={multi}
+                      maxSelect={maxSelect}
+                      onAutoSend={(value) => handleSendMessage(normalizeCardValue(value))}
+                    />
                   </div>
-                  <span className="text-[10px] text-neutral-400">AI</span>
-                </div>
-                <div className="tc-bubble-ai max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-neutral-900">
-                  <MarkdownMessage content={msg.content} />
-                  <span className="text-xs mt-1 block text-neutral-400">{time}</span>
-                </div>
+                )}
               </div>
             );
-          })}
+          })()}
 
-          {state.isLoading && (
-            <div className="flex justify-start tc-fade-in">
+          {state.isLoading && currentAiMsg && (
+            <div className="flex justify-center mt-6">
               <div className="bg-neutral-100 rounded-2xl px-4 py-3">
                 <Loader2 className="w-5 h-5 text-neutral-400 animate-spin" />
               </div>
@@ -1749,7 +1726,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           )}
 
           {state.error && (
-            <div className="flex justify-center">
+            <div className="flex justify-center mt-4">
               <div className="bg-red-50 text-red-600 rounded-lg px-4 py-2 text-sm">{state.error}</div>
             </div>
           )}
@@ -1768,7 +1745,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
         {/* Input */}
         {(() => {
           const lastAiMsg = [...state.messages].reverse().find((m) => m.role === 'ai');
-          const noMenu = activeMenuMsgIdx === null;
+          const noMenu = !hasCurrentOptions;
           const isNameMode = !state.isLoading && !!lastAiMsg && isAskingForName(lastAiMsg.content) && noMenu;
           const isPhoneMode = !state.isLoading && !isNameMode && !!lastAiMsg && isAskingForPhone(lastAiMsg.content) && noMenu;
           const isEmailMode = !state.isLoading && !isNameMode && !isPhoneMode && !!lastAiMsg && isAskingForEmail(lastAiMsg.content) && noMenu;
@@ -1899,10 +1876,10 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                     value={input}
                     onChange={(e) => {
                       setInput(e.target.value);
-                      if (activeMenuMsgIdx !== null) setMenuSelections([]);
+                      if (hasCurrentOptions) setMenuSelections([]);
                     }}
                     onKeyDown={handleKeyDown}
-                    placeholder={activeMenuMsgIdx !== null ? 'Select above or type to make changes…' : 'Type your message…'}
+                    placeholder={hasCurrentOptions ? 'Select above or type to make changes…' : 'Type your message…'}
                     className="flex-1 resize-none border border-neutral-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400 min-h-[52px] max-h-[120px]"
                     rows={1}
                     disabled={state.isLoading}

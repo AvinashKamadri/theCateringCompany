@@ -87,7 +87,8 @@ def build_openai_request_tags(
         ctx.get("phase", "-"),
         ctx.get("target", "-"),
     ]
-    prompt_cache_key = "|".join(cache_bits)[:256]
+    # OpenAI caps prompt_cache_key at 64 chars. Hash to stay deterministic + short.
+    prompt_cache_key = hashlib.sha256("|".join(cache_bits).encode("utf-8")).hexdigest()[:64]
 
     principal = ctx.get("user_id") or ctx.get("author_id") or ctx.get("thread_id") or "anonymous"
     safety_identifier = "catering_" + hashlib.sha256(principal.encode("utf-8")).hexdigest()[:32]

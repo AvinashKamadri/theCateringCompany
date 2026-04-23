@@ -2,7 +2,6 @@
 # Assumes postgres (catering-db-local) is running and backend has applied migrations.
 # Safe to re-run: role seed uses ON CONFLICT, menu uses upsert. seed:users will ADD another 100.
 # Usage: .\scripts\seed-db.ps1
-$ErrorActionPreference = "Stop"
 
 Write-Host "[1/3] seeding roles + permissions..." -ForegroundColor Cyan
 Get-Content "$PSScriptRoot\..\sql\seed_roles_permissions.sql" -Raw | docker exec -i catering-db-local psql -U cateringco -d cateringco_dev | Out-Null

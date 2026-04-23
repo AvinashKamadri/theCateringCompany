@@ -677,4 +677,355 @@ export class ProjectsService {
 
     return result;
   }
+
+  // ─── Event-level waste logs ─────────────────────────────────────────────────
+
+  private async assertProjectReadable(userId: string, projectId: string) {
+    const project = await this.prisma.projects.findFirst({ where: { id: projectId, deleted_at: null } });
+    if (!project) throw new NotFoundException('Project not found');
+    if (project.owner_user_id === userId) return;
+    const membership = await this.prisma.project_collaborators.findUnique({
+      where: { project_id_user_id: { project_id: projectId, user_id: userId } },
+    });
+    if (!membership) throw new ForbiddenException('You do not have access to this project');
+  }
+
+  private assertStaff(email: string) {
+    if (!email?.endsWith('@catering-company.com')) {
+      throw new ForbiddenException('Only staff can manage event-level waste logs');
+    }
+  }
+
+  async listWasteLogs(userId: string, projectId: string) {
+    await this.assertProjectReadable(userId, projectId);
+    const rows = await this.prisma.project_waste_logs.findMany({
+      where: { project_id: projectId },
+      orderBy: { logged_at: 'desc' },
+      include: { users: { select: { id: true, email: true } } },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      total_weight_kg: r.total_weight_kg ? Number(r.total_weight_kg) : null,
+      reason: r.reason,
+      notes: r.notes,
+      logged_at: r.logged_at,
+      logged_by: r.users ? { id: r.users.id, email: r.users.email } : null,
+    }));
+  }
+
+  async createWasteLog(
+    userId: string,
+    email: string,
+    projectId: string,
+    dto: { total_weight_kg?: number | null; reason?: string | null; notes?: string | null; logged_at?: string | null },
+  ) {
+    this.assertStaff(email);
+    await this.assertProjectReadable(userId, projectId);
+    if ((dto.total_weight_kg == null) && !dto.reason?.trim() && !dto.notes?.trim()) {
+      throw new ForbiddenException('Provide at least a weight, reason, or notes');
+    }
+    const row = await this.prisma.project_waste_logs.create({
+      data: {
+        project_id: projectId,
+        logged_by_user_id: userId,
+        total_weight_kg: dto.total_weight_kg ?? null,
+        reason: dto.reason?.trim() || null,
+        notes: dto.notes?.trim() || null,
+        logged_at: dto.logged_at ? new Date(dto.logged_at) : new Date(),
+      },
+    });
+    return { id: row.id };
+  }
+
+  async deleteWasteLog(userId: string, email: string, projectId: string, logId: string) {
+    this.assertStaff(email);
+    await this.assertProjectReadable(userId, projectId);
+    const existing = await this.prisma.project_waste_logs.findFirst({
+      where: { id: logId, project_id: projectId },
+    });
+    if (!existing) throw new NotFoundException('Waste log not found');
+    await this.prisma.project_waste_logs.delete({ where: { id: logId } });
+    return { deleted: true };
+  }
+
+  // ─── Cost breakdown (Step 2) ────────────────────────────────────────────────
+  // Thresholds surface in UI via margin_color. Tune here.
+  static readonly MARGIN_GREEN_PCT = 30;
+  static readonly MARGIN_YELLOW_PCT = 15;
+  // Non-weight ingredient cost share above which waste estimate is flagged rough.
+  static readonly WASTE_ROUGH_THRESHOLD_PCT = 20;
+
+  async getCostBreakdown(userId: string, email: string, projectId: string) {
+    this.assertStaff(email);
+    await this.assertProjectReadable(userId, projectId);
+
+    const warnings: string[] = [];
+
+    const project = await this.prisma.projects.findFirst({
+      where: { id: projectId, deleted_at: null },
+      select: { id: true, guest_count: true },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    // ── Ingredients ──────────────────────────────────────────────────────────
+    const orderItems = await this.prisma.order_items.findMany({
+      where: { project_id: projectId },
+      select: {
+        id: true,
+        menu_item_id: true,
+        item_name_snapshot: true,
+        quantity: true,
+        unit_cost_snapshot: true,
+      },
+    });
+
+    const portions = await this.prisma.project_portion_estimates.findMany({
+      where: { project_id: projectId },
+      select: { menu_item_id: true, quantity: true },
+    });
+    const portionByItem = new Map<string, number>();
+    for (const p of portions) {
+      if (!p.menu_item_id) continue;
+      portionByItem.set(p.menu_item_id, (portionByItem.get(p.menu_item_id) ?? 0) + Number(p.quantity));
+    }
+
+    const menuItemIds = orderItems.map((o) => o.menu_item_id).filter(Boolean) as string[];
+    const itemDishes = menuItemIds.length
+      ? await this.prisma.menu_item_dishes.findMany({
+          where: { menu_item_id: { in: menuItemIds } },
+          include: {
+            dishes: {
+              include: {
+                dish_ingredients: { include: { ingredients: true } },
+              },
+            },
+          },
+        })
+      : [];
+
+    // Group dishes under menu_item_id
+    const dishesByItem = new Map<string, typeof itemDishes>();
+    for (const link of itemDishes) {
+      const key = link.menu_item_id;
+      if (!dishesByItem.has(key)) dishesByItem.set(key, []);
+      dishesByItem.get(key)!.push(link);
+    }
+
+    let ingredientsTotal = 0;
+    let weightBasedCost = 0;
+    let totalWeightGrams = 0;
+    const byMenuItem: Array<{ menu_item_id: string | null; menu_item_name: string; cost: number }> = [];
+
+    for (const oi of orderItems) {
+      // Prefer snapshot when available — most accurate historical cost
+      if (oi.unit_cost_snapshot != null) {
+        const cost = Number(oi.unit_cost_snapshot) * oi.quantity;
+        ingredientsTotal += cost;
+        byMenuItem.push({ menu_item_id: oi.menu_item_id, menu_item_name: oi.item_name_snapshot, cost });
+        continue;
+      }
+
+      // No snapshot — compose from dishes
+      if (!oi.menu_item_id) {
+        warnings.push(`Line item '${oi.item_name_snapshot}' has no menu_item link and no unit_cost_snapshot; excluded from cost.`);
+        byMenuItem.push({ menu_item_id: null, menu_item_name: oi.item_name_snapshot, cost: 0 });
+        continue;
+      }
+      const dishes = dishesByItem.get(oi.menu_item_id) ?? [];
+      if (dishes.length === 0) {
+        warnings.push(`Menu item '${oi.item_name_snapshot}' has no dishes linked; cost = 0.`);
+        byMenuItem.push({ menu_item_id: oi.menu_item_id, menu_item_name: oi.item_name_snapshot, cost: 0 });
+        continue;
+      }
+
+      // effective_servings: portions -> guest_count -> order_items.quantity (warn on last)
+      let effectiveServings = portionByItem.get(oi.menu_item_id) ?? 0;
+      if (effectiveServings === 0) {
+        if (project.guest_count && project.guest_count > 0) {
+          effectiveServings = project.guest_count;
+        } else {
+          effectiveServings = oi.quantity;
+          warnings.push(`No portion estimate or guest_count for '${oi.item_name_snapshot}'; using order quantity (${oi.quantity}) as servings.`);
+        }
+      }
+
+      let perServingCost = 0;
+      for (const link of dishes) {
+        const dish = link.dishes;
+        if (!dish.dish_ingredients.length) {
+          warnings.push(`Dish '${dish.name}' (in '${oi.item_name_snapshot}') has no ingredients linked.`);
+          continue;
+        }
+        for (const di of dish.dish_ingredients) {
+          const ing = di.ingredients;
+          if (ing.default_price == null) {
+            warnings.push(`Ingredient '${ing.name}' is missing default_price; treated as 0.`);
+            continue;
+          }
+          const price = Number(ing.default_price);
+          const priceUnit = ing.default_price_unit ?? 'g';
+
+          if (di.weight_g != null && Number(di.weight_g) > 0) {
+            const grams = Number(di.weight_g);
+            const pricePerGram = unitToGramsFactor(priceUnit, price);
+            if (pricePerGram == null) {
+              warnings.push(`Ingredient '${ing.name}' has unrecognized default_price_unit '${priceUnit}'; skipped.`);
+              continue;
+            }
+            const cost = grams * pricePerGram;
+            perServingCost += cost;
+            weightBasedCost += cost * effectiveServings;
+            totalWeightGrams += grams * effectiveServings;
+          } else if (di.volume_ml != null && Number(di.volume_ml) > 0) {
+            const ml = Number(di.volume_ml);
+            const pricePerMl = unitToMlFactor(priceUnit, price);
+            if (pricePerMl == null) {
+              warnings.push(`Ingredient '${ing.name}' has unrecognized default_price_unit '${priceUnit}' for volume amount; skipped.`);
+              continue;
+            }
+            perServingCost += ml * pricePerMl;
+          } else {
+            // Treat as per-unit (single item)
+            if (priceUnit !== 'unit') {
+              warnings.push(`Ingredient '${ing.name}' has no weight/volume; assuming per-unit pricing.`);
+            }
+            perServingCost += price;
+          }
+        }
+      }
+      const lineCost = perServingCost * effectiveServings;
+      ingredientsTotal += lineCost;
+      byMenuItem.push({ menu_item_id: oi.menu_item_id, menu_item_name: oi.item_name_snapshot, cost: lineCost });
+    }
+
+    // ── Labour ───────────────────────────────────────────────────────────────
+    const staffReqs = await this.prisma.project_staff_requirements.findMany({
+      where: { project_id: projectId },
+    });
+    let labourTotal = 0;
+    for (const sr of staffReqs) {
+      if (sr.total_cost != null) {
+        labourTotal += Number(sr.total_cost);
+        continue;
+      }
+      if (sr.rate_per_hour == null || sr.hours_estimated == null) {
+        warnings.push(`Staff role '${sr.role}' missing rate_per_hour or hours_estimated; treated as 0.`);
+        continue;
+      }
+      labourTotal += sr.quantity * Number(sr.hours_estimated) * Number(sr.rate_per_hour);
+    }
+
+    // ── Waste ────────────────────────────────────────────────────────────────
+    const wasteLogs = await this.prisma.project_waste_logs.findMany({
+      where: { project_id: projectId },
+      select: { total_weight_kg: true },
+    });
+    const totalWasteKg = wasteLogs.reduce((sum, w) => sum + (w.total_weight_kg ? Number(w.total_weight_kg) : 0), 0);
+
+    let wasteCost = 0;
+    if (totalWasteKg > 0) {
+      const totalWeightKg = totalWeightGrams / 1000;
+      if (totalWeightKg > 0) {
+        const avgCostPerKg = weightBasedCost / totalWeightKg;
+        wasteCost = totalWasteKg * avgCostPerKg;
+
+        const nonWeightShare = ingredientsTotal > 0 ? (ingredientsTotal - weightBasedCost) / ingredientsTotal : 0;
+        if (nonWeightShare * 100 > ProjectsService.WASTE_ROUGH_THRESHOLD_PCT) {
+          warnings.push(
+            `Waste estimate is rough: ${(nonWeightShare * 100).toFixed(0)}% of ingredient cost came from non-weight items (volume/unit).`,
+          );
+        }
+      } else {
+        warnings.push('Waste weight logged but no weight-based ingredient cost to derive avg price/kg; waste cost = 0.');
+      }
+    }
+
+    // ── Contract total ───────────────────────────────────────────────────────
+    const contract = await this.prisma.contracts.findFirst({
+      where: {
+        project_id: projectId,
+        status: { in: ['signed', 'approved'] as any },
+        is_active: true,
+      },
+      orderBy: { version_number: 'desc' },
+      select: { total_amount: true },
+    });
+
+    let contractTotal: number | null = null;
+    let margin: number | null = null;
+    let marginPercent: number | null = null;
+
+    if (contract) {
+      contractTotal = contract.total_amount != null ? Number(contract.total_amount) : null;
+    } else {
+      warnings.push('No signed or approved contract on this project; margin not available.');
+    }
+
+    // ── Change orders / upsells (deferred, warnings only) ────────────────────
+    const changeOrderCount = await this.prisma.change_orders.count({ where: { project_id: projectId } });
+    if (changeOrderCount > 0) warnings.push(`${changeOrderCount} change order(s) not included in this calculation.`);
+    const upsellCount = await this.prisma.project_upsell_items.count({ where: { project_id: projectId } });
+    if (upsellCount > 0) warnings.push(`${upsellCount} upsell item(s) not included in this calculation.`);
+
+    // ── Totals ───────────────────────────────────────────────────────────────
+    const deliveryCost = ingredientsTotal + labourTotal;
+    if (contractTotal != null) {
+      margin = contractTotal - deliveryCost;
+      marginPercent = contractTotal > 0 ? (margin / contractTotal) * 100 : 0;
+    }
+
+    const marginColor =
+      marginPercent == null
+        ? null
+        : marginPercent >= ProjectsService.MARGIN_GREEN_PCT
+          ? 'green'
+          : marginPercent >= ProjectsService.MARGIN_YELLOW_PCT
+            ? 'yellow'
+            : 'red';
+
+    return {
+      ingredients_total: round2(ingredientsTotal),
+      labour_total: round2(labourTotal),
+      waste_cost: round2(wasteCost),
+      delivery_cost: round2(deliveryCost),
+      contract_total: contractTotal != null ? round2(contractTotal) : null,
+      margin: margin != null ? round2(margin) : null,
+      margin_percent: marginPercent != null ? Math.round(marginPercent * 10) / 10 : null,
+      margin_color: marginColor,
+      warnings,
+      by_menu_item: byMenuItem.map((m) => ({ ...m, cost: round2(m.cost) })),
+    };
+  }
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
+// Convert default_price (expressed per `unit`) into price-per-gram.
+// Returns null if the unit doesn't make sense for weight.
+function unitToGramsFactor(unit: string, price: number): number | null {
+  switch (unit) {
+    case 'g':
+      return price; // price is per gram
+    case 'kg':
+      return price / 1000;
+    case '100g':
+      return price / 100;
+    default:
+      return null;
+  }
+}
+
+// Convert default_price (per `unit`) into price-per-ml.
+function unitToMlFactor(unit: string, price: number): number | null {
+  switch (unit) {
+    case 'ml':
+      return price;
+    case 'l':
+    case 'L':
+      return price / 1000;
+    default:
+      return null;
+  }
 }

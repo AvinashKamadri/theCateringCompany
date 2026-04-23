@@ -1,7 +1,6 @@
 # Bring up the whole local stack in dependency order:
 #   db -> backend + ml-agent -> frontend
 # Usage: .\scripts\restart-all.ps1
-$ErrorActionPreference = "Stop"
 
 & "$PSScriptRoot\restart-db.ps1"
 & "$PSScriptRoot\restart-backend.ps1"

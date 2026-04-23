@@ -2,8 +2,6 @@
 # Uses docker-compose.yml service `postgres` (container catering-db-local) on host port 5433.
 # Safe to re-run; data persists in the `postgres_data` volume.
 # Usage: .\scripts\restart-db.ps1
-$ErrorActionPreference = "Stop"
-
 Write-Host "[1/2] starting postgres..." -ForegroundColor Cyan
 docker compose up -d postgres
 if ($LASTEXITCODE -ne 0) { Write-Host "[ERROR] compose up failed." -ForegroundColor Red; exit 1 }

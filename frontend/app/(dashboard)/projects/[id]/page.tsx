@@ -24,6 +24,15 @@ interface Contract {
   version_number: number;
 }
 
+interface EventWasteLog {
+  id: string;
+  total_weight_kg: number | null;
+  reason: string | null;
+  notes: string | null;
+  logged_at: string;
+  logged_by: { id: string; email: string } | null;
+}
+
 interface Project {
   id: string;
   title: string;
@@ -82,12 +91,24 @@ export default function ProjectDetailPage() {
   const [addingCollaborator, setAddingCollaborator] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [wasteOpen, setWasteOpen] = useState(false);
+  const [eventWasteOpen, setEventWasteOpen] = useState(false);
+  const [eventWasteLogs, setEventWasteLogs] = useState<EventWasteLog[]>([]);
   const pollRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   useEffect(() => {
     fetchProject();
     fetchCollaborators();
+    fetchEventWasteLogs();
   }, [projectId]);
+
+  const fetchEventWasteLogs = async () => {
+    try {
+      const data = await apiClient.get(`/projects/${projectId}/waste-logs`);
+      setEventWasteLogs((Array.isArray(data) ? data : []) as EventWasteLog[]);
+    } catch {
+      // silent — waste logs may not exist, or user may not have access
+    }
+  };
 
   useEffect(() => {
     if (!project) return;
@@ -438,13 +459,49 @@ export default function ProjectDetailPage() {
             {isStaff && (
               <BentoInfoCard className="p-5">
                 <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Food Waste</p>
-                <p className="text-xs text-neutral-500 mb-3">Log ingredients discarded or over-prepped for this event.</p>
-                <button
-                  onClick={() => setWasteOpen(true)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border border-neutral-200 hover:border-neutral-400 text-neutral-800 transition-colors"
-                >
-                  <Flame className="h-3.5 w-3.5" /> Log waste
-                </button>
+                {eventWasteLogs.length > 0 && (
+                  <div className="mb-3 max-h-40 overflow-y-auto space-y-1.5">
+                    {eventWasteLogs.slice(0, 4).map((w) => (
+                      <div key={w.id} className="flex items-start justify-between gap-2 text-xs border-b border-neutral-100 pb-1.5 last:border-b-0">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            {w.total_weight_kg != null && <span className="font-semibold text-neutral-900">{w.total_weight_kg} kg</span>}
+                            {w.reason && <span className="text-neutral-600 truncate">· {w.reason}</span>}
+                          </div>
+                          {w.notes && <p className="text-neutral-400 truncate">{w.notes}</p>}
+                          <p className="text-[10px] text-neutral-400 mt-0.5">{new Date(w.logged_at).toLocaleDateString()}</p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (!confirm('Delete this waste log?')) return;
+                            try {
+                              await apiClient.delete(`/projects/${projectId}/waste-logs/${w.id}`);
+                              setEventWasteLogs((prev) => prev.filter((x) => x.id !== w.id));
+                            } catch (e: any) { toast.error(e.message || 'Failed to delete'); }
+                          }}
+                          className="text-neutral-300 hover:text-red-600 shrink-0 p-0.5"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setEventWasteOpen(true)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl bg-neutral-900 text-white hover:bg-black transition-colors"
+                  >
+                    <Flame className="h-3.5 w-3.5" /> Log event waste
+                  </button>
+                  <button
+                    onClick={() => setWasteOpen(true)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium rounded-xl border border-neutral-200 hover:border-neutral-400 text-neutral-600 transition-colors"
+                  >
+                    Log ingredient waste
+                  </button>
+                </div>
               </BentoInfoCard>
             )}
           </div>
@@ -677,6 +734,14 @@ export default function ProjectDetailPage() {
           onSaved={() => { setWasteOpen(false); toast.success('Waste logged'); }}
         />
       )}
+
+      {eventWasteOpen && (
+        <LogEventWasteModal
+          projectId={projectId}
+          onClose={() => setEventWasteOpen(false)}
+          onSaved={() => { setEventWasteOpen(false); toast.success('Event waste logged'); fetchEventWasteLogs(); }}
+        />
+      )}
     </div>
   );
 }
@@ -809,6 +874,107 @@ function LogWasteModal({
               className="px-4 py-2 text-sm font-medium rounded-lg bg-neutral-900 text-white hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? 'Logging…' : 'Log waste'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function LogEventWasteModal({
+  projectId,
+  onClose,
+  onSaved,
+}: {
+  projectId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [weight, setWeight] = useState('');
+  const [reason, setReason] = useState('');
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const kg = weight ? Number(weight) : null;
+    if (kg != null && (!Number.isFinite(kg) || kg < 0)) {
+      toast.error('Enter a valid weight'); return;
+    }
+    if (kg == null && !reason.trim() && !notes.trim()) {
+      toast.error('Provide at least a weight, reason, or notes'); return;
+    }
+    setSaving(true);
+    try {
+      await apiClient.post(`/projects/${projectId}/waste-logs`, {
+        total_weight_kg: kg,
+        reason: reason.trim() || null,
+        notes: notes.trim() || null,
+      });
+      onSaved();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to log event waste');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-neutral-200">
+        <div className="flex items-center justify-between p-5 border-b border-neutral-100">
+          <h3 className="text-base font-semibold text-neutral-900">Log event waste</h3>
+          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-900">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <form onSubmit={submit} className="p-5 space-y-4">
+          <p className="text-xs text-neutral-500">
+            Record higher-level waste for this event — not tied to a specific inventory ingredient.
+          </p>
+          <div>
+            <label className="text-xs font-medium text-neutral-600 mb-1 block">Total weight (kg) <span className="text-neutral-400">(optional)</span></label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-neutral-200 focus:border-neutral-900 focus:outline-none"
+              placeholder="e.g. 5.5"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-neutral-600 mb-1 block">Reason <span className="text-neutral-400">(optional)</span></label>
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-neutral-200 focus:border-neutral-900 focus:outline-none"
+              placeholder="Over-prepared, spoiled, uneaten leftovers…"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-neutral-600 mb-1 block">Notes <span className="text-neutral-400">(optional)</span></label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-neutral-200 focus:border-neutral-900 focus:outline-none resize-none"
+              placeholder="Optional details about what was wasted and why."
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-neutral-600 hover:bg-neutral-100">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-neutral-900 text-white hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Logging…' : 'Log event waste'}
             </button>
           </div>
         </form>

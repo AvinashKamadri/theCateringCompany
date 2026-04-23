@@ -272,4 +272,41 @@ export class ProjectsController {
       throw error;
     }
   }
+
+  // ─── Event-level waste logs ─────────────────────────────────────────────────
+
+  @Get(':projectId/waste-logs')
+  listWasteLogs(
+    @CurrentUser() user: { userId: string },
+    @Param('projectId') projectId: string,
+  ) {
+    return this.projectsService.listWasteLogs(user.userId, projectId);
+  }
+
+  @Post(':projectId/waste-logs')
+  createWasteLog(
+    @CurrentUser() user: { userId: string; email: string },
+    @Param('projectId') projectId: string,
+    @Body() body: { total_weight_kg?: number | null; reason?: string | null; notes?: string | null; logged_at?: string | null },
+  ) {
+    return this.projectsService.createWasteLog(user.userId, user.email, projectId, body);
+  }
+
+  @Delete(':projectId/waste-logs/:logId')
+  @HttpCode(HttpStatus.OK)
+  deleteWasteLog(
+    @CurrentUser() user: { userId: string; email: string },
+    @Param('projectId') projectId: string,
+    @Param('logId') logId: string,
+  ) {
+    return this.projectsService.deleteWasteLog(user.userId, user.email, projectId, logId);
+  }
+
+  @Get(':projectId/cost-breakdown')
+  getCostBreakdown(
+    @CurrentUser() user: { userId: string; email: string },
+    @Param('projectId') projectId: string,
+  ) {
+    return this.projectsService.getCostBreakdown(user.userId, user.email, projectId);
+  }
 }

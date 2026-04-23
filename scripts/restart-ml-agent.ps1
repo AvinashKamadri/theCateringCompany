@@ -1,14 +1,12 @@
 # Rebuild + recreate the ml-agent container. Reads env from .\ml-agent.env.
 # Usage: .\scripts\restart-ml-agent.ps1
-$ErrorActionPreference = "Stop"
-
 if (-not (Test-Path ".\ml-agent.env")) {
   Write-Host "[ERROR] .\ml-agent.env not found. Create it with DATABASE_URL, OPENAI_API_KEY, CORS_ORIGIN." -ForegroundColor Red
   exit 1
 }
 
 Write-Host "[1/3] building ml-agent image..." -ForegroundColor Cyan
-docker compose build ml-agent 2>&1 | ForEach-Object { "$_" }
+docker compose build ml-agent
 if ($LASTEXITCODE -ne 0) { Write-Host "[ERROR] build failed - aborting." -ForegroundColor Red; exit 1 }
 
 Write-Host "[2/3] recreating container..." -ForegroundColor Cyan

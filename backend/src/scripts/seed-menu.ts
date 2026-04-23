@@ -328,7 +328,7 @@ async function seedMenu() {
       console.log(`Upserting category: ${categoryData.name}...`);
 
       const category = await prisma.menu_categories.upsert({
-        where: { name: categoryData.name },
+        where: { section_name: { section: '', name: categoryData.name } },
         create: {
           name: categoryData.name,
           sort_order: categoryData.sort_order,

@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useEffect, useRef, Fragment } from 'react';
-import { Send, Loader2, Sparkles, Check, ChevronDown, MessageSquare } from 'lucide-react';
+import { Send, Loader2, Sparkles, Check, ChevronDown, MessageSquare, ArrowRight } from 'lucide-react';
 import { chatAiApi } from '@/lib/api/chat-ai';
 import type { ChatMessage, ChatState, ContractData, InputHint } from '@/types/chat-ai.types';
 import { toast } from 'sonner';
@@ -1062,26 +1062,26 @@ function saveSessionToStorage(threadId: string) {
 
 // --- Country codes ------------------------------------------------------------
 const COUNTRY_CODES = [
-  { code: '+1',  flag: '????', name: 'US' },
-  { code: '+1',  flag: '????', name: 'CA' },
-  { code: '+44', flag: '????', name: 'GB' },
-  { code: '+91', flag: '????', name: 'IN' },
-  { code: '+61', flag: '????', name: 'AU' },
-  { code: '+64', flag: '????', name: 'NZ' },
-  { code: '+971', flag: '????', name: 'AE' },
-  { code: '+65', flag: '????', name: 'SG' },
-  { code: '+60', flag: '????', name: 'MY' },
-  { code: '+63', flag: '????', name: 'PH' },
-  { code: '+852', flag: '????', name: 'HK' },
-  { code: '+49', flag: '????', name: 'DE' },
-  { code: '+33', flag: '????', name: 'FR' },
-  { code: '+39', flag: '????', name: 'IT' },
-  { code: '+34', flag: '????', name: 'ES' },
-  { code: '+55', flag: '????', name: 'BR' },
-  { code: '+52', flag: '????', name: 'MX' },
-  { code: '+81', flag: '????', name: 'JP' },
-  { code: '+82', flag: '????', name: 'KR' },
-  { code: '+86', flag: '????', name: 'CN' },
+  { code: '+1',   flag: '🇺🇸', name: 'US' },
+  { code: '+1',   flag: '🇨🇦', name: 'CA' },
+  { code: '+44',  flag: '🇬🇧', name: 'GB' },
+  { code: '+91',  flag: '🇮🇳', name: 'IN' },
+  { code: '+61',  flag: '🇦🇺', name: 'AU' },
+  { code: '+64',  flag: '🇳🇿', name: 'NZ' },
+  { code: '+971', flag: '🇦🇪', name: 'AE' },
+  { code: '+65',  flag: '🇸🇬', name: 'SG' },
+  { code: '+60',  flag: '🇲🇾', name: 'MY' },
+  { code: '+63',  flag: '🇵🇭', name: 'PH' },
+  { code: '+852', flag: '🇭🇰', name: 'HK' },
+  { code: '+49',  flag: '🇩🇪', name: 'DE' },
+  { code: '+33',  flag: '🇫🇷', name: 'FR' },
+  { code: '+39',  flag: '🇮🇹', name: 'IT' },
+  { code: '+34',  flag: '🇪🇸', name: 'ES' },
+  { code: '+55',  flag: '🇧🇷', name: 'BR' },
+  { code: '+52',  flag: '🇲🇽', name: 'MX' },
+  { code: '+81',  flag: '🇯🇵', name: 'JP' },
+  { code: '+82',  flag: '🇰🇷', name: 'KR' },
+  { code: '+86',  flag: '🇨🇳', name: 'CN' },
 ];
 
 function isAskingForName(content: string): boolean {
@@ -1438,7 +1438,9 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
   }
 
   const handleSendMessage = async (messageText?: string) => {
-    const content = messageText || input.trim();
+    // For multi-select menu mode, build content from selections
+    const isMultiSelectSend = !messageText && activeMenuMsgIdx !== null && menuSelections.length > 0;
+    const content = messageText || (isMultiSelectSend ? menuSelections.join(', ') : input.trim());
     if (!content || state.isLoading) return;
 
     if (content.startsWith('/')) {
@@ -1461,6 +1463,8 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     setInput('');
     setMenuSelections([]);
     setActiveMenuMsgIdx(null);
+
+    const multiSelectCount = isMultiSelectSend ? menuSelections.length : 0;
 
     const userMessage: ChatMessage = {
       role: 'user',
@@ -1486,7 +1490,9 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
 
       const aiMessage: ChatMessage = {
         role: 'ai',
-        content: response.message,
+        content: multiSelectCount > 0
+          ? `Selected ${multiSelectCount} item${multiSelectCount !== 1 ? 's' : ''}`
+          : response.message,
         timestamp: new Date(),
         inputHint: response.input_hint ?? null,
       };
@@ -1798,18 +1804,19 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           };
 
           return (
-            <div className={`px-3 sm:px-6 py-3 sm:py-4 bg-black text-white${state.isComplete && state.contractData ? ' hidden' : ''}`}>
+            <>
+            <div className={`mx-auto w-[min(calc(100%-2rem),720px)] mb-0 px-2 py-3 bg-[#141414] text-white rounded-full shadow-[0_10px_30px_-8px_rgba(0,0,0,0.55)]${state.isComplete && state.contractData ? ' hidden' : ''}`}>
               <div className="flex items-end gap-2 sm:gap-3 min-w-0">
                 {isNameMode ? (
                   /* First name + Last name split input — stacked on mobile */
-                  <div className="flex-1 min-w-0 flex flex-col sm:flex-row gap-2">
+                  <div className="flex-1 min-w-0 flex flex-col sm:flex-row">
                     <input
                       type="text"
                       value={firstName}
                       onChange={(e) => setFirstName(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && firstName.trim() && lastName.trim()) { e.preventDefault(); handleSpecialSend(); } }}
                       placeholder="First name"
-                      className="w-full sm:flex-1 min-w-0 border border-neutral-300 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400"
+                      className="w-full sm:flex-1 min-w-0 bg-transparent border-none outline-none ring-0 px-3 py-1.5 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-0"
                       autoFocus
                       disabled={state.isLoading}
                     />
@@ -1819,26 +1826,26 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       onChange={(e) => setLastName(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && firstName.trim() && lastName.trim()) { e.preventDefault(); handleSpecialSend(); } }}
                       placeholder="Last name"
-                      className="w-full sm:flex-1 min-w-0 border border-neutral-300 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400"
+                      className="w-full sm:flex-1 min-w-0 bg-transparent border-none outline-none ring-0 px-3 py-1.5 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-0"
                       disabled={state.isLoading}
                     />
                   </div>
                 ) : isPhoneMode ? (
                   /* Phone input with country code */
-                  <div className="flex-1 flex items-center border border-neutral-300 rounded-xl overflow-hidden bg-white focus-within:ring-2 focus-within:ring-white focus-within:border-white">
+                  <div className="flex-1 flex items-center gap-1 min-w-0">
                     <div className="relative shrink-0">
                       <select
                         value={COUNTRY_CODES.indexOf(countryCode)}
                         onChange={(e) => setCountryCode(COUNTRY_CODES[Number(e.target.value)])}
-                        className="appearance-none bg-neutral-50 border-r border-neutral-200 pl-3 pr-7 py-3 text-sm text-neutral-900 focus:outline-none cursor-pointer h-full"
+                        className="appearance-none bg-white/10 border border-white/20 rounded-full pl-2.5 pr-6 py-1.5 text-sm text-white focus:outline-none cursor-pointer"
                       >
                         {COUNTRY_CODES.map((c, i) => (
-                          <option key={`${c.code}-${c.name}`} value={i}>
+                          <option key={`${c.code}-${c.name}`} value={i} className="bg-neutral-900 text-white">
                             {c.flag} {c.name} {c.code}
                           </option>
                         ))}
                       </select>
-                      <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-neutral-400 pointer-events-none" />
+                      <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-neutral-400 pointer-events-none" />
                     </div>
                     <input
                       type="tel"
@@ -1847,7 +1854,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
                       placeholder="0000000000"
                       maxLength={10}
-                      className="flex-1 px-3 py-3 text-sm focus:outline-none bg-white text-neutral-900 placeholder:text-neutral-400"
+                      className="flex-1 min-w-0 bg-transparent border-none outline-none ring-0 px-3 py-1.5 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-0"
                       disabled={state.isLoading}
                     />
                   </div>
@@ -1859,7 +1866,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
                     placeholder="you@example.com"
-                    className="flex-1 border border-neutral-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400"
+                    className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm text-white placeholder:text-white/40 focus:outline-none"
                     disabled={state.isLoading}
                   />
                 ) : isDateMode ? (
@@ -1881,17 +1888,31 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       min={10}
                       max={10000}
                       placeholder="Number of guests"
-                      className="flex-1 border border-neutral-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400"
+                      className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm text-white placeholder:text-white/40 focus:outline-none"
                       disabled={state.isLoading}
                     />
                     <button
                       type="button"
                       onClick={() => { setInput('Not confirmed yet'); handleSendMessage('Not confirmed yet'); }}
                       disabled={state.isLoading}
-                      className="shrink-0 px-4 py-2 text-sm text-neutral-500 border border-neutral-200 rounded-xl hover:bg-neutral-50 transition-colors"
+                      className="shrink-0 px-3 py-1 text-xs text-neutral-400 border border-white/20 rounded-full hover:bg-white/10 transition-colors"
                     >
                       Skip
                     </button>
+                  </div>
+                ) : activeMenuMsgIdx !== null && menuSelections.length > 0 ? (
+                  /* Multi-select pills in bar */
+                  <div className="flex-1 flex items-center gap-1.5 flex-wrap px-3 py-1.5 min-h-[36px] overflow-hidden">
+                    {menuSelections.map((name) => (
+                      <span key={name} className="inline-flex items-center gap-1 bg-white text-black text-xs font-medium px-2.5 py-1 rounded-full shrink-0">
+                        {name.replace(/\s*\([^)]*\$[^)]*\)\s*/g, '').trim()}
+                        <button
+                          onClick={() => setMenuSelections(menuSelections.filter((n) => n !== name))}
+                          className="opacity-50 hover:opacity-100 leading-none"
+                        >✕</button>
+                      </span>
+                    ))}
+                    <span className="text-xs text-neutral-500 shrink-0">— hit Send</span>
                   </div>
                 ) : (
                   <textarea
@@ -1902,49 +1923,50 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                       if (activeMenuMsgIdx !== null) setMenuSelections([]);
                     }}
                     onKeyDown={handleKeyDown}
-                    placeholder={activeMenuMsgIdx !== null ? 'Select above or type to make changes…' : 'Type your message…'}
-                    className="flex-1 resize-none border border-neutral-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-white focus:border-white bg-white text-neutral-900 placeholder:text-neutral-400 min-h-[52px] max-h-[120px]"
+                    placeholder={activeMenuMsgIdx !== null ? 'Select items above…' : 'Type a message or ask to change anything…'}
+                    className="flex-1 resize-none bg-transparent border-none outline-none ring-0 px-4 py-1.5 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-0 min-h-[36px] max-h-[100px] self-center"
                     rows={1}
                     disabled={state.isLoading}
                   />
                 )}
                 <button
                   onClick={specialMode ? handleSpecialSend : () => handleSendMessage()}
-                  disabled={state.isLoading || (isNameMode ? (!firstName.trim() || !lastName.trim()) : (isEmailMode ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) : (isGuestMode ? (!input.trim() || Number(input) < 10) : !input.trim())))}
-                  className="bg-white text-black w-12 h-[52px] flex items-center justify-center rounded-xl shrink-0 hover:bg-neutral-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-[0_4px_14px_rgba(255,255,255,0.18)]"
+                  disabled={state.isLoading || (isNameMode ? (!firstName.trim() || !lastName.trim()) : (isEmailMode ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) : (isGuestMode ? (!input.trim() || Number(input) < 10) : (activeMenuMsgIdx !== null ? menuSelections.length === 0 && !input.trim() : !input.trim()))))}
+                  className="bg-white text-black w-8 h-8 self-center flex items-center justify-center rounded-full shrink-0 hover:bg-neutral-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  {state.isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                  {state.isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
                 </button>
               </div>
-              <div className="flex items-center justify-center gap-3 mt-2">
-                <p className="text-xs font-medium text-neutral-300 text-center">
-                  {isNameMode
-                    ? 'Enter your first and last name'
-                    : isPhoneMode
-                      ? 'Select your country code and enter your phone number'
-                      : isEmailMode
-                        ? 'Enter a valid email address'
-                        : isDateMode
-                          ? 'Pick your event date (up to 7 months ahead)'
-                          : isGuestMode
-                            ? 'Enter estimated guest count (minimum 10)'
-                            : isVenueMode
-                              ? 'Type venue name & address, or skip for now'
-                              : <>Shift+Enter for new line · At any point, request changes by just typing</>
-                  }
-                </p>
-                {isVenueMode && (
-                  <button
-                    type="button"
-                    onClick={() => handleSendMessage('Venue TBD — will confirm later')}
-                    disabled={state.isLoading}
-                    className="text-xs text-neutral-500 border border-neutral-200 rounded-lg px-3 py-1 hover:bg-neutral-50 transition-colors shrink-0"
-                  >
-                    Skip for now
-                  </button>
-                )}
-              </div>
             </div>
+            <div className="flex items-center justify-center gap-3 mt-1.5 mb-1 px-4">
+              <p className="text-xs font-medium text-white/60 text-center drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                {isNameMode
+                  ? 'Enter your first and last name'
+                  : isPhoneMode
+                    ? 'Select your country code and enter your phone number'
+                    : isEmailMode
+                      ? 'Enter a valid email address'
+                      : isDateMode
+                        ? 'Pick your event date (up to 7 months ahead)'
+                        : isGuestMode
+                          ? 'Enter estimated guest count (minimum 10)'
+                          : isVenueMode
+                            ? 'Type venue name & address, or skip for now'
+                            : <>Shift+Enter for new line · At any point, request changes by just typing</>
+                }
+              </p>
+              {isVenueMode && (
+                <button
+                  type="button"
+                  onClick={() => handleSendMessage('Venue TBD — will confirm later')}
+                  disabled={state.isLoading}
+                  className="text-xs text-neutral-500 border border-neutral-200 rounded-lg px-3 py-1 hover:bg-neutral-50 transition-colors shrink-0"
+                >
+                  Skip for now
+                </button>
+              )}
+            </div>
+            </>
           );
         })()}
       </div>

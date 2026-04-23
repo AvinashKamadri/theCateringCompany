@@ -492,12 +492,15 @@ model margin_alerts {
 
 model menu_categories {
   id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name       String       @unique
+  section    String       @default("")
+  name       String
   sort_order Int          @default(0)
   active     Boolean      @default(true)
   created_at DateTime     @default(now()) @db.Timestamptz(6)
   updated_at DateTime     @default(now()) @db.Timestamptz(6)
   menu_items menu_items[]
+
+  @@unique([section, name])
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -899,6 +902,7 @@ model projects {
   project_staff_requirements                                                       project_staff_requirements[]
   project_summaries                                                                project_summaries[]
   project_upsell_items                                                             project_upsell_items[]
+  project_waste_logs                                                               project_waste_logs[]
   ai_conversation_states_projects_ai_conversation_state_idToai_conversation_states ai_conversation_states?      @relation("projects_ai_conversation_state_idToai_conversation_states", fields: [ai_conversation_state_id], references: [id], onUpdate: NoAction, map: "fk_projects_ai_conv_state")
   contracts_projects_signed_contract_idTocontracts                                 contracts?                   @relation("projects_signed_contract_idTocontracts", fields: [signed_contract_id], references: [id], onUpdate: NoAction, map: "fk_projects_signed_contract")
   users_projects_deleted_byTousers                                                 users?                       @relation("projects_deleted_byTousers", fields: [deleted_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -1057,6 +1061,7 @@ model users {
   project_pricing                                               project_pricing[]
   projects_projects_deleted_byTousers                           projects[]              @relation("projects_deleted_byTousers")
   projects_projects_owner_user_idTousers                        projects[]              @relation("projects_owner_user_idTousers")
+  project_waste_logs                                            project_waste_logs[]
   service_accounts                                              service_accounts[]
   sessions                                                      sessions[]
   threads                                                       threads[]
@@ -1293,6 +1298,7 @@ model ingredients {
   allergens            String[]
   default_unit         String                 @default("g")
   default_price        Decimal?               @db.Decimal(10, 2)
+  default_price_unit   String?                @default("g")
   created_by_user_id   String?                @db.Uuid
   created_at           DateTime               @default(now()) @db.Timestamptz(6)
   updated_at           DateTime               @default(now()) @db.Timestamptz(6)
@@ -1363,4 +1369,20 @@ model project_summaries {
   projects      projects @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([project_id, generated_at(sort: Desc)], map: "ix_project_summaries_project")
+}
+
+model project_waste_logs {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  project_id          String    @db.Uuid
+  logged_by_user_id   String?   @db.Uuid
+  total_weight_kg     Decimal?  @db.Decimal(10, 2)
+  reason              String?
+  notes               String?
+  logged_at           DateTime  @default(now()) @db.Timestamptz(6)
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @db.Timestamptz(6)
+  projects            projects  @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users               users?    @relation(fields: [logged_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([project_id, logged_at(sort: Desc)], map: "ix_project_waste_logs_project")
 }

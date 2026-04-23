@@ -54,6 +54,7 @@ def apply_cascade(
             ("partner_name", "Wedding"),
             ("company_name", "Corporate"),
             ("honoree_name", "Birthday"),
+            ("event_type_other", "Other"),
         ):
             if new_value != need and slots.get(dep, {}).get("filled"):
                 clear_slot(slots, dep)
@@ -84,6 +85,12 @@ def apply_cascade(
             if get_slot_value(slots, "bartender"):
                 fill_slot(slots, "bartender", False)
                 effects.append(("bartender", "set False (Dropoff)"))
+
+    # --- requesting onsite labor implies Onsite service ---
+    elif slot_name in _LABOR_SLOTS:
+        if bool(new_value) and get_slot_value(slots, "service_type") == "Dropoff":
+            fill_slot(slots, "service_type", "Onsite")
+            effects.append(("service_type", "auto-set Onsite (onsite labor requested)"))
 
     # --- bar_service drives bartender + clears bar_package on False ---
     elif slot_name == "bar_service":

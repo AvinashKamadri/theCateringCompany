@@ -102,6 +102,31 @@ def _record_response_usage(response: Any) -> None:
         logger.debug("token usage capture failed: %s", exc)
 
 
+def _is_truncated_json_validation_error(exc: ValidationError) -> bool:
+    """Heuristic: Pydantic failed to parse JSON due to EOF/unterminated string.
+
+    This is almost always caused by the model being cut off at the output-token
+    limit. In that case, retrying with a higher `max_output_tokens` is the most
+    reliable fix.
+    """
+    try:
+        for err in exc.errors() or []:
+            if (err.get("type") or "") == "json_invalid":
+                msg = str(err.get("msg") or "")
+                if "EOF" in msg or "Unterminated" in msg or "while parsing" in msg:
+                    return True
+    except Exception:  # noqa: BLE001
+        return False
+    return False
+
+
+def _bump_max_tokens(max_tokens: int) -> int:
+    # Minimum bump to escape common truncation cases while keeping a hard cap.
+    # 200 -> 1000, 250 -> 1000, 500 -> 2000, 1000 -> 4000, ...
+    bumped = max(max_tokens * 4, max_tokens + 500, 1000)
+    return min(bumped, 8000)
+
+
 def _build_json_schema(schema: Type[T]) -> dict[str, object]:
     """Convert a Pydantic model into a strict JSON schema payload (cached)."""
     cached = _SCHEMA_CACHE.get(schema)
@@ -193,7 +218,7 @@ async def _extract_via_chat_completions(
     user_message: str,
     history: Optional[List[dict]] = None,
     model: Optional[str] = None,
-    max_tokens: int = 500,
+    max_tokens: int = 5000,
 ) -> Optional[T]:
     request_tags = build_openai_request_tags(
         operation="extract_fallback",
@@ -256,7 +281,7 @@ async def extract(
     user_message: str,
     history: Optional[List[dict]] = None,
     model: Optional[str] = None,
-    max_tokens: int = 250,
+    max_tokens: int = 5000,
     max_retries: int = 2,
 ) -> Optional[T]:
     """Extract structured data using the Responses API with strict JSON schema.
@@ -278,6 +303,7 @@ async def extract(
     )
 
     last_exc: Exception | None = None
+    attempt_max_tokens = max_tokens
     for attempt in range(max_retries + 1):
         try:
             increment_llm_call()
@@ -293,7 +319,7 @@ async def extract(
                 instructions=system,
                 input=input_items,
                 text=_text_format_for_schema(schema),
-                max_output_tokens=max_tokens,
+                max_output_tokens=attempt_max_tokens,
                 metadata=request_tags["metadata"],
                 prompt_cache_key=request_tags["prompt_cache_key"],
                 safety_identifier=request_tags["safety_identifier"],
@@ -322,6 +348,16 @@ async def extract(
         except ValidationError as e:
             logger.warning("Validation failed for %s (attempt %d): %s", schema.__name__, attempt + 1, e)
             last_exc = e
+            if attempt < max_retries and _is_truncated_json_validation_error(e):
+                new_max = _bump_max_tokens(attempt_max_tokens)
+                if new_max != attempt_max_tokens:
+                    logger.info(
+                        "Retrying %s with higher max_output_tokens (%d -> %d) due to truncated JSON",
+                        schema.__name__,
+                        attempt_max_tokens,
+                        new_max,
+                    )
+                    attempt_max_tokens = new_max
         except Exception as e:
             logger.warning("Extraction error for %s (attempt %d): %s", schema.__name__, attempt + 1, e)
             last_exc = e
@@ -335,7 +371,7 @@ async def extract(
             user_message=user_message,
             history=history,
             model=_model,
-            max_tokens=max_tokens,
+            max_tokens=attempt_max_tokens,
         )
     except Exception as fallback_exc:
         logger.warning("Chat completions fallback failed for %s: %s", schema.__name__, fallback_exc)

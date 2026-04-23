@@ -424,7 +424,8 @@ def _looks_like_modification_intent(message: str) -> bool:
     # "add X to/in menu" or "add [bar|cake|rentals|drinks|…]" outside a first-fill
     # context. These are mid-flow additions to already-progressed intake, not answers.
     if re.search(
-        r"\badd\b.{0,40}\b(?:bar|bar service|cocktail|appetizer|appetizers|dessert|desserts|"
+        r"\badd\b.{0,60}\b(?:main\s+menu|main\s+dish|main\s+dishes|entree|entrees|dishes|"
+        r"bar|bar service|cocktail|appetizer|appetizers|dessert|desserts|"
         r"rental|rentals|linen|linens|labor|staff|wedding cake|cake|drink|drinks)\b",
         msg,
     ):
@@ -475,6 +476,71 @@ def _quick_route(message: str, state: dict) -> str | None:
 
     phase = state.get("conversation_phase") or PHASE_GREETING
     msg_lower = _normalize_choice(message)
+
+    # Free-text phases (date/venue/guests/service type): if the user starts
+    # the message with an edit verb, it's almost certainly a modification (not
+    # the answer we asked for). Route to modification_tool so the request
+    # doesn't get swallowed by the basic-info autoroute.
+    if phase in _FREE_TEXT_AUTOROUTE_PHASES and msg_lower:
+        if re.match(r"^(?:add|remove|delete|drop|replace|swap|change|update|edit)\b", msg_lower):
+            return "modification_tool"
+
+    # If the user is clearly *updating* a basic-info field while we're in some
+    # other phase (menus, add-ons, etc.), route to modification_tool so it can
+    # apply the update without phase-lock swallowing it.
+    if phase not in _FREE_TEXT_AUTOROUTE_PHASES and msg_lower:
+        mentions_basic_update = bool(
+            re.search(
+                r"\b(?:venue|location|guest count|guests|headcount|attendees|"
+                r"event date|date is|service type|drop[- ]?off|on[- ]?site)\b",
+                msg_lower,
+            )
+        )
+        # Avoid routing short confirmations ("ok", "yes") as modifications.
+        if mentions_basic_update and len(msg_lower) >= 8:
+            return "modification_tool"
+
+    # Modification intent should route to modification_tool even in locked phases
+    # (except for "add" language during menu selection, which usually means "select").
+    if msg_lower and _looks_like_modification_intent(message):
+        if phase in {PHASE_TRANSITION, PHASE_COCKTAIL, PHASE_MAIN_MENU, PHASE_DESSERT}:
+            if re.search(r"\b(?:remove|delete|drop|replace|swap|change|update|edit|redo|reselect|start over)\b", msg_lower):
+                return "modification_tool"
+        else:
+            return "modification_tool"
+
+    # Partner/company/honoree name updates should not be swallowed by basic-info
+    # phases like venue/date/guest_count. If the user explicitly says which name
+    # they are updating, treat it as a modification.
+    if phase != PHASE_CONDITIONAL_FOLLOWUP and msg_lower:
+        if re.search(r"\b(?:partner|fianc[eé]|fiancee|company|honoree)\b.{0,20}\bname\b", msg_lower):
+            return "modification_tool"
+
+    # Deterministic replace/swap commands should always go to modification_tool.
+    # Prevents menu phases (e.g., ask_meal_style) from accidentally eating the
+    # request and just repeating the prior question.
+    if msg_lower:
+        has_replace = bool(re.search(r"\breplace\b", msg_lower)) and " with " in msg_lower
+        has_swap = bool(re.search(r"\bswap\b", msg_lower)) and bool(re.search(r"\b(?:with|for)\b", msg_lower))
+        if has_replace or has_swap:
+            return "modification_tool"
+
+    # If the event type is currently TBD and the user later states the event
+    # type in free text (e.g. "wedding", "birthday"), route to modification_tool
+    # so it can update event_type mid-flow.
+    current_event_type = str(get_slot_value(slots, "event_type") or "").strip().lower()
+    if current_event_type.startswith("tbd"):
+        if (
+            msg_lower
+            and "," not in msg_lower
+            and not re.search(r"\d", msg_lower)
+            and len(msg_lower) <= 40
+            and (
+                msg_lower in {"wedding", "birthday", "bday", "corporate", "company", "office"}
+                or msg_lower.startswith(("event is ", "event type is ", "it's a ", "it is a "))
+            )
+        ):
+            return "modification_tool"
 
     # Review recap: "change" always goes to modification_tool so the user can
     # pick what to modify. Never gate on finalization state — if the user says
@@ -561,7 +627,7 @@ _META_COMMAND_MARKERS = (
 # appetizers"). In that case we defer to the LLM router so it can split intent.
 _OUT_OF_PHASE_MARKERS = frozenset({
     "appetizer", "appetizers", "starter", "starters",
-    "main dish", "main dishes", "entree", "entrees",
+    "main dish", "main dishes", "entree", "entrees", "main menu",
     "dessert", "desserts",
     "bar service", "bar package", "drinks",
     "tableware", "utensils", "linens", "rentals",
@@ -671,6 +737,22 @@ async def route(
         )
 
     # Fast path — skip LLM for obvious continuations and modification intents.
+    # Honor structured answers to the most recent assistant question, even if
+    # `conversation_phase` drifted (common after modification resume prompts).
+    # Prevents replies like "drop-off" from being mis-routed to modification_tool
+    # and accidentally reopening an unrelated section.
+    msg_norm = _normalize_choice(message)
+    if msg_norm and history:
+        last_ai = next((m for m in reversed(history) if getattr(m, "type", "") == "ai"), None)
+        last_text = _normalize_choice(str(getattr(last_ai, "content", "") or "")) if last_ai else ""
+        if msg_norm in _SERVICE_TYPE_STRUCTURED_VALUES and ("onsite" in last_text and "drop" in last_text):
+            from agent.models import ToolCall as _TC
+            return OrchestratorDecision(
+                action="tool_call",
+                tool_calls=[_TC(tool_name="basic_info_tool", reason="recent_prompt:service_type")],
+                confidence=1.0,
+            )
+
     quick = _quick_route(message, state)
     if quick:
         from agent.models import ToolCall as _TC
@@ -696,7 +778,7 @@ async def route(
                 user_message=user_block,
                 history=_history_for_llm(history),
                 model=MODEL_ROUTER,
-                max_tokens=180,
+                max_tokens=5000,
             )
         )
     with trace_scope(route_stage="decision"):
@@ -707,7 +789,7 @@ async def route(
                 user_message=user_block,
                 history=_history_for_llm(history),
                 model=MODEL_ROUTER,
-                max_tokens=200,
+                max_tokens=5000,
             )
         )
 

@@ -14,6 +14,7 @@ Key rules:
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from langchain_core.messages import BaseMessage
@@ -29,15 +30,18 @@ from agent.state import (
     PHASE_EVENT_TYPE,
     PHASE_GREETING,
     PHASE_GUEST_COUNT,
+    PHASE_REVIEW,
     PHASE_SERVICE_TYPE,
     PHASE_TRANSITION,
     PHASE_VENUE,
     PHASE_WEDDING_CAKE,
+    clear_slot,
     fill_slot,
     get_slot_value,
     is_filled,
 )
 from agent.tools.base import ToolResult, history_for_llm
+from agent.modification_picker import make_modification_picker_result
 from agent.tools.structured_choice import normalize_structured_choice
 
 
@@ -62,7 +66,8 @@ _SYSTEM_PROMPT = (
     "- Never invent data.\n"
     "- name: first+last if both given, else whatever is given.\n"
     "- event_type: map 'wedding'->Wedding, 'birthday/bday'->Birthday, "
-    "'corporate/company/office'->Corporate, anything else custom->Other.\n"
+    "'corporate/company/office'->Corporate. Do NOT invent 'Other'.\n"
+    "- event_type_other: only extract if explicitly requested.\n"
     "- event_date: accept any format ('may 5', '05/19/27'), parse to YYYY-MM-DD. "
     "MUST be a future date. Reject past dates by returning None for this field.\n"
     "- guest_count: extract number only ('around 100' -> 100). Must be > 0.\n"
@@ -105,6 +110,28 @@ _WEDDING_CAKE_FILLINGS = {
 _WEDDING_CAKE_BUTTERCREAMS = {
     "signature", "chocolate", "cream cheese frosting",
 }
+
+
+def _normalize_wedding_cake_choice(raw: str, allowed: set[str]) -> str | None:
+    msg = (raw or "").strip().lower().strip(" .,!?")
+    if not msg:
+        return None
+    if msg in allowed:
+        return msg
+    # Robust partial matching so "cream cheese" or "cream-cheese frosting" works.
+    simplified = re.sub(r"[^a-z0-9\s]+", " ", msg).strip()
+    simplified = re.sub(r"\s+", " ", simplified)
+    for option in allowed:
+        if option in simplified:
+            return option
+    # Extra friendly aliases
+    if "cream cheese" in simplified and any("cream cheese" in o for o in allowed):
+        for option in allowed:
+            if "cream cheese" in option:
+                return option
+    if "buttercream" in simplified and "butter cream" in allowed:
+        return "butter cream"
+    return None
 
 
 def _display_structured_choice(raw_message: str, normalized: str) -> str:
@@ -194,9 +221,11 @@ def _next_phase(slots: dict) -> str:
     Flow order:
       1. name → email → phone → event_type   (always first)
       2. conditional (partner/company/honoree name)
-      3. appetizers → mains → desserts         (jump to menu early)
-      4. wedding_cake → event_date → venue → guest_count → service_type
-      5. PHASE_DRINKS_BAR                      (all basic info done)
+      3. appetizers → mains → desserts           (menu)
+      4. wedding_cake                            (weddings only)
+      5. service_type                            (after desserts)
+      6. event_date → venue → guest_count
+      7. PHASE_DRINKS_BAR                        (all basic info done)
     """
     # 1. Core identity — collected before anything else
     if not is_filled(slots, "name"):
@@ -216,6 +245,7 @@ def _next_phase(slots: dict) -> str:
         return PHASE_CONDITIONAL_FOLLOWUP
     if event_type == "Birthday" and not is_filled(slots, "honoree_name"):
         return PHASE_CONDITIONAL_FOLLOWUP
+    # Custom event types are stored directly in event_type; no extra follow-up.
 
     # 3. Jump to menu
     if not _menu_is_complete(slots):
@@ -224,17 +254,72 @@ def _next_phase(slots: dict) -> str:
     # 4. Post-menu basic info
     if event_type == "Wedding" and _wedding_cake_stage(slots) is not None:
         return PHASE_WEDDING_CAKE
+    if not is_filled(slots, "service_type"):
+        return PHASE_SERVICE_TYPE
     if not is_filled(slots, "event_date"):
         return PHASE_EVENT_DATE
     if not is_filled(slots, "venue"):
         return PHASE_VENUE
     if not is_filled(slots, "guest_count"):
         return PHASE_GUEST_COUNT
-    if not is_filled(slots, "service_type"):
-        return PHASE_SERVICE_TYPE
 
-    # 5. All basic info done — hand off to add-ons
+    # 7. All basic info done — hand off to add-ons
     return PHASE_DRINKS_BAR
+
+
+def _next_phase_from_current(current_phase: str | None, slots: dict) -> str:
+    """Compute next phase without regressing earlier intake steps.
+
+    In normal flows, phases advance sequentially. But when resuming from a
+    persisted state (or when a tool is called directly in tests), we should not
+    jump backwards to re-ask name/email/phone if the caller is already working
+    on a later phase like venue or wedding cake.
+    """
+    phase = current_phase or PHASE_GREETING
+    if phase == PHASE_GREETING:
+        return _next_phase(slots)
+
+    event_type = get_slot_value(slots, "event_type")
+
+    if phase in {PHASE_EVENT_TYPE, PHASE_CONDITIONAL_FOLLOWUP}:
+        if not is_filled(slots, "event_type"):
+            return PHASE_EVENT_TYPE
+        if event_type == "Wedding" and not is_filled(slots, "partner_name"):
+            return PHASE_CONDITIONAL_FOLLOWUP
+        if event_type == "Corporate" and not is_filled(slots, "company_name"):
+            return PHASE_CONDITIONAL_FOLLOWUP
+        if event_type == "Birthday" and not is_filled(slots, "honoree_name"):
+            return PHASE_CONDITIONAL_FOLLOWUP
+        # Custom event types are stored directly in event_type; no extra follow-up.
+        if not _menu_is_complete(slots):
+            return PHASE_TRANSITION
+
+    if phase == PHASE_WEDDING_CAKE:
+        if event_type == "Wedding" and _wedding_cake_stage(slots) is not None:
+            return PHASE_WEDDING_CAKE
+        # If cake is complete/declined, continue forward to post-menu basics.
+
+    if phase == PHASE_TRANSITION:
+        if not _menu_is_complete(slots):
+            return PHASE_TRANSITION
+        # Menu complete — fall through to post-menu ordering below.
+
+    if phase in {PHASE_EVENT_DATE, PHASE_VENUE, PHASE_GUEST_COUNT, PHASE_SERVICE_TYPE, PHASE_WEDDING_CAKE}:
+        if phase == PHASE_WEDDING_CAKE and event_type == "Wedding" and _wedding_cake_stage(slots) is not None:
+            return PHASE_WEDDING_CAKE
+        if event_type == "Wedding" and _wedding_cake_stage(slots) is not None:
+            return PHASE_WEDDING_CAKE
+        if not is_filled(slots, "service_type"):
+            return PHASE_SERVICE_TYPE
+        if not is_filled(slots, "event_date"):
+            return PHASE_EVENT_DATE
+        if not is_filled(slots, "venue"):
+            return PHASE_VENUE
+        if not is_filled(slots, "guest_count"):
+            return PHASE_GUEST_COUNT
+        return PHASE_DRINKS_BAR
+
+    return _next_phase(slots)
 
 
 class BasicInfoTool:
@@ -331,31 +416,125 @@ class BasicInfoTool:
                     filled_this_turn.append(("__wedding_cake_gate", False))
                     filled_this_turn.append(("wedding_cake", "none"))
                     _skip_extraction = True
-            elif cake_stage == "ask_wedding_cake_flavor" and _msg_lower in _WEDDING_CAKE_FLAVORS:
-                flavor = _display_structured_choice(message, _msg_lower)
-                fill_slot(slots, "__wedding_cake_flavor", flavor)
-                filled_this_turn.append(("__wedding_cake_flavor", flavor))
-                _skip_extraction = True
-            elif cake_stage == "ask_wedding_cake_filling" and _msg_lower in _WEDDING_CAKE_FILLINGS:
-                filling = _display_structured_choice(message, _msg_lower)
-                fill_slot(slots, "__wedding_cake_filling", filling)
-                filled_this_turn.append(("__wedding_cake_filling", filling))
-                _skip_extraction = True
-            elif cake_stage == "ask_wedding_cake_buttercream" and _msg_lower in _WEDDING_CAKE_BUTTERCREAMS:
-                flavor = str(get_slot_value(slots, "__wedding_cake_flavor") or "").strip()
-                filling = str(get_slot_value(slots, "__wedding_cake_filling") or "").strip()
-                buttercream = _display_structured_choice(message, _msg_lower)
-                fill_slot(slots, "__wedding_cake_buttercream", buttercream)
-                fill_slot(
-                    slots,
-                    "wedding_cake",
-                    f'2 Tier 6" & 8" - {flavor}, {filling}, {buttercream}',
-                )
-                filled_this_turn.append(("__wedding_cake_buttercream", buttercream))
-                filled_this_turn.append(("wedding_cake", get_slot_value(slots, "wedding_cake")))
-                _skip_extraction = True
+            elif cake_stage == "ask_wedding_cake_flavor":
+                normalized = _normalize_wedding_cake_choice(_msg_lower, _WEDDING_CAKE_FLAVORS)
+                if not normalized:
+                    _skip_extraction = False
+                else:
+                    flavor = _display_structured_choice(message, normalized)
+                    fill_slot(slots, "__wedding_cake_flavor", flavor)
+                    filled_this_turn.append(("__wedding_cake_flavor", flavor))
+                    _skip_extraction = True
+            elif cake_stage == "ask_wedding_cake_filling":
+                normalized = _normalize_wedding_cake_choice(_msg_lower, _WEDDING_CAKE_FILLINGS)
+                if not normalized:
+                    _skip_extraction = False
+                else:
+                    filling = _display_structured_choice(message, normalized)
+                    fill_slot(slots, "__wedding_cake_filling", filling)
+                    filled_this_turn.append(("__wedding_cake_filling", filling))
+                    _skip_extraction = True
+            elif cake_stage == "ask_wedding_cake_buttercream":
+                normalized = _normalize_wedding_cake_choice(_msg_lower, _WEDDING_CAKE_BUTTERCREAMS)
+                if not normalized:
+                    _skip_extraction = False
+                else:
+                    flavor = str(get_slot_value(slots, "__wedding_cake_flavor") or "").strip()
+                    filling = str(get_slot_value(slots, "__wedding_cake_filling") or "").strip()
+                    buttercream = _display_structured_choice(message, normalized)
+                    fill_slot(slots, "__wedding_cake_buttercream", buttercream)
+                    fill_slot(
+                        slots,
+                        "wedding_cake",
+                        f'2 Tier 6" & 8" - {flavor}, {filling}, {buttercream}',
+                    )
+                    filled_this_turn.append(("__wedding_cake_buttercream", buttercream))
+                    filled_this_turn.append(("wedding_cake", get_slot_value(slots, "wedding_cake")))
+                    _skip_extraction = True
 
         extracted = None
+        if (
+            state.get("conversation_phase") == PHASE_EVENT_TYPE
+            and not is_filled(slots, "event_type")
+            and get_slot_value(slots, "__awaiting_custom_event_type") is not True
+        ):
+            _EVENT_TYPE_MAP = {
+                "wedding": "Wedding",
+                "birthday": "Birthday",
+                "bday": "Birthday",
+                "corporate": "Corporate",
+                "company": "Corporate",
+                "office": "Corporate",
+            }
+            _CONFIRM_EVENT_TYPE_VALUES = {
+                "confirm on call",
+                "confirm later",
+                "tbd",
+                "skip",
+                "tbd - confirm on call",
+            }
+
+            if _msg_lower in _CONFIRM_EVENT_TYPE_VALUES:
+                fill_slot(slots, "event_type", "TBD - Confirm on call")
+                filled_this_turn.append(("event_type", "TBD - Confirm on call"))
+                cascade_effects.extend(apply_cascade("event_type", None, "TBD - Confirm on call", slots))
+                _skip_extraction = True
+            elif _msg_lower in {"other", "others"}:
+                # Two-step "Other": set an internal marker so the next prompt
+                # asks what the event actually is (or confirm on call).
+                fill_slot(slots, "__awaiting_custom_event_type", True)
+                filled_this_turn.append(("__awaiting_custom_event_type", True))
+                _skip_extraction = True
+            elif _msg_lower in _EVENT_TYPE_MAP:
+                val = _EVENT_TYPE_MAP[_msg_lower]
+                fill_slot(slots, "event_type", val)
+                filled_this_turn.append(("event_type", val))
+                cascade_effects.extend(apply_cascade("event_type", None, val, slots))
+                _skip_extraction = True
+            else:
+                # Free-text event type: store verbatim instead of forcing "Other".
+                val = (message or "").strip()
+                if val and _msg_lower not in _BASIC_FOLLOWUP_FILLER:
+                    fill_slot(slots, "event_type", val)
+                    filled_this_turn.append(("event_type", val))
+                    cascade_effects.extend(apply_cascade("event_type", None, val, slots))
+                    _skip_extraction = True
+
+        # "Other" follow-up: user is now specifying the custom event label.
+        if (
+            state.get("conversation_phase") == PHASE_EVENT_TYPE
+            and not is_filled(slots, "event_type")
+            and get_slot_value(slots, "__awaiting_custom_event_type") is True
+            and not _skip_extraction
+        ):
+            # Accept confirm-on-call tokens
+            _CONFIRM_EVENT_TYPE_VALUES = {
+                "confirm on call",
+                "confirm later",
+                "tbd",
+                "skip",
+                "tbd - confirm on call",
+            }
+            if _msg_lower in _CONFIRM_EVENT_TYPE_VALUES:
+                fill_slot(slots, "event_type", "TBD - Confirm on call")
+                filled_this_turn.append(("event_type", "TBD - Confirm on call"))
+                cascade_effects.extend(apply_cascade("event_type", None, "TBD - Confirm on call", slots))
+                clear_slot(slots, "__awaiting_custom_event_type")
+                filled_this_turn.append(("__awaiting_custom_event_type", None))
+                _skip_extraction = True
+            else:
+                # Ignore unhelpful repeats like "Other"
+                if _msg_lower in {"other", "others"} or not (message or "").strip():
+                    _skip_extraction = True
+                else:
+                    val = (message or "").strip()
+                    fill_slot(slots, "event_type", val)
+                    filled_this_turn.append(("event_type", val))
+                    cascade_effects.extend(apply_cascade("event_type", None, val, slots))
+                    clear_slot(slots, "__awaiting_custom_event_type")
+                    filled_this_turn.append(("__awaiting_custom_event_type", None))
+                    _skip_extraction = True
+
         if not _skip_extraction:
             extracted = await extract(
                 schema=EventDetailsExtraction,
@@ -372,6 +551,8 @@ class BasicInfoTool:
                 extracted_values,
                 event_type=effective_event_type,
             )
+            # event_type_other is deprecated; avoid accidentally populating it.
+            extracted_values.pop("event_type_other", None)
             allowed = _PHASE_ALLOWED_FIELDS.get(state.get("conversation_phase"), [])
             pre_filter_had_values = bool(extracted_values)
             extracted_values = filter_extraction_fields(extracted_values, allowed)
@@ -392,8 +573,26 @@ class BasicInfoTool:
             if state.get("conversation_phase") == PHASE_EVENT_DATE:
                 rejected_date = True
 
-        next_phase = _next_phase(slots)
+        next_phase = _next_phase_from_current(state.get("conversation_phase"), slots)
         state["conversation_phase"] = next_phase
+
+        # If the user initiated this slot change from the final review recap,
+        # they usually want to quickly edit multiple fields. Return them to the
+        # modification picker instead of continuing the normal flow.
+        marker = get_slot_value(slots, "__return_to_review_after_edit")
+        if isinstance(marker, dict):
+            slot = str(marker.get("slot") or "").strip()
+            return_to = str(marker.get("return_to") or "review").strip().lower()
+            filled_slots = {k for k, _ in filled_this_turn}
+            if slot and return_to == "picker" and slot in filled_slots:
+                clear_slot(slots, "__return_to_review_after_edit")
+                return make_modification_picker_result(
+                    slots=slots,
+                    state=state,
+                    prompt="Anything else you want to change?",
+                    include_done=True,
+                    origin_phase=PHASE_REVIEW,
+                )
 
         response_context = {
             "tool": self.name,
@@ -428,6 +627,11 @@ def _phase_to_question(phase: str, slots: dict) -> str:
         if not is_filled(slots, "phone"):
             return "ask_phone"
     if phase == PHASE_EVENT_TYPE:
+        # "Other" is a 2-step capture: user clicks "Other", then we ask what
+        # kind of event it actually is (or "confirm on call"). We keep the
+        # eventual label in `event_type` directly.
+        if get_slot_value(slots, "__awaiting_custom_event_type") is True and not is_filled(slots, "event_type"):
+            return "ask_other_event_type"
         return "ask_event_type"
     if phase == PHASE_CONDITIONAL_FOLLOWUP:
         if event_type == "Wedding":
@@ -466,6 +670,15 @@ def _input_hint_for_phase(phase: str, slots: dict | None = None) -> dict | None:
         if not is_filled(_slots, "phone"):
             return {"type": "phone"}
     if phase == PHASE_EVENT_TYPE:
+        # If the user chose "Other", switch to a free-text follow-up with an
+        # optional "confirm on call" chip.
+        if get_slot_value(slots or {}, "__awaiting_custom_event_type") is True and not is_filled(slots or {}, "event_type"):
+            return {
+                "type": "options",
+                "options": [
+                    {"value": "confirm on call", "label": "Confirm on call"},
+                ],
+            }
         return {
             "type": "options",
             "options": [
@@ -473,6 +686,7 @@ def _input_hint_for_phase(phase: str, slots: dict | None = None) -> dict | None:
                 {"value": "Birthday", "label": "Birthday"},
                 {"value": "Corporate", "label": "Corporate"},
                 {"value": "Other", "label": "Other"},
+                {"value": "confirm on call", "label": "Confirm on call"},
             ],
         }
     if phase == PHASE_SERVICE_TYPE:

@@ -302,6 +302,11 @@ _BASIC_INFO_PROMPTS = {
         "Who is the event for?",
         "Whose celebration is this for?",
     ),
+    "ask_other_event_type": (
+        "Please specify what kind of event it is (or say confirm on call).",
+        "What kind of event is it? You can also say confirm on call.",
+        "What should I label the event as? (Or say confirm on call.)",
+    ),
     "ask_wedding_cake": (
         "Would you like to include a wedding cake?",
         "Do you want to add a wedding cake?",
@@ -323,14 +328,14 @@ _BASIC_INFO_PROMPTS = {
         "What buttercream would you like on the cake?",
     ),
     "ask_service_type": (
-        "Would you like drop-off delivery or full onsite service?",
-        "Do you want drop-off service or a full onsite setup with staff?",
-        "Should I note drop-off delivery or full onsite service?",
+        "Would you like drop-off delivery or full onsite service? (Reply drop-off or onsite.)",
+        "Do you want drop-off or onsite service? (Reply drop-off or onsite.)",
+        "Service: drop-off or onsite? (Reply drop-off or onsite.)",
     ),
     "ask_event_date": (
-        "What is the event date?",
-        "When is the event?",
-        "What date should I put down for the event?",
+        "What date should I put down for the event? (Future date please.)",
+        "What is the event date? (Future date â€” YYYY-MM-DD works.)",
+        "When is the event? (Future date please.)",
     ),
     "ask_venue": (
         "Where is the venue? If it is still TBD, you can say confirm venue on call.",
@@ -338,9 +343,9 @@ _BASIC_INFO_PROMPTS = {
         "Where will the event be held? If the venue is still TBD, you can say confirm venue on call.",
     ),
     "ask_guest_count": (
-        "About how many guests are you expecting?",
-        "What guest count should I plan around?",
-        "Roughly how many guests are you expecting?",
+        "About how many guests are you expecting? (If TBD, you can say TBD.)",
+        "What guest count should I plan around? (Number, or say TBD.)",
+        "Roughly how many guests are you expecting? (If TBD, say TBD.)",
     ),
     "ask_email": (
         "What is the best email to reach you at?",
@@ -371,9 +376,9 @@ _MENU_SELECTION_PROMPTS = {
         "Here is the appetizer menu. Pick as many as you'd like.",
     ),
     "ask_appetizer_style": (
-        "How would you like the appetizers served: passed around or set up at a station?",
-        "Should the appetizers be passed around or served from a station?",
         "How should we serve the appetizers - passed or station?",
+        "Appetizer setup: passed or station?",
+        "Do you want the appetizers passed around or set up at a station?",
     ),
     "show_main_menu": (
         "Here is the main menu - pick 3 to 5 dishes.",
@@ -404,19 +409,19 @@ _MENU_SELECTION_PROMPTS = {
 
 _ADD_ONS_PROMPTS = {
     "ask_drinks_interest": (
-        "Would you like to add drinks or bar service for the event?",
-        "Do you want to include drinks or bar service?",
-        "Should we add drinks, bar service, or both to the event?",
+        "Do you want to add drinks/bar service? (Reply yes or no.)",
+        "Should I include drinks or bar service? (Reply yes or no.)",
+        "Do you want drinks/bar service, or skip both? (Reply yes or no.)",
     ),
     "ask_drinks_setup": (
-        "Would you like coffee service, bar service, both, or neither?",
-        "For drinks, should I note coffee service, bar service, both, or neither?",
-        "What beverage setup do you want - coffee service, bar service, both, or neither?",
+        "For drinks, do you want coffee service, bar service, both, or neither?",
+        "Should I note coffee service, bar service, both, or neither?",
+        "Coffee service, bar service, both, or neither?",
     ),
     "ask_bar_package": (
-        "Which bar package would you like?",
-        "What bar package should I note for the event?",
-        "Which bar package feels right for this event?",
+        "Which bar package do you want: beer & wine, beer/wine + 2 signature drinks, or full open bar?",
+        "What bar package should I note: beer & wine, beer/wine + 2 signature drinks, or full open bar?",
+        "Bar package: beer & wine, beer/wine + 2 signature drinks, or full open bar?",
     ),
     "ask_tableware_gate": (
         "Would you like standard tableware, an upgrade, or no tableware?",
@@ -449,9 +454,9 @@ _ADD_ONS_PROMPTS = {
         "Which rental items should I note?",
     ),
     "ask_labor_services": (
-        "Which service staff would you like us to handle? Select everything you need.",
-        "Pick any event labor you want us to cover, and you can choose more than one.",
-        "Which labor services should I include? Choose all that apply.",
+        "Do you need any onsite help like ceremony setup, table setup/preset, cleanup, or trash removal? Choose all that apply.",
+        "Which labor/services should we cover onsite (setup, preset, cleanup, trash)? Choose all that apply.",
+        "What onsite labor should I include (ceremony setup, table setup, cleanup, trash removal)? Choose all that apply.",
     ),
     "transition_to_special_requests": (
         "Before we wrap up, do you have any special requests or notes?",
@@ -515,7 +520,7 @@ def _select_variant(options: tuple[str, ...], seed: str | None = None) -> str:
 
 
 def basic_info_prompt(target: str, seed: str | None = None) -> str:
-    return _select_variant(_BASIC_INFO_PROMPTS.get(target, ("Could you tell me a bit more?",)), seed)
+    return _select_variant(_BASIC_INFO_PROMPTS.get(target, ("Could you clarify that a bit?",)), seed)
 
 
 def menu_selection_prompt(target: str, seed: str | None = None) -> str:

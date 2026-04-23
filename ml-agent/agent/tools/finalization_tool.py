@@ -429,6 +429,7 @@ def _client_facing_summary(slots: dict) -> dict:
         "email": get_slot_value(slots, "email"),
         "phone": get_slot_value(slots, "phone"),
         "event_type": get_slot_value(slots, "event_type"),
+        "event_type_other": get_slot_value(slots, "event_type_other"),
         "event_date": get_slot_value(slots, "event_date"),
         "venue": get_slot_value(slots, "venue"),
         "guest_count": get_slot_value(slots, "guest_count"),
@@ -485,6 +486,7 @@ _UTENSILS_PRETTY = {
     "standard_plastic": "standard utensils",
     "eco_biodegradable": "eco-friendly utensils",
     "bamboo": "bamboo utensils",
+    "no_utensils": "no utensils",
 }
 
 _SERVICE_STYLE_PRETTY = {
@@ -647,9 +649,31 @@ def _render_review_recap(s: dict) -> str:
     name = s.get("name") or "there"
     lines: list[str] = [f"Here's the recap{', ' + name if name != 'there' else ''}:"]
 
+    def _canonical_event_type(et_raw: str) -> tuple[str, str]:
+        """Return (key, display) where key is wedding/birthday/corporate/other/free-text."""
+        et_raw = (et_raw or "").strip()
+        if not et_raw:
+            return "", ""
+        low = et_raw.lower().strip()
+        if low in {"wedding", "weddimg", "weding", "weddding"} or low.startswith("wedd"):
+            return "wedding", "Wedding"
+        if low in {"birthday", "bday"} or "birthday" in low or low.startswith("birth"):
+            return "birthday", "Birthday"
+        if low in {"corporate", "corp"} or "corporate" in low or "company" in low:
+            return "corporate", "Corporate"
+        if low in {"other", "others"}:
+            return "other", "Other"
+        return low, et_raw
+
     parts = []
+    event_type_key = ""
     if s.get("event_type"):
-        parts.append(str(s["event_type"]))
+        et = str(s["event_type"])
+        event_type_key, et_display = _canonical_event_type(et)
+        if (et_display == "Other" or et == "Other") and s.get("event_type_other"):
+            parts.append(f"Other ({s['event_type_other']})")
+        else:
+            parts.append(et_display or et)
     if s.get("event_date"):
         parts.append(f"on {s['event_date']}")
     if s.get("venue"):
@@ -664,12 +688,14 @@ def _render_review_recap(s: dict) -> str:
     if s.get("phone"):
         lines.append(f"• Phone: {s['phone']}")
 
+    if not event_type_key:
+        event_type_key, _ = _canonical_event_type(str(s.get("event_type") or ""))
     event_type = str(s.get("event_type") or "").lower()
-    if "wedding" in event_type and s.get("partner_name"):
+    if event_type_key == "wedding" and s.get("partner_name"):
         lines.append(f"• Partner: {s['partner_name']}")
-    if "corporate" in event_type and s.get("company_name"):
+    if event_type_key == "corporate" and s.get("company_name"):
         lines.append(f"• Company: {s['company_name']}")
-    if "birthday" in event_type and s.get("honoree_name"):
+    if event_type_key == "birthday" and s.get("honoree_name"):
         lines.append(f"• Honoree: {s['honoree_name']}")
 
     service = (s.get("service_type") or "").lower()
@@ -684,7 +710,7 @@ def _render_review_recap(s: dict) -> str:
     elif meal == "buffet":
         lines.append("• Meal served buffet-style")
 
-    if "wedding" in event_type:
+    if event_type_key == "wedding":
         service_style = str(s.get("service_style") or "").lower()
         if service_style in _SERVICE_STYLE_PRETTY:
             lines.append(f"• Service style: {_SERVICE_STYLE_PRETTY[service_style]}")

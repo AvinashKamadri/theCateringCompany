@@ -128,6 +128,35 @@ async def test_extract_falls_back_to_chat_completions_when_responses_fails(monke
 
 
 @pytest.mark.asyncio
+async def test_extract_retries_with_higher_max_tokens_on_truncated_json(monkeypatch):
+    calls: list[int] = []
+
+    async def fake_create(**kwargs):
+        calls.append(int(kwargs["max_output_tokens"]))
+        # First attempt: truncated JSON (common when max_output_tokens too low)
+        if len(calls) == 1:
+            return SimpleNamespace(output_text='{"value":"oops')
+        # Second attempt: valid JSON
+        return SimpleNamespace(output_text='{"value":"ok"}')
+
+    monkeypatch.setattr(client_module._raw_async.responses, "create", fake_create)
+
+    result = await client_module.extract(
+        schema=_MiniSchema,
+        system="You are strict.",
+        user_message="hello",
+        model="gpt-test",
+        max_tokens=200,
+        max_retries=1,
+    )
+
+    assert result == _MiniSchema(value="ok")
+    assert calls[0] == 200
+    assert calls[1] > calls[0]
+    assert calls[1] >= 1000
+
+
+@pytest.mark.asyncio
 async def test_generate_text_falls_back_to_chat_completions_when_responses_fails(monkeypatch):
     async def fail_create(**kwargs):
         raise RuntimeError("responses unavailable")

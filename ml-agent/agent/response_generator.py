@@ -43,6 +43,7 @@ _TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
     "ask_partner_name": ("partner", "spouse", "fiance"),
     "ask_company_name": ("company", "organization", "business"),
     "ask_honoree_name": ("who", "honoree", "celebrating", "celebration", "for"),
+    "ask_other_event_type": ("event", "kind", "type", "planning", "confirm"),
     "ask_service_type": ("drop", "onsite", "on-site", "on site", "service", "staff", "setup"),
     "ask_event_date": ("date", "when", "day"),
     "ask_venue": ("venue", "where", "location", "held", "address"),
@@ -280,6 +281,9 @@ _TEMPLATE_ONLY_TARGETS = frozenset({
     # Flavor/filling/buttercream are removed so the LLM can say
     # "Funfetti — great pick! What filling would you like?" etc.
     "ask_wedding_cake",
+    "ask_wedding_cake_flavor",
+    "ask_wedding_cake_filling",
+    "ask_wedding_cake_buttercream",
     # Menu transitions and gates
     "ask_service_style",
     "ask_dessert_gate",
@@ -309,11 +313,22 @@ _TEMPLATE_ONLY_TARGETS = frozenset({
 
 
 def _should_force_direct_prompt(ctx: dict[str, Any]) -> bool:
-    return str(ctx.get("next_question_target") or "") in _TEMPLATE_ONLY_TARGETS
+    target = str(ctx.get("next_question_target") or "")
+    if target in _TEMPLATE_ONLY_TARGETS:
+        return True
+    # Edge-case handling: if a basic-info validator rejects the user's answer,
+    # re-ask deterministically instead of letting the response LLM generate a
+    # vague "clarify" message.
+    if ctx.get("tool") == "basic_info_tool" and (ctx.get("rejected_past_date") or ctx.get("wrong_field_for_phase")):
+        return True
+    return False
 
 
 def _direct_prompt_text(ctx: dict[str, Any], state: dict[str, Any] | None = None) -> str:
     target = str(ctx.get("next_question_target") or "")
+    if ctx.get("tool") == "basic_info_tool" and ctx.get("rejected_past_date"):
+        # Keep this message explicit â€” dates are high-friction and easy to misunderstand.
+        return "That date is in the past. What date should I put down for the event? (Future date â€” YYYY-MM-DD works.)"
     if target == "ask_service_style":
         return (
             "For the wedding, would you like to have a cocktail hour before the main meal, "
@@ -470,6 +485,7 @@ def _modification_value_text(target: str, value: Any) -> str:
             "standard_plastic": "standard plastic",
             "eco_biodegradable": "eco / biodegradable",
             "bamboo": "bamboo",
+            "no_utensils": "no utensils",
         }.get(text.lower(), text)
     return text
 
@@ -492,7 +508,9 @@ def _modification_current_state_sentence(
     pretty_value = _modification_value_text(target, new_value)
     if target in {"special_requests", "dietary_concerns", "additional_notes"}:
         return f"Your {label} now read: {pretty_value}."
-    return f"Your {label} is now {pretty_value}."
+    # For scalar slots, avoid duplicating the acknowledgement:
+    # "I updated your X to Y. Your X is now Y."
+    return ""
 
 
 def _additional_modification_sentences(changes: Any) -> list[str]:

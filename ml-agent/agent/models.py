@@ -29,7 +29,7 @@ BarPackage = Literal["beer_wine", "beer_wine_signature", "full_open_bar"]
 Tableware = Literal[
     "standard_disposable", "silver_disposable", "gold_disposable", "china", "no_tableware"
 ]
-Utensils = Literal["standard_plastic", "eco_biodegradable", "bamboo"]
+Utensils = Literal["standard_plastic", "eco_biodegradable", "bamboo", "no_utensils"]
 TravelFee = Literal["none", "tier1_150", "tier2_250", "tier3_375plus"]
 ModificationAction = Literal["add", "remove", "replace", "reopen"]
 SelectionGroundingStatus = Literal["resolved", "ambiguous", "no_match"]
@@ -51,6 +51,7 @@ class EventDetailsExtraction(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     event_type: Optional[EventType] = None
+    event_type_other: Optional[str] = None
     event_date: Optional[datetime.date] = None
     venue: Optional[str] = None
     guest_count: Optional[int] = None

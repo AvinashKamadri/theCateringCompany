@@ -5,7 +5,8 @@ Owns drinks, bar_service, bar_package, bartender (auto), coffee_service,
 tableware, utensils, linens, rentals, and all labor_* slots + travel_fee.
 
 Enforced rules:
-- `service_type == Dropoff` → ALL labor_* slots skipped entirely.
+- Labor services are always asked once in add-ons. If the user selected Dropoff,
+  selecting any onsite labor implies switching to Onsite service.
 - `bar_service == True` → `bartender` auto-True, non-optional, cannot be unset.
 - `meal_style == plated` → auto-note china in tableware (cascade).
 - `drinks == False` → skip bar sub-questions.
@@ -23,6 +24,7 @@ from agent.state import (
     PHASE_DRINKS_BAR,
     PHASE_LABOR,
     PHASE_RENTALS,
+    PHASE_REVIEW,
     PHASE_SPECIAL_REQUESTS,
     PHASE_TABLEWARE,
     clear_slot,
@@ -31,6 +33,7 @@ from agent.state import (
     is_filled,
 )
 from agent.tools.base import ToolResult, history_for_llm
+from agent.modification_picker import make_modification_picker_result
 from agent.tools.structured_choice import normalize_structured_choice
 
 
@@ -56,6 +59,7 @@ _SYSTEM_PROMPT = (
     "  'Standard plastic (included)'/'standard_plastic'/'1' -> standard_plastic\n"
     "  'Eco / biodegradable'/'eco_biodegradable'/'2' -> eco_biodegradable\n"
     "  'Bamboo'/'bamboo'/'3' -> bamboo\n"
+    "  'No utensils needed'/'no_utensils'/'none'/'skip' -> no_utensils\n"
     "- linens: True if they want linen rentals.\n"
     "- rentals: ALWAYS return as a JSON array of strings, never a single string.\n"
     "  - 'Tables and Chairs' -> ['Tables','Chairs']; 'none'/'no rentals' -> [].\n"
@@ -187,6 +191,11 @@ _UTENSILS_MAP: dict[str, str] = {
     "eco-friendly / biodegradable": "eco_biodegradable",
     "eco friendly / biodegradable": "eco_biodegradable",
     "bamboo": "bamboo",
+    "no_utensils": "no_utensils",
+    "no utensils": "no_utensils",
+    "no utensils needed": "no_utensils",
+    "no cutlery": "no_utensils",
+    "no cutlery needed": "no_utensils",
 }
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
     return history_for_llm(history)
@@ -249,8 +258,6 @@ class AddOnsTool:
             for field_name, value in dump.items():
                 if field_name not in allowed_fields:
                     continue
-                if field_name in _LABOR_SLOTS and service_type == "Dropoff":
-                    continue
                 if field_name == "rentals" and isinstance(value, list):
                     normalized = _normalize_rentals(value)
                     if not normalized:
@@ -276,6 +283,21 @@ class AddOnsTool:
         next_target = _next_target(slots)
         next_phase = _phase_of(slots)
         state["conversation_phase"] = next_phase
+
+        marker = get_slot_value(slots, "__return_to_review_after_edit")
+        if isinstance(marker, dict):
+            slot = str(marker.get("slot") or "").strip()
+            return_to = str(marker.get("return_to") or "review").strip().lower()
+            filled_slots = {k for k, _ in fills}
+            if slot and return_to == "picker" and slot in filled_slots:
+                clear_slot(slots, "__return_to_review_after_edit")
+                return make_modification_picker_result(
+                    slots=slots,
+                    state=state,
+                    prompt="Anything else you want to change?",
+                    include_done=True,
+                    origin_phase=PHASE_REVIEW,
+                )
 
         # Store which yes/no question is pending so the router can resolve
         # bare "yes"/"no" replies without an LLM call.
@@ -345,8 +367,7 @@ def _next_target(slots: dict) -> str:
     if get_slot_value(slots, "__gate_rentals") and not is_filled(slots, "rentals"):
         return "ask_rentals_items"
 
-    service_type = get_slot_value(slots, "service_type")
-    if service_type != "Dropoff" and _has_unfilled_labor(slots):
+    if _has_unfilled_labor(slots):
         return "ask_labor_services"
 
     return "transition_to_special_requests"
@@ -381,6 +402,18 @@ def _apply_structured_answer(
     effects: list[tuple[str, str]],
 ) -> bool:
     message_lower = normalize_structured_choice(message_lower)
+
+    if target == "ask_labor_services":
+        selected_slots = _normalize_labor_services([message_lower])
+        if selected_slots is None:
+            return False
+        for labor_slot in _LABOR_SLOTS:
+            wants_service = labor_slot in selected_slots
+            old = get_slot_value(slots, labor_slot)
+            fill_slot(slots, labor_slot, wants_service)
+            fills.append((labor_slot, wants_service))
+            effects.extend(apply_cascade(labor_slot, old, wants_service, slots))
+        return True
 
     if target == "ask_drinks_interest":
         if message_lower in _YES or message_lower in {"yes, add drinks"}:
@@ -460,6 +493,10 @@ def _apply_structured_answer(
         if normalized:
             fill_slot(slots, "utensils", normalized)
             fills.append(("utensils", normalized))
+            return True
+        if message_lower in _NO:
+            fill_slot(slots, "utensils", "no_utensils")
+            fills.append(("utensils", "no_utensils"))
             return True
 
     if target == "ask_rentals_gate":
@@ -550,7 +587,6 @@ def _normalize_labor_services(values: list[str]) -> set[str] | None:
             if any(alias in token for alias in aliases):
                 selected.add(slot_name)
                 recognized = True
-                break
 
     return selected if recognized else None
 
@@ -608,6 +644,7 @@ def _input_hint_for_target(target: str, slots: dict) -> dict | None:
                 {"value": "standard_plastic", "label": "Standard plastic (included)"},
                 {"value": "eco_biodegradable", "label": "Eco / biodegradable"},
                 {"value": "bamboo", "label": "Bamboo"},
+                {"value": "no_utensils", "label": "No utensils needed"},
             ],
         }
     if target == "ask_rentals_gate":
@@ -632,10 +669,10 @@ def _input_hint_for_target(target: str, slots: dict) -> dict | None:
     if target == "ask_labor_services":
         return {
             "type": "options",
-            "options": [
-                {"value": slot_name, "label": label}
-                for slot_name, label, _aliases in _LABOR_SERVICE_OPTIONS
-            ],
+            "options": (
+                [{"value": "none", "label": "No onsite labor"}]
+                + [{"value": slot_name, "label": label} for slot_name, label, _aliases in _LABOR_SERVICE_OPTIONS]
+            ),
             "multi": True,
         }
     if target == "transition_to_special_requests":
@@ -651,7 +688,7 @@ def _input_hint_for_target(target: str, slots: dict) -> dict | None:
 
 def _direct_response_for_target(target: str, slots: dict) -> str | None:
     if target == "ask_drinks_interest":
-        return "Would you like to add drinks or bar service for the event?"
+        return "Do you want drinks or bar service for the event?"
     if target == "ask_drinks_setup":
         return "Would you like coffee service, bar service, both, or neither?"
     if target == "ask_bar_package":
@@ -661,13 +698,13 @@ def _direct_response_for_target(target: str, slots: dict) -> str | None:
     if target == "ask_tableware":
         return "Which tableware upgrade would you like?"
     if target == "ask_utensils":
-        return "What utensils would you like to add?"
+        return "What utensils should I include? (You can also say 'no utensils'.)"
     if target == "ask_rentals_gate":
         return "Do you need any rentals like linens, tables, or chairs?"
     if target == "ask_rentals_items":
         return "Which rentals would you like to add?"
     if target == "ask_labor_services":
-        return "Which service staff would you like us to handle? Select everything you need."
+        return "What onsite help should we cover (ceremony setup, table setup/preset, cleanup, trash removal)? Choose all that apply."
     if target == "transition_to_special_requests":
         return "Do you have any special requests we should note?"
     return None

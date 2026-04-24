@@ -136,7 +136,7 @@ class MenuResolution:
     unmatched_queries: list[str] = field(default_factory=list)
 
 
-_STOP_WORDS = frozenset({"and", "w", "with", "the", "a", "an", "&"})
+_STOP_WORDS = frozenset({"and", "w", "with", "the", "a", "an", "&", "bar", "menu"})
 
 
 def _loose(name: str) -> str:
@@ -411,6 +411,87 @@ def parse_slot_items(value: str | None) -> list[str]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Tagging helpers for bulk operations (veg/non-veg/seafood/egg/etc.)
+# ---------------------------------------------------------------------------
+
+_TAG_PATTERNS: dict[str, str] = {
+    "egg": r"\begg\b",
+    "seafood": r"\b(shrimp|salmon|tuna|crab|lobster|cod|scallop|scallops|mussel|mussels|clam|clams|fish)\b",
+    "chicken": r"\bchicken\b",
+    "pork": r"\b(pork|bacon|ham|chorizo)\b",
+    "beef": r"\b(beef|steak|brisket|prime\s+rib|ribeye|filet)\b",
+}
+
+
+def menu_item_tags(item_name: str, category_name: str = "") -> set[str]:
+    """Return coarse tags for a menu item for bulk selection/removal.
+
+    Tags are deterministic heuristics (not nutrition facts). `non_veg` is only
+    assigned when an animal-protein tag is detected, so vegetarian canapes are
+    not misclassified as non-veg.
+    """
+    name = (item_name or "").strip()
+    category = (category_name or "").strip()
+    if not name and not category:
+        return set()
+
+    name_lower = name.lower()
+    cat_lower = category.lower()
+    tags: set[str] = set()
+
+    if "vegetarian" in cat_lower or "veggie" in cat_lower:
+        tags.add("veg")
+
+    # Category hints
+    if "seafood" in cat_lower:
+        tags.add("seafood")
+    if "chicken" in cat_lower:
+        tags.add("chicken")
+    if "pork" in cat_lower:
+        tags.add("pork")
+    if "beef" in cat_lower:
+        tags.add("beef")
+
+    # Name-based hints
+    for tag, pattern in _TAG_PATTERNS.items():
+        if _re.search(pattern, name_lower):
+            tags.add(tag)
+
+    animal = {"seafood", "chicken", "pork", "beef", "egg"}
+    if "veg" not in tags and tags.intersection(animal):
+        tags.add("non_veg")
+
+    return tags
+
+
+def filter_menu_items_by_tags(
+    menu: dict[str, list[dict]],
+    *,
+    include_tags: set[str],
+    exclude_tags: set[str] | None = None,
+) -> list[dict]:
+    """Return all menu items matching any include tag and no exclude tags."""
+    if not include_tags:
+        return []
+    excluded = exclude_tags or set()
+    out: list[dict] = []
+    for cat, items in (menu or {}).items():
+        for it in items or []:
+            name = str(it.get("name") or "").strip()
+            if not name:
+                continue
+            tags = menu_item_tags(name, cat)
+            if not tags:
+                continue
+            if not any(t in tags for t in include_tags):
+                continue
+            if excluded and any(t in tags for t in excluded):
+                continue
+            out.append({**it, "matched_category": cat})
+    return out
+
+
 async def resolve_dessert_choices(
     raw_names: Iterable[str],
     *,
@@ -442,6 +523,7 @@ async def resolve_desserts(
 __all__ = [
     "AmbiguousMenuChoice",
     "MenuResolution",
+    "filter_menu_items_by_tags",
     "format_items",
     "is_appetizer_category",
     "is_dessert_category",
@@ -449,6 +531,7 @@ __all__ = [
     "load_appetizer_menu",
     "load_dessert_menu_expanded",
     "load_main_dish_menu",
+    "menu_item_tags",
     "parse_slot_items",
     "resolve_dessert_choices",
     "resolve_desserts",

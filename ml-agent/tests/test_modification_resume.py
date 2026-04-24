@@ -17,6 +17,7 @@ from agent.models import (
 )
 from agent.menu_resolver import resolve_to_db_items
 from agent.response_generator import GeneratedReply, _fallback, render
+from agent.prompt_registry import fallback_prompt_for_target
 from agent.router import _quick_route, route
 from agent.state import (
     PHASE_COCKTAIL,
@@ -438,6 +439,77 @@ async def test_router_phase_lock_keeps_wedding_cake_phase_from_jumping_to_finali
     )
 
     assert decision.tool_calls[0].tool_name == "basic_info_tool"
+
+
+@pytest.mark.asyncio
+async def test_router_honors_recent_service_type_prompt_even_if_phase_drifted():
+    from langchain_core.messages import AIMessage
+
+    slots = initialize_empty_slots()
+    state = {"conversation_phase": PHASE_DESSERT, "slots": slots}
+
+    history = [AIMessage(content="Would you like drop-off delivery or full onsite service?")]
+    decision = await route(
+        message="drop-off",
+        history=history,
+        state=state,
+    )
+
+    assert decision.tool_calls[0].tool_name == "basic_info_tool"
+
+
+@pytest.mark.asyncio
+async def test_menu_selection_returns_to_review_after_review_edit(monkeypatch):
+    import agent.tools.menu_selection_tool as menu_tool_module
+    from agent.models import MenuSelectionExtraction
+    from agent.state import (
+        PHASE_DESSERT,
+        PHASE_REVIEW,
+        fill_slot,
+        get_slot_value,
+        initialize_empty_slots,
+    )
+
+    async def fake_extract(**kwargs):
+        schema = kwargs.get("schema")
+        if schema is MenuSelectionExtraction:
+            return MenuSelectionExtraction(raw_items=["Brownies"], category_hint="desserts")
+        raise AssertionError(f"Unexpected schema: {schema}")
+
+    monkeypatch.setattr(menu_tool_module, "extract", fake_extract)
+    async def fake_load_desserts(*args, **kwargs):
+        return [
+            {"name": "Brownies", "unit_price": 5.25, "price_type": "per_person"},
+            {"name": "Blondies", "unit_price": 5.25, "price_type": "per_person"},
+        ]
+
+    monkeypatch.setattr(menu_tool_module, "load_dessert_menu_expanded", fake_load_desserts)
+
+    slots = initialize_empty_slots()
+    # Minimal recap-able state
+    fill_slot(slots, "name", "Sam")
+    fill_slot(slots, "email", "sam@example.com")
+    fill_slot(slots, "phone", "+1 1234567890")
+    fill_slot(slots, "event_type", "Birthday")
+    fill_slot(slots, "event_date", "2026-05-29")
+    fill_slot(slots, "venue", "TBD - Confirm on call")
+    fill_slot(slots, "guest_count", "TBD - Confirm on call")
+    fill_slot(slots, "service_type", "Dropoff")
+    fill_slot(slots, "selected_dishes", "Burger Bar ($23.99/per_person)")
+    fill_slot(slots, "meal_style", "buffet")
+    fill_slot(slots, "__return_to_review_after_edit", {"slot": "desserts"})
+
+    tool = menu_tool_module.MenuSelectionTool()
+    result = await tool.run(
+        message="Brownies",
+        history=[],
+        state={"slots": slots, "conversation_phase": PHASE_DESSERT},
+    )
+
+    assert result.state["conversation_phase"] == PHASE_REVIEW
+    assert get_slot_value(result.state["slots"], "__return_to_review_after_edit") is None
+    assert result.direct_response is not None
+    assert "recap" in result.direct_response.lower()
 
 
 def test_normalize_tbd_venue_variants():
@@ -1354,6 +1426,89 @@ def test_review_recap_uses_written_service_style_and_rentals():
     assert "service style: cocktail hour + reception" in lowered
     assert "rentals: linens, tables, chairs" in lowered
     assert "linens included" not in lowered
+
+
+def test_review_recap_canonicalizes_common_event_type_typos():
+    text = _render_review_recap({
+        "name": "Syed",
+        "event_type": "Weddimg",
+        "partner_name": "Saniya",
+        "event_date": "2026-07-30",
+    })
+
+    lowered = text.lower()
+    assert "wedding" in lowered
+    assert "partner: saniya" in lowered
+
+
+@pytest.mark.asyncio
+async def test_modification_tool_normalizes_meal_style_values():
+    tool = ModificationTool()
+    slots = initialize_empty_slots()
+    fill_slot(slots, "meal_style", "plated")
+
+    await tool._apply_scalar_modification(
+        ModificationExtraction(target_slot="meal_style", action="replace", new_value="change to buffet"),
+        "change to buffet",
+        slots,
+        {"conversation_phase": PHASE_REVIEW},
+        [],
+    )
+
+    assert get_slot_value(slots, "meal_style") == "buffet"
+
+
+@pytest.mark.asyncio
+async def test_modification_tool_maps_drinks_package_to_bar_slots():
+    tool = ModificationTool()
+    slots = initialize_empty_slots()
+    fill_slot(slots, "drinks", True)
+    fill_slot(slots, "bar_service", True)
+    fill_slot(slots, "bar_package", "full_open_bar")
+
+    await tool._apply_scalar_modification(
+        ModificationExtraction(target_slot="drinks", action="replace", new_value="Beer+Wine"),
+        "Beer+Wine",
+        slots,
+        {"conversation_phase": PHASE_REVIEW},
+        [],
+    )
+
+    assert get_slot_value(slots, "drinks") is True
+    assert get_slot_value(slots, "bar_service") is True
+    assert get_slot_value(slots, "bar_package") == "beer_wine"
+
+
+@pytest.mark.asyncio
+async def test_review_stage_scalar_edit_returns_to_change_picker():
+    tool = ModificationTool()
+    slots = initialize_empty_slots()
+    fill_slot(slots, "name", "Syed")
+    fill_slot(slots, "event_type", "Wedding")
+    fill_slot(slots, "meal_style", "plated")
+
+    pending = {
+        "stage": "value",
+        "target_slot": "meal_style",
+        "origin_phase": PHASE_REVIEW,
+    }
+    fill_slot(slots, "__pending_modification_request", pending)
+
+    result = await tool.run(
+        message="buffet",
+        history=[],
+        state={"slots": slots, "conversation_phase": PHASE_REVIEW},
+    )
+
+    assert get_slot_value(slots, "meal_style") == "buffet"
+    assert result.response_context["next_question_target"] == "ask_modification_target"
+    assert "anything else" in (result.direct_response or "").lower()
+
+
+def test_prompt_registry_has_wedding_cake_subprompts():
+    assert "cake" in fallback_prompt_for_target("basic_info_tool", "ask_wedding_cake_flavor").lower()
+    assert "filling" in fallback_prompt_for_target("basic_info_tool", "ask_wedding_cake_filling").lower()
+    assert "buttercream" in fallback_prompt_for_target("basic_info_tool", "ask_wedding_cake_buttercream").lower()
 
 
 @pytest.mark.asyncio

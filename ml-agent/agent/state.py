@@ -69,6 +69,7 @@ SLOT_NAMES: list[str] = [
     "email",
     "phone",
     "event_type",
+    "event_type_other",
     "event_date",
     "venue",
     "guest_count",

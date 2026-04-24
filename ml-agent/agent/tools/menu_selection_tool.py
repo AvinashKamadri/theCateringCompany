@@ -21,18 +21,20 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 
 from agent.ambiguous_choice import (
+    normalize_choice_text,
     replace_query_with_selection,
     resolve_choice_selection,
+    resolve_multi_choice_selection,
 )
 from agent.cascade import apply_cascade
 from agent.instructor_client import extract
 from agent.menu_resolver import (
+    filter_menu_items_by_tags,
     format_items,
     load_appetizer_menu,
     load_main_dish_menu,
     load_dessert_menu_expanded,
     parse_slot_items,
-    resolve_dessert_choices,
     resolve_menu_items,
 )
 from agent.models import MenuSelectionExtraction
@@ -45,6 +47,7 @@ from agent.state import (
     PHASE_GREETING,
     PHASE_GUEST_COUNT,
     PHASE_MAIN_MENU,
+    PHASE_REVIEW,
     PHASE_SERVICE_TYPE,
     PHASE_TRANSITION,
     PHASE_VENUE,
@@ -56,6 +59,12 @@ from agent.state import (
 )
 from agent.tools.base import ToolResult, history_for_llm
 from agent.tools.structured_choice import normalize_structured_choice
+from agent.tools.finalization_tool import (
+    _client_facing_summary as _finalization_client_facing_summary,
+    _input_hint_for_target as _finalization_input_hint_for_target,
+    _render_review_recap as _render_final_review_recap,
+)
+from agent.modification_picker import make_modification_picker_result
 
 
 _SYSTEM_PROMPT = (
@@ -92,6 +101,25 @@ def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
     return history_for_llm(history)
 
 
+def _message_explicitly_sets_service_style(message_lower: str) -> bool:
+    """Guard against the extractor inferring cocktail-hour answers from acknowledgements.
+
+    We only treat cocktail_hour as explicit when the user actually mentions
+    cocktail/reception/both (or clicked a structured option handled elsewhere).
+    """
+    msg = (message_lower or "").strip().lower()
+    if not msg:
+        return False
+    return bool(re.search(r"\b(cocktail|reception|both)\b", msg))
+
+
+def _message_explicitly_sets_appetizer_style(message_lower: str) -> bool:
+    msg = (message_lower or "").strip().lower()
+    if not msg:
+        return False
+    return bool(re.search(r"\b(passed(?:\s+around)?|station)\b", msg))
+
+
 def _wedding_cake_needed(slots: dict) -> bool:
     """Return True if the wedding cake sub-flow still has unanswered questions."""
     if not is_filled(slots, "__wedding_cake_gate"):
@@ -102,6 +130,42 @@ def _wedding_cake_needed(slots: dict) -> bool:
         is_filled(slots, "__wedding_cake_flavor")
         and is_filled(slots, "__wedding_cake_filling")
         and is_filled(slots, "__wedding_cake_buttercream")
+    )
+
+
+def _return_to_review_after_edit_if_done(*, state: dict, slots: dict, fills: list[tuple[str, Any]]) -> ToolResult | None:
+    marker = get_slot_value(slots, "__return_to_review_after_edit")
+    if not isinstance(marker, dict):
+        return None
+    slot = str(marker.get("slot") or "").strip()
+    return_to = str(marker.get("return_to") or "review").strip().lower()
+    if not slot:
+        return None
+    filled_slots = {s for s, _ in (fills or [])}
+    if slot not in filled_slots:
+        return None
+    clear_slot(slots, "__return_to_review_after_edit")
+    if return_to == "picker":
+        return make_modification_picker_result(
+            slots=slots,
+            state=state,
+            prompt="Anything else you want to change?",
+            include_done=True,
+            origin_phase=PHASE_REVIEW,
+        )
+    summary = _finalization_client_facing_summary(slots)
+    state["conversation_phase"] = PHASE_REVIEW
+    return ToolResult(
+        state=state,
+        response_context={
+            "tool": "finalization_tool",
+            "next_phase": PHASE_REVIEW,
+            "next_question_target": "review",
+            "client_summary": summary,
+            "awaiting_confirm": True,
+        },
+        input_hint=_finalization_input_hint_for_target("review"),
+        direct_response=_render_final_review_recap(summary),
     )
 
 
@@ -137,14 +201,14 @@ def _phase_of(slots: dict) -> str:
         return PHASE_CONDITIONAL_FOLLOWUP
     if "wedding" in event_type and _wedding_cake_needed(slots):
         return PHASE_WEDDING_CAKE
+    if not is_filled(slots, "service_type"):
+        return PHASE_SERVICE_TYPE
     if not is_filled(slots, "event_date"):
         return PHASE_EVENT_DATE
     if not is_filled(slots, "venue"):
         return PHASE_VENUE
     if not is_filled(slots, "guest_count"):
         return PHASE_GUEST_COUNT
-    if not is_filled(slots, "service_type"):
-        return PHASE_SERVICE_TYPE
 
     return PHASE_DRINKS_BAR
 
@@ -176,6 +240,7 @@ class MenuSelectionTool:
         current_target = _next_target([], phase, slots)
         expecting_appetizer_style = current_target == "ask_appetizer_style"
         expecting_meal_style = current_target == "ask_meal_style"
+        replace_existing = False
 
         effects: list[tuple[str, str]] = []
         fills: list[tuple[str, Any]] = []
@@ -187,20 +252,41 @@ class MenuSelectionTool:
                 clear_slot(slots, "__pending_menu_choice")
             else:
                 matches = [str(v) for v in pending_choice.get("matches") or [] if str(v).strip()]
-                selected = resolve_choice_selection(message, matches)
-                if not selected:
+                msg_norm = normalize_choice_text(message or "")
+                multi = resolve_multi_choice_selection(message, matches) or []
+                selects_all = bool(multi and len(multi) == len(matches))
+                selected = None if selects_all or len(multi) != 1 else multi[0]
+                if not multi:
                     return self._repeat_pending_menu_choice_result(
                         state=state,
                         pending_choice=pending_choice,
                     )
 
                 clear_slot(slots, "__pending_menu_choice")
-                forced_extracted = MenuSelectionExtraction(
-                    raw_items=replace_query_with_selection(
-                        [str(v) for v in (pending_choice.get("raw_items") or []) if str(v).strip()],
-                        query=str(pending_choice.get("query") or ""),
+                raw_items = [str(v) for v in (pending_choice.get("raw_items") or []) if str(v).strip()]
+                query = str(pending_choice.get("query") or "")
+                if selects_all or len(multi) > 1:
+                    # Replace the ambiguous query token with the selected options.
+                    query_key = normalize_choice_text(query)
+                    replaced = False
+                    updated: list[str] = []
+                    for value in raw_items:
+                        if not replaced and normalize_choice_text(value) == query_key:
+                            updated.extend(multi)
+                            replaced = True
+                        else:
+                            updated.append(value)
+                    if not replaced:
+                        updated.extend(multi)
+                    forced_raw_items = updated
+                else:  # single selection
+                    forced_raw_items = replace_query_with_selection(
+                        raw_items,
+                        query=query,
                         selection=selected,
-                    ),
+                    )
+                forced_extracted = MenuSelectionExtraction(
+                    raw_items=forced_raw_items,
                     category_hint=str(pending_choice.get("category") or "") or forced_category,
                 )
 
@@ -238,6 +324,20 @@ class MenuSelectionTool:
             fill_slot(slots, "meal_style", val)
             fills.append(("meal_style", val))
             effects.extend(apply_cascade("meal_style", old, val, slots))
+        elif (
+            _msg_lower in _MEAL_STYLE_MAP
+            and phase == PHASE_MAIN_MENU
+            and is_filled(slots, "selected_dishes")
+            and not is_filled(slots, "meal_style")
+        ):
+            # Users often answer "buffet"/"plated" even when we still need them
+            # to narrow main dishes down to 3â€“5. Capture the preference, but
+            # keep them in the main-menu phase until the count is valid.
+            val = _MEAL_STYLE_MAP[_msg_lower]
+            old = get_slot_value(slots, "meal_style")
+            fill_slot(slots, "meal_style", val)
+            fills.append(("meal_style", val))
+            effects.extend(apply_cascade("meal_style", old, val, slots))
 
         if _msg_lower in _APP_STYLE_MAP and expecting_appetizer_style and not is_filled(slots, "appetizer_style"):
             val = _APP_STYLE_MAP[_msg_lower]
@@ -249,13 +349,79 @@ class MenuSelectionTool:
             and not is_filled(slots, "cocktail_hour")
             and _msg_lower in _SERVICE_STYLE_MAP
         ):
-            service_style, wants_cocktail = _SERVICE_STYLE_MAP[_msg_lower]
-            fill_slot(slots, "service_style", service_style)
-            fills.append(("service_style", service_style))
-            old = get_slot_value(slots, "cocktail_hour")
-            fill_slot(slots, "cocktail_hour", wants_cocktail)
-            fills.append(("cocktail_hour", wants_cocktail))
-            effects.extend(apply_cascade("cocktail_hour", old, wants_cocktail, slots))
+            # Cocktail-hour-vs-reception is a wedding-only concept in this flow.
+            event_type = (get_slot_value(slots, "event_type") or "").lower()
+            if "wedding" in event_type:
+                service_style, wants_cocktail = _SERVICE_STYLE_MAP[_msg_lower]
+                fill_slot(slots, "service_style", service_style)
+                fills.append(("service_style", service_style))
+                old = get_slot_value(slots, "cocktail_hour")
+                fill_slot(slots, "cocktail_hour", wants_cocktail)
+                fills.append(("cocktail_hour", wants_cocktail))
+                effects.extend(apply_cascade("cocktail_hour", old, wants_cocktail, slots))
+
+        # "Select all" should never depend on the LLM (avoids occasional
+        # structured-output validation failures and makes the behavior uniform
+        # across environments).
+        _SELECT_ALL_MARKERS = {
+            "all",
+            "all of them",
+            "everything",
+            "all items",
+            "select all",
+            "all options",
+        }
+        _tag_select = _parse_tag_select(message)
+        _all_except = _parse_all_except(message)
+        _remove_all_except = _parse_remove_all_except(message)
+        _handled_menu_sentinel = False
+        _show_menu_targets = {"show_appetizer_menu", "show_main_menu", "show_dessert_menu"}
+        if (
+            forced_extracted is None
+            and current_target in _show_menu_targets
+            and _msg_lower in _SELECT_ALL_MARKERS
+        ):
+            forced_extracted = MenuSelectionExtraction(
+                raw_items=["ALL"],
+                category_hint=forced_category,
+            )
+            _handled_menu_sentinel = True
+        elif (
+            forced_extracted is None
+            and _tag_select
+            and (current_target in _show_menu_targets or _tag_select[2] is not None)
+        ):
+            include_tags, exclude_tags, category_override = _tag_select
+            payload = f"TAG_SELECT:include={','.join(sorted(include_tags))};exclude={','.join(sorted(exclude_tags))}"
+            forced_extracted = MenuSelectionExtraction(
+                raw_items=[payload],
+                category_hint=category_override or forced_category,
+            )
+            _handled_menu_sentinel = True
+        elif (
+            forced_extracted is None
+            and _all_except
+            and (current_target in _show_menu_targets or _all_except[1] is not None)
+        ):
+            exceptions, category_override = _all_except
+            forced_extracted = MenuSelectionExtraction(
+                raw_items=["ALL_EXCEPT:" + ", ".join(exceptions)],
+                category_hint=category_override or forced_category,
+            )
+            _handled_menu_sentinel = True
+        elif (
+            forced_extracted is None
+            and _remove_all_except
+            and (current_target in _show_menu_targets or _remove_all_except[1] is not None)
+        ):
+            keep_tokens, category_override = _remove_all_except
+            # Explicit replace intent: keep only the listed items.
+            replace_existing = True
+            forced_extracted = MenuSelectionExtraction(
+                raw_items=list(keep_tokens),
+                category_hint=category_override or forced_category,
+            )
+            _handled_menu_sentinel = True
 
         # Skip LLM extraction when the entire message was a style-only sentinel;
         # avoids the LLM re-interpreting an already-resolved click.
@@ -263,6 +429,8 @@ class MenuSelectionTool:
             _msg_lower in _MEAL_STYLE_MAP
             or _msg_lower in _APP_STYLE_MAP
             or _msg_lower in _SERVICE_STYLE_MAP
+            or _msg_lower in _SELECT_ALL_MARKERS
+            or _handled_menu_sentinel
         )
 
         if (
@@ -274,6 +442,54 @@ class MenuSelectionTool:
             fill_slot(slots, "__gate_desserts", True)
             fills.append(("__gate_desserts", True))
             _style_only = True
+
+        # Allow skipping desserts with a single reply ("skip", "no thanks", etc.)
+        # even if the gate/menu was already shown.
+        _DESSERT_SKIP_VALUES = {"skip", "skip dessert", "skip desserts", "no thanks", "no", "none", "pass"}
+        if (
+            phase == PHASE_DESSERT
+            and not is_filled(slots, "desserts")
+            and _msg_lower in _DESSERT_SKIP_VALUES
+        ):
+            fill_slot(slots, "desserts", "none")
+            fills.append(("desserts", "none"))
+            next_phase = _phase_of(slots)
+            state["conversation_phase"] = next_phase
+            response_context = {
+                "tool": self.name,
+                "filled_this_turn": fills,
+                "cascade_effects": effects,
+                "unmatched_items": [],
+                "next_phase": next_phase,
+                "current_selections": {
+                    "appetizers": get_slot_value(slots, "appetizers"),
+                    "selected_dishes": get_slot_value(slots, "selected_dishes"),
+                    "desserts": get_slot_value(slots, "desserts"),
+                },
+                "needs_custom_menu_call": bool(get_slot_value(slots, "custom_menu")),
+                "next_question_target": _next_target(fills, next_phase, slots),
+            }
+            input_hint = await _input_hint_for_menu_phase(next_phase, slots)
+            if response_context["next_question_target"] == "transition_to_addons":
+                input_hint = _addons_transition_hint()
+            progress_response = _build_menu_turn_response(
+                before_lists=before_lists,
+                fills=fills,
+                next_phase=next_phase,
+                next_target=response_context["next_question_target"],
+                input_hint=input_hint,
+                slots=slots,
+            )
+            if progress_response:
+                response_context["menu_progress"] = progress_response
+            override = _return_to_review_after_edit_if_done(state=state, slots=slots, fills=fills)
+            if override is not None:
+                return override
+            return ToolResult(
+                state=state,
+                response_context=response_context,
+                input_hint=input_hint,
+            )
 
         extracted = forced_extracted
         if not _style_only and phase == PHASE_DESSERT and not is_filled(slots, "desserts"):
@@ -289,6 +505,9 @@ class MenuSelectionTool:
                 fills.append(("desserts", "none"))
                 next_phase = _phase_of(slots)
                 state["conversation_phase"] = next_phase
+                override = _return_to_review_after_edit_if_done(state=state, slots=slots, fills=fills)
+                if override is not None:
+                    return override
                 return ToolResult(
                     state=state,
                     response_context={
@@ -313,7 +532,19 @@ class MenuSelectionTool:
                 system=_SYSTEM_PROMPT,
                 user_message=message,
                 history=_history_for_llm(history),
+                # Users can paste long comma-separated lists (especially appetizers).
+                # The default extract max_tokens (250) can truncate the JSON output,
+                # causing Pydantic "EOF while parsing a string" validation errors.
+                max_tokens=5000,
             )
+
+        # Defensive fallback: if structured extraction failed (e.g., transient
+        # validation issue), attempt a deterministic split so the user doesn't
+        # get stuck seeing the same menu again.
+        if extracted is None and not _style_only and phase in {PHASE_COCKTAIL, PHASE_MAIN_MENU, PHASE_DESSERT}:
+            parsed = _split_user_items(message)
+            if parsed:
+                extracted = MenuSelectionExtraction(raw_items=parsed, category_hint=forced_category)
 
         # Auto-set cocktail_hour only for non-weddings. Weddings need the
         # explicit cocktail hour / reception / both choice, so we must not
@@ -325,29 +556,33 @@ class MenuSelectionTool:
             # get the cocktail hour / reception / both card.
             if "wedding" not in event_type:
                 fill_slot(slots, "cocktail_hour", True)
-                fills.append(("cocktail_hour", True))
-                # Auto-fill appetizer_style too — non-weddings don't need the
-                # passed-vs-station follow-up either.
-                if not is_filled(slots, "appetizer_style"):
-                    fill_slot(slots, "appetizer_style", "station")
-                    fills.append(("appetizer_style", "station"))
+                # Do not treat this as a user-visible "capture" — avoids telling
+                # non-wedding customers "we will plan for cocktail hour".
 
         if extracted is not None:
-            category = extracted.category_hint or forced_category
+            # Trust the conversation phase over the extractor's inferred category.
+            # Prevents cases where a main-menu item list is mis-labeled as "appetizers"
+            # and then fails to resolve, causing the menu to be re-shown.
+            category = forced_category or extracted.category_hint
 
             # ---- cocktail_hour declared explicitly ----
             if extracted.cocktail_hour is not None:
-                old = get_slot_value(slots, "cocktail_hour")
-                fill_slot(slots, "cocktail_hour", extracted.cocktail_hour)
-                fills.append(("cocktail_hour", extracted.cocktail_hour))
-                if not is_filled(slots, "service_style"):
-                    fill_slot(
-                        slots,
-                        "service_style",
-                        "cocktail_hour" if extracted.cocktail_hour else "reception",
-                    )
-                    fills.append(("service_style", get_slot_value(slots, "service_style")))
-                effects.extend(apply_cascade("cocktail_hour", old, extracted.cocktail_hour, slots))
+                # Only accept cocktail_hour when it was explicitly stated.
+                # Prevents "ok"/"sure" replies (or menu item lists) from being
+                # misread as choosing cocktail hour during weddings.
+                event_type = (get_slot_value(slots, "event_type") or "").lower()
+                if "wedding" in event_type and _message_explicitly_sets_service_style(_msg_lower):
+                    old = get_slot_value(slots, "cocktail_hour")
+                    fill_slot(slots, "cocktail_hour", extracted.cocktail_hour)
+                    fills.append(("cocktail_hour", extracted.cocktail_hour))
+                    if not is_filled(slots, "service_style"):
+                        fill_slot(
+                            slots,
+                            "service_style",
+                            "cocktail_hour" if extracted.cocktail_hour else "reception",
+                        )
+                        fills.append(("service_style", get_slot_value(slots, "service_style")))
+                    effects.extend(apply_cascade("cocktail_hour", old, extracted.cocktail_hour, slots))
 
             # ---- meal_style ----
             if (
@@ -362,7 +597,7 @@ class MenuSelectionTool:
             # ---- appetizer_style ----
             if (
                 extracted.appetizer_style is not None
-                and (expecting_appetizer_style or not extracted.raw_items)
+                and (expecting_appetizer_style or _message_explicitly_sets_appetizer_style(_msg_lower))
             ):
                 fill_slot(slots, "appetizer_style", extracted.appetizer_style)
                 fills.append(("appetizer_style", extracted.appetizer_style))
@@ -418,7 +653,13 @@ class MenuSelectionTool:
             ):
                 single = extracted.raw_items[0]
                 msg_commas = message.count(",")
-                if msg_commas >= 2 or single.count(",") >= 1:
+                single_upper = str(single or "").strip().upper()
+                is_sentinel = (
+                    single_upper == "ALL"
+                    or single_upper.startswith("ALL_EXCEPT:")
+                    or single_upper.startswith("TAG_SELECT:")
+                )
+                if not is_sentinel and (msg_commas >= 2 or single.count(",") >= 1):
                     _parsed = _split_user_items(message)
                     if len(_parsed) > 1:
                         extracted.raw_items = _parsed
@@ -426,7 +667,10 @@ class MenuSelectionTool:
             # ---- raw_items → DB resolution ----
             if extracted.raw_items and not extracted.is_decline:
                 resolved_result = await self._resolve_raw_items(
-                    extracted.raw_items, category, slots
+                    extracted.raw_items,
+                    category,
+                    slots,
+                    replace_existing=replace_existing,
                 )
                 for target_slot, resolved_value, matched_count in resolved_result:
                     if target_slot == "__ambiguous__":
@@ -462,7 +706,7 @@ class MenuSelectionTool:
                             },
                             input_hint=overflow_hint,
                             direct_response=(
-                                f"You picked {matched_count} desserts, but the max is 4. "
+                                f"I appreciate your appetite — however you can only choose 4 desserts. "
                                 f"Please narrow it down and pick up to 4.\n\n{menu_text}"
                             ),
                         )
@@ -522,11 +766,11 @@ class MenuSelectionTool:
         no_items_selected = not any(
             s for s, _ in fills if s in ("appetizers", "selected_dishes", "desserts")
         )
-        asking_style = (
-            (next_phase == PHASE_COCKTAIL and not is_filled(slots, "cocktail_hour"))
-            or (next_phase == PHASE_COCKTAIL and is_filled(slots, "appetizers") and not is_filled(slots, "appetizer_style"))
-            or (next_phase == PHASE_MAIN_MENU and is_filled(slots, "selected_dishes") and not is_filled(slots, "meal_style"))
-        )
+        asking_style = response_context["next_question_target"] in {
+            "ask_service_style",
+            "ask_appetizer_style",
+            "ask_meal_style",
+        }
         direct_response: str | None = None
         progress_response = _build_menu_turn_response(
             before_lists=before_lists,
@@ -544,6 +788,9 @@ class MenuSelectionTool:
             menu_text = _format_menu_response(next_phase, input_hint, slots)
             if menu_text:
                 direct_response = menu_text
+        override = _return_to_review_after_edit_if_done(state=state, slots=slots, fills=fills)
+        if override is not None:
+            return override
         return ToolResult(
             state=state,
             response_context=response_context,
@@ -567,7 +814,8 @@ class MenuSelectionTool:
         }.get(category, "menu item")
         query = str(pending_choice.get("query") or "")
         prompt = (
-            f"I found more than one {label} match for '{query}'. Which one do you want?\n\n"
+            f"I found more than one {label} match for '{query}'.\n"
+            "Reply with a number (or '1,2'), the exact name, or 'all'.\n\n"
             + "\n".join(f"{idx}. {item}" for idx, item in enumerate(matches, 1))
         )
         return ToolResult(
@@ -594,6 +842,8 @@ class MenuSelectionTool:
         raw_items: list[str],
         category: str | None,
         slots: dict,
+        *,
+        replace_existing: bool = False,
     ) -> list[tuple[str, str, int]]:
         """Resolve raw_items into (slot_name, formatted_value, matched_count).
 
@@ -611,23 +861,57 @@ class MenuSelectionTool:
         elif target_slot == "selected_dishes":
             scoped_menu = await load_main_dish_menu()
         elif target_slot == "desserts":
-            return await self._resolve_desserts(raw_items, slots)
+            return await self._resolve_desserts(raw_items, slots, replace_existing=replace_existing)
         else:
             # Unknown target — skip
             return []
 
+        raw_items = _coerce_all_except_raw_items(raw_items)
+
+        # Support selecting by the visible menu index, e.g. "2" / "option 2".
+        numbered_names = _numbered_menu_names(scoped_menu)
+        raw_items = _map_numeric_selections(raw_items, numbered_names)
+
         existing_names = parse_slot_items(get_slot_value(slots, target_slot) or "")
 
-        if len(raw_items) == 1 and raw_items[0].strip().upper() == "ALL":
+        if len(raw_items) == 1 and str(raw_items[0]).strip().upper().startswith("TAG_SELECT:"):
+            token = str(raw_items[0]).strip()
+            include: set[str] = set()
+            exclude: set[str] = set()
+            m = re.match(r"^TAG_SELECT:include=([^;]*);exclude=(.*)$", token, flags=re.IGNORECASE)
+            if m:
+                include = {t.strip() for t in (m.group(1) or "").split(",") if t and t.strip()}
+                exclude = {t.strip() for t in (m.group(2) or "").split(",") if t and t.strip()}
+            selected_items = filter_menu_items_by_tags(scoped_menu, include_tags=include, exclude_tags=exclude)
+            selected_names = [str(i.get("name") or "").strip() for i in selected_items if str(i.get("name") or "").strip()]
+            resolution = await resolve_menu_items(
+                selected_names,
+                menu=scoped_menu,
+                existing_names=None if replace_existing else existing_names,
+            )
+        elif len(raw_items) == 1 and str(raw_items[0]).strip().upper().startswith("ALL_EXCEPT:"):
+            rest = str(raw_items[0]).split(":", 1)[-1].strip()
+            exceptions = _split_freeform_list(rest)
+            exceptions = _map_numeric_selections(exceptions, numbered_names)
+            exc_res = await resolve_menu_items(exceptions, menu=scoped_menu)
+            excluded = {m["name"].lower() for m in (exc_res.matched_items or [])}
+            selected_names = [n for n in numbered_names if n.lower() not in excluded]
+            resolution = await resolve_menu_items(
+                selected_names,
+                menu=scoped_menu,
+                existing_names=None if replace_existing else existing_names,
+            )
+        elif len(raw_items) == 1 and raw_items[0].strip().upper() == "ALL":
             resolution = await resolve_menu_items(
                 ", ".join(item["name"] for catitems in scoped_menu.values() for item in catitems),
                 menu=scoped_menu,
+                existing_names=None if replace_existing else existing_names,
             )
         else:
             resolution = await resolve_menu_items(
                 raw_items,
                 menu=scoped_menu,
-                existing_names=existing_names,
+                existing_names=None if replace_existing else existing_names,
             )
 
         if resolution.ambiguous_choices:
@@ -647,11 +931,24 @@ class MenuSelectionTool:
         matched = resolution.matched_items
         resolved_text = resolution.formatted_value
 
+        # Replace intent: set the list to exactly what was resolved.
+        if replace_existing:
+            if resolved_text == "none" and existing_names:
+                resolved_text = get_slot_value(slots, target_slot) or ""
+            return [(target_slot, resolved_text, 1 if resolved_text else 0)]
+
         # Merge with existing — never replace silently
         if existing_names and matched:
             cur_val = get_slot_value(slots, target_slot) or ""
             if cur_val and cur_val.lower() not in ("none", "no", ""):
                 resolved_text = cur_val + ", " + resolved_text
+        elif resolved_text == "none" and existing_names and (
+            (len(raw_items) == 1 and raw_items[0].strip().upper() == "ALL")
+            or (len(raw_items) == 1 and str(raw_items[0]).strip().upper().startswith("ALL_EXCEPT:"))
+        ):
+            # "All" (or all-except) can be a no-op when everything is already selected.
+            resolved_text = get_slot_value(slots, target_slot) or ""
+            return [(target_slot, resolved_text, 1 if resolved_text else 0)]
 
         return [(target_slot, resolved_text, len(matched))]
 
@@ -659,14 +956,36 @@ class MenuSelectionTool:
         self,
         raw_items: list[str],
         slots: dict,
+        *,
+        replace_existing: bool = False,
     ) -> list[tuple[str, str, int]]:
         event_type = (get_slot_value(slots, "event_type") or "").lower()
         is_wedding = "wedding" in event_type
         existing_names = parse_slot_items(get_slot_value(slots, "desserts") or "")
-        resolution = await resolve_dessert_choices(
-            raw_items,
-            is_wedding=is_wedding,
-            existing_names=existing_names,
+        expanded = await load_dessert_menu_expanded(is_wedding=is_wedding)
+
+        numbered_names = [
+            str(i.get("name") or "").strip()
+            for i in expanded
+            if str(i.get("name") or "").strip()
+        ]
+        raw_items = _coerce_all_except_raw_items(raw_items)
+        raw_items = _map_numeric_selections(raw_items, numbered_names)
+
+        if len(raw_items) == 1 and str(raw_items[0]).strip().upper().startswith("ALL_EXCEPT:"):
+            rest = str(raw_items[0]).split(":", 1)[-1].strip()
+            exceptions = _split_freeform_list(rest)
+            exceptions = _map_numeric_selections(exceptions, numbered_names)
+            exc_res = await resolve_menu_items(exceptions, menu={"Desserts": expanded})
+            excluded = {m["name"].lower() for m in (exc_res.matched_items or [])}
+            raw_items = [n for n in numbered_names if n.lower() not in excluded]
+        elif len(raw_items) == 1 and str(raw_items[0]).strip().upper() == "ALL":
+            raw_items = list(numbered_names)
+
+        resolution = await resolve_menu_items(
+            list(raw_items),
+            menu={"Desserts": expanded},
+            existing_names=None if replace_existing else existing_names,
         )
         if resolution.ambiguous_choices:
             ambiguous = resolution.ambiguous_choices[0]
@@ -683,11 +1002,14 @@ class MenuSelectionTool:
             return [("__ambiguous__", ambiguous.query, len(ambiguous.matches))]
         matched = resolution.matched_items
 
-        # Dedup + merge with existing
-        existing_lower = {n.lower() for n in existing_names}
-        combined_names = list(existing_names) + [
-            m["name"] for m in matched if m["name"].lower() not in existing_lower
-        ]
+        if replace_existing:
+            combined_names = [m["name"] for m in matched]
+        else:
+            # Dedup + merge with existing
+            existing_lower = {n.lower() for n in existing_names}
+            combined_names = list(existing_names) + [
+                m["name"] for m in matched if m["name"].lower() not in existing_lower
+            ]
 
         # Hard cap: 4 desserts max. Return a special signal when exceeded so
         # the caller can reject and reshow the menu.
@@ -699,7 +1021,6 @@ class MenuSelectionTool:
             return [("desserts", get_slot_value(slots, "desserts") or "", 0)]
 
         # Look up price rows for formatted output
-        expanded = await load_dessert_menu_expanded(is_wedding=is_wedding)
         by_name = {i["name"].lower(): i for i in expanded}
         final_items = [by_name[n.lower()] for n in combined_names if n.lower() in by_name]
         return [("desserts", format_items(final_items), len(matched))]
@@ -730,6 +1051,224 @@ def _split_user_items(message: str) -> list[str]:
             expanded.append(p)
     # Drop very short fragments that are almost certainly noise
     return [e for e in expanded if len(e) >= 3]
+
+
+def _numbered_menu_names(menu: dict[str, list[dict]]) -> list[str]:
+    """Flatten menu items in the same order as the numbered UI list."""
+    names: list[str] = []
+    for _cat_name, items in (menu or {}).items():
+        for item in items or []:
+            name = str(item.get("name") or "").strip()
+            if name:
+                names.append(name)
+    return names
+
+
+_NUMERIC_SELECTION_WORDS = {"option", "options", "and", "or"}
+
+
+def _extract_numeric_indices(token: str) -> list[int] | None:
+    """Parse tokens like '2', '2 and 5', 'option 3' into [2], [2,5], [3]."""
+    norm = normalize_choice_text(token or "")
+    if not norm:
+        return None
+
+    parts = norm.split()
+    indices: list[int] = []
+    for part in parts:
+        if part.isdigit():
+            indices.append(int(part))
+            continue
+        if part not in _NUMERIC_SELECTION_WORDS:
+            return None
+    return indices or None
+
+
+def _map_numeric_selections(raw_items: list[str], numbered_names: list[str]) -> list[str]:
+    """Translate numeric menu picks to real item names (1-indexed)."""
+    if not raw_items or not numbered_names:
+        return raw_items
+
+    mapped: list[str] = []
+    for raw in raw_items:
+        raw_str = str(raw or "").strip()
+        if not raw_str:
+            continue
+        if raw_str.upper() == "ALL":
+            mapped.append(raw_str)
+            continue
+
+        indices = _extract_numeric_indices(raw_str)
+        if not indices:
+            mapped.append(raw_str)
+            continue
+
+        for idx in indices:
+            if 1 <= idx <= len(numbered_names):
+                mapped.append(numbered_names[idx - 1])
+            else:
+                mapped.append(str(idx))
+    return mapped
+
+
+def _split_freeform_list(text: str) -> list[str]:
+    """Split a freeform list like '2, 3 and shrimp' into tokens (keeps digits)."""
+    if not text:
+        return []
+    cleaned = str(text).strip()
+    if not cleaned:
+        return []
+    # Split on commas/semicolons/newlines first, then expand simple "and" joins.
+    parts = re.split(r"[;\n]+|,(?![^(]*\))", cleaned)
+    out: list[str] = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if re.search(r"\b(and|&)\b", part, flags=re.IGNORECASE) and "(" not in part:
+            out.extend(
+                p.strip()
+                for p in re.split(r"\b(?:and|&)\b", part, flags=re.IGNORECASE)
+                if p and p.strip()
+            )
+        else:
+            out.append(part)
+    return [o for o in out if o]
+
+
+def _normalize_menu_category_hint(raw: str) -> str | None:
+    text = normalize_structured_choice(raw or "")
+    if not text:
+        return None
+    if any(kw in text for kw in ("appetizer", "appetizers", "apps", "starter", "starters")):
+        return "appetizers"
+    if any(kw in text for kw in ("dessert", "desserts")):
+        return "desserts"
+    if any(kw in text for kw in ("main", "mains", "dish", "dishes", "entree", "entrees")):
+        return "dishes"
+    return None
+
+
+def _parse_all_except(message: str) -> tuple[list[str], str | None] | None:
+    """Parse 'all except X' / 'everything but X' and return (exceptions, category_override)."""
+    msg = normalize_structured_choice(message or "")
+    if not msg:
+        return None
+    m = re.match(
+        r"^(?:all|everything|all of them|all items|all options)"
+        r"(?:\s+(?:in|from|on|for)\s+(?P<cat>"
+        r"appetizers?|apps?|starters?|mains?|main(?:\s+menu)?|main(?:\s+dishes)?|"
+        r"dishes?|entrees?|desserts?))?"
+        r"\s+(?:except|but(?:\s+not)?)\s+(?P<rest>.+)$",
+        msg,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+    category = _normalize_menu_category_hint(m.group("cat") or "")
+    rest = (m.group("rest") or "").strip()
+    items = _split_freeform_list(rest)
+    if not items:
+        return None
+    return items, category
+
+
+def _parse_tag_select(message: str) -> tuple[set[str], set[str], str | None] | None:
+    """Parse 'all <group> (except <group>)' into (include_tags, exclude_tags, category_override).
+
+    Examples:
+    - "all non veg except pork and chicken"
+    - "add all seafood"
+    - "all egg items in appetizers"
+    """
+    msg = normalize_structured_choice(message or "")
+    if not msg:
+        return None
+
+    m = re.match(
+        r"^(?:add\s+)?all\s+(?P<body>.+?)"
+        r"(?:\s+(?:in|from|on|for)\s+(?P<cat>"
+        r"appetizers?|apps?|starters?|mains?|main(?:\s+menu)?|main(?:\s+dishes)?|"
+        r"dishes?|entrees?|desserts?))?"
+        r"(?:\s+(?:except|but(?:\s+not)?)\s+(?P<rest>.+))?$",
+        msg,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+
+    def _tags_in(text: str) -> set[str]:
+        t = (text or "").lower()
+        tags: set[str] = set()
+        non_veg = bool(re.search(r"\bnon[\s-]?veg\b|\bnon[\s-]?vegetarian\b", t))
+        if non_veg:
+            tags.add("non_veg")
+        elif re.search(r"\bveg\b|\bvegetarian\b", t):
+            tags.add("veg")
+        if re.search(r"\begg\b", t):
+            tags.add("egg")
+        if re.search(r"\bseafood\b|\bfish\b", t):
+            tags.add("seafood")
+        if re.search(r"\bchicken\b", t):
+            tags.add("chicken")
+        if re.search(r"\bpork\b", t):
+            tags.add("pork")
+        if re.search(r"\bbeef\b", t):
+            tags.add("beef")
+        return tags
+
+    include_tags = _tags_in(m.group("body") or "")
+    if not include_tags:
+        return None
+    exclude_tags = _tags_in(m.group("rest") or "")
+    category = _normalize_menu_category_hint(m.group("cat") or "")
+    return include_tags, exclude_tags, category
+
+
+def _parse_remove_all_except(message: str) -> tuple[list[str], str | None] | None:
+    """Parse 'remove all except X' / 'delete everything but X' into (keep, category_override)."""
+    msg = normalize_structured_choice(message or "")
+    if not msg:
+        return None
+    m = re.match(
+        r"^(?:remove|delete|drop|take off)\s+(?:all|everything)"
+        r"(?:\s+(?:in|from|on|for)\s+(?P<cat>"
+        r"appetizers?|apps?|starters?|mains?|main(?:\s+menu)?|main(?:\s+dishes)?|"
+        r"dishes?|entrees?|desserts?))?"
+        r"\s+(?:except|but(?:\s+not)?)\s+(?P<rest>.+)$",
+        msg,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+    category = _normalize_menu_category_hint(m.group("cat") or "")
+    rest = (m.group("rest") or "").strip()
+    items = _split_freeform_list(rest)
+    if not items:
+        return None
+    return items, category
+
+
+def _coerce_all_except_raw_items(raw_items: list[str]) -> list[str]:
+    """If raw_items contains ALL plus an 'except ...' token, normalize to ALL_EXCEPT:."""
+    if not raw_items or len(raw_items) < 2:
+        return raw_items
+
+    has_all = any(str(x or "").strip().upper() == "ALL" for x in raw_items)
+    if not has_all:
+        return raw_items
+
+    exceptions: list[str] = []
+    for token in raw_items:
+        t = normalize_structured_choice(str(token or ""))
+        m = re.match(r"^(?:except|but(?:\s+not)?)\s+(.+)$", t, flags=re.IGNORECASE)
+        if not m:
+            continue
+        exceptions.extend(_split_freeform_list((m.group(1) or "").strip()))
+
+    if not exceptions:
+        return raw_items
+    return ["ALL_EXCEPT:" + ", ".join(exceptions)]
 
 
 def _slot_for_category(category: str | None) -> str:
@@ -981,10 +1520,7 @@ def _build_menu_turn_response(
             after=parse_slot_items(get_slot_value(slots, "appetizers") or ""),
         )
         if next_target == "ask_appetizer_style":
-            return (
-                lead
-                + "\n\nHow would you like the appetizers served: passed around by servers, or set up at a station?"
-            )
+            return lead + "\n\nHow should we serve the appetizers - passed or station?"
         return lead
 
     if "appetizer_style" in filled_slots:
@@ -994,6 +1530,7 @@ def _build_menu_turn_response(
             if style == "passed"
             else "Perfect — we will set the appetizers at a station."
         )
+        lead = "Appetizers will be passed around." if style == "passed" else "Appetizers will be set up at a station."
         menu_text = _format_menu_response(next_phase, input_hint, slots) if input_hint else None
         return lead + ("\n\n" + menu_text if menu_text else "")
 
@@ -1010,28 +1547,53 @@ def _build_menu_turn_response(
     if "meal_style" in filled_slots:
         meal_style = str(get_slot_value(slots, "meal_style") or "").lower()
         if meal_style == "plated":
-            return "Perfect — we will serve the meal plated."
-        if meal_style == "buffet":
-            return "Perfect — we will serve the meal buffet-style."
+            lead = "Perfect — we will serve the meal plated."
+        elif meal_style == "buffet":
+            lead = "Perfect — we will serve the meal buffet-style."
+        else:
+            lead = "Got it — noted."
+
+        return lead
 
     if "desserts" in filled_slots:
-        lead = _list_progress_message(
-            label="desserts",
-            before=before_lists["desserts"],
-            after=parse_slot_items(get_slot_value(slots, "desserts") or ""),
-        )
+        desserts_val = str(get_slot_value(slots, "desserts") or "")
+        if desserts_val.strip().lower() in {"none", "no", "n/a"}:
+            lead = "Got it — we’ll skip desserts."
+        else:
+            lead = _list_progress_message(
+                label="desserts",
+                before=before_lists["desserts"],
+                after=parse_slot_items(desserts_val),
+            )
         if next_target == "transition_to_addons":
-            return lead + "\n\nWould you like to add drinks or bar service for the event?"
+            return lead + "\n\nDo you want drinks or bar service for the event?"
+        if next_target in {"ask_event_date", "ask_venue", "ask_guest_count", "ask_service_type"}:
+            from agent.prompt_registry import fallback_prompt_for_target
+
+            q = fallback_prompt_for_target("basic_info_tool", next_target)
+            if q:
+                return lead + "\n\n" + q
+        if next_target in {
+            "ask_wedding_cake",
+            "ask_wedding_cake_flavor",
+            "ask_wedding_cake_filling",
+            "ask_wedding_cake_buttercream",
+        }:
+            from agent.prompt_registry import fallback_prompt_for_target
+
+            q = fallback_prompt_for_target("basic_info_tool", next_target)
+            if q:
+                return lead + "\n\n" + q
         return lead
 
     if next_target == "ask_service_style":
         return "For the wedding, would you like to have a cocktail hour before the main meal, a reception for the main meal, or both?"
     if next_target == "ask_appetizer_style":
-        return "How would you like the appetizers served? Would you like servers to walk around with them, or have them set up at a station?"
+        return "How should we serve the appetizers - passed or station?"
     if next_target == "ask_meal_style":
-        return "Would you like the meal served plated at the tables, or as a buffet where guests serve themselves?"
+        return "For the main meal, do you want it plated or buffet-style?"
     if next_target == "transition_to_addons":
-        return "Would you like to add drinks, coffee, or bar service for the event?"
+        return "Do you want drinks or bar service for the event?"
     return None
 
 
@@ -1041,19 +1603,25 @@ def _list_progress_message(*, label: str, before: list[str], after: list[str]) -
     added = [item for item in after if item.lower() not in before_lower]
     removed = [item for item in before if item.lower() not in after_lower]
 
+    # Keep acknowledgements readable for large multi-picks.
+    _MAX_INLINE = 6
+
     if added and removed:
-        lead = (
-            f"Updated your {label}: removed {', '.join(removed)} and added {', '.join(added)}."
-        )
+        if len(added) > _MAX_INLINE or len(removed) > _MAX_INLINE:
+            lead = f"Updated your {label}: removed {len(removed)} and added {len(added)}."
+        else:
+            lead = f"Updated your {label}: removed {', '.join(removed)} and added {', '.join(added)}."
     elif added:
-        lead = f"Added {', '.join(added)}."
+        lead = f"Added {len(added)} {label}." if len(added) > _MAX_INLINE else f"Added {', '.join(added)}."
     elif removed:
-        lead = f"Removed {', '.join(removed)}."
+        lead = f"Removed {len(removed)} {label}." if len(removed) > _MAX_INLINE else f"Removed {', '.join(removed)}."
     else:
         lead = f"Your {label} are set."
 
     if after:
-        return lead + f" Your {label} are now: {', '.join(after)}."
+        if len(after) <= _MAX_INLINE:
+            return lead + f" Your {label} are now: {', '.join(after)}."
+        return lead + f" Your {label} are now set."
     return lead + f" Your {label} list is empty now."
 
 

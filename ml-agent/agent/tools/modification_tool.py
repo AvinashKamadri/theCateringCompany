@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import datetime
 from typing import Any
 
 from langchain_core.messages import BaseMessage
@@ -177,6 +178,23 @@ _NO_TOKENS = frozenset({
 })
 
 
+_LABOR_SLOTS = frozenset({
+    "labor_ceremony_setup",
+    "labor_table_setup",
+    "labor_table_preset",
+    "labor_cleanup",
+    "labor_trash",
+})
+
+_LABOR_SLOT_ALIASES: dict[str, tuple[str, ...]] = {
+    "labor_ceremony_setup": ("ceremony", "ceremony setup"),
+    "labor_table_setup": ("table setup", "tables setup"),
+    "labor_table_preset": ("preset", "table preset", "tables preset"),
+    "labor_cleanup": ("cleanup", "clean up"),
+    "labor_trash": ("trash", "trash removal", "garbage"),
+}
+
+
 def _normalize_yes_no(message: str) -> str | None:
     msg = normalize_choice_text(message or "").strip().lower()
     if not msg:
@@ -185,6 +203,22 @@ def _normalize_yes_no(message: str) -> str | None:
         return "yes"
     if msg in _NO_TOKENS:
         return "no"
+    return None
+
+
+def _normalize_bool_value(message: str, *, truthy_markers: tuple[str, ...] = (), falsy_markers: tuple[str, ...] = ()) -> bool | None:
+    msg = normalize_choice_text(message or "").strip().lower()
+    if not msg:
+        return None
+    yn = _normalize_yes_no(msg)
+    if yn == "yes":
+        return True
+    if yn == "no":
+        return False
+    if truthy_markers and any(m in msg for m in truthy_markers):
+        return True
+    if falsy_markers and any(m in msg for m in falsy_markers):
+        return False
     return None
 
 
@@ -216,6 +250,90 @@ def _normalize_bar_package_value(raw: Any) -> str | None:
     if ("beer" in msg and "wine" in msg) or "beer+wine" in msg or "beer & wine" in msg:
         return "beer_wine"
     return None
+
+
+def _extract_multi_scalar_updates(message: str) -> dict[str, Any]:
+    """Best-effort deterministic multi-field updates from a single message.
+
+    This avoids an extra LLM call for common "change X and Y" commands and
+    ensures we can update multiple slots in one turn.
+    """
+    text = (message or "").strip()
+    raw_lower = text.lower()
+    low = normalize_choice_text(text)
+    if not text or not low:
+        return {}
+
+    updates: dict[str, Any] = {}
+
+    # Email
+    email_match = re.search(r"([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})", raw_lower, flags=re.IGNORECASE)
+    if email_match and ("email" in raw_lower or "mail" in raw_lower):
+        updates["email"] = email_match.group(1)
+
+    # Phone
+    if "phone" in low or "number" in low or "contact" in low:
+        phone_match = re.search(r"(\+?\d[\d\s()\-\u2010\u2011\u2012\u2013]{7,}\d)", text)
+        if phone_match:
+            updates["phone"] = re.sub(r"\s+", "", phone_match.group(1)).replace("(", "").replace(")", "").replace("-", "")
+
+    # Meal style
+    meal_style = _normalize_meal_style_value(low)
+    if meal_style:
+        updates["meal_style"] = meal_style
+
+    # Service type
+    if "drop" in low or "onsite" in low or "on-site" in low or "on site" in low:
+        if "drop" in low:
+            updates["service_type"] = "Dropoff"
+        elif "onsite" in low or "on-site" in low or "on site" in low:
+            updates["service_type"] = "Onsite"
+
+    # Drinks/bar package in same utterance ("Beer+Wine", "full open bar", "no drinks")
+    pkg = _normalize_bar_package_value(low)
+    if pkg:
+        updates["drinks"] = True
+        updates["bar_service"] = True
+        updates["bar_package"] = pkg
+    elif "no drinks" in low or ("drinks" in low and _normalize_yes_no(low) == "no"):
+        updates["drinks"] = False
+
+    # Coffee / bar booleans
+    if "coffee" in low:
+        yn = _normalize_yes_no(low)
+        if yn == "yes":
+            updates["coffee_service"] = True
+        elif yn == "no":
+            updates["coffee_service"] = False
+    if "bar service" in low or (("bar" in low) and ("package" not in low) and ("open bar" not in low)):
+        yn = _normalize_yes_no(low)
+        if yn == "yes":
+            updates["bar_service"] = True
+            updates.setdefault("drinks", True)
+        elif yn == "no":
+            updates["bar_service"] = False
+
+    # Guest count
+    if "guest" in low or "headcount" in low:
+        m = re.search(r"\b(\d{1,4})\b", low)
+        if m:
+            updates["guest_count"] = int(m.group(1))
+        elif "tbd" in low or "confirm" in low:
+            updates["guest_count"] = "TBD"
+
+    # Event date (YYYY-MM-DD only here; natural language dates use BasicInfoTool validator path)
+    if "date" in low:
+        m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", low)
+        if m:
+            try:
+                y, mo, d = (int(p) for p in m.group(1).split("-"))
+                dt = datetime.date(y, mo, d)
+                if dt > datetime.date.today():
+                    updates["event_date"] = dt.isoformat()
+            except Exception:
+                pass
+
+    return updates
 
 
 def _normalize_event_type_display(raw: Any) -> str | None:
@@ -580,6 +698,55 @@ class ModificationTool:
     ) -> ToolResult:
         slots = state["slots"]
 
+        # Deterministic multi-field edits in one message (common UX pattern).
+        multi = _extract_multi_scalar_updates(message)
+        if len(multi) >= 2 and not get_slot_value(slots, "__pending_modification_request") and not get_slot_value(slots, "__pending_modification_choice"):
+            applied: list[str] = []
+            for slot_name, value in multi.items():
+                if slot_name in LOCKED_SLOTS or slot_name.startswith("__"):
+                    continue
+                old = get_slot_value(slots, slot_name)
+                fill_slot(slots, slot_name, value)
+                apply_cascade(slot_name, old, value, slots)
+                applied.append(slot_name)
+
+            ack_parts = []
+            for slot_name in applied:
+                label = _SLOT_LABELS.get(slot_name, slot_name.replace("_", " "))
+                if slot_name == "bar_package":
+                    ack_parts.append(f"Bar package: {_pretty_slot_value('bar_package', get_slot_value(slots, 'bar_package'))}.")
+                elif slot_name == "meal_style":
+                    ack_parts.append(f"Meal style: {_pretty_slot_value('meal_style', get_slot_value(slots, 'meal_style'))}.")
+                elif slot_name == "service_type":
+                    ack_parts.append(f"Service: {_pretty_slot_value('service_type', get_slot_value(slots, 'service_type'))}.")
+                else:
+                    ack_parts.append(f"Updated {label}.")
+
+            next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                slots=slots,
+                state=state,
+            )
+            direct = " ".join(ack_parts).strip()
+            if resume_prompt:
+                direct = f"{direct}\n\n{resume_prompt}"
+
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "modification": {
+                        "target_slot": applied[0] if applied else "selection",
+                        "action": "replace",
+                        "also_updated": applied[1:],
+                    },
+                    "next_phase": next_phase,
+                    "next_question_target": next_target,
+                    "next_question_prompt": resume_prompt,
+                },
+                input_hint=input_hint,
+                direct_response=direct,
+            )
+
         pending_confirmation = get_slot_value(slots, "__pending_confirmation")
         if isinstance(pending_confirmation, dict) and pending_confirmation.get("tool") == "modification_tool":
             if pending_confirmation.get("question_id") == "confirm_event_type_reset":
@@ -819,7 +986,50 @@ class ModificationTool:
                 return await self._reopen_list_slot(target_slot, slots, state, message=message)
             return await self._apply_list_modification(extracted, slots, state, message=message)
 
-        if target_slot == "wedding_cake" and _should_reopen_wedding_cake(message, extracted):
+        if target_slot == "wedding_cake":
+            # Wedding cake is a multi-step sub-flow. Any attempt to "add" or
+            # "change" the wedding cake should reopen the sub-questions instead
+            # of storing raw command text like "add wedding cake".
+            if extracted.action == "remove" or _looks_like_decline(message):
+                old_value = get_slot_value(slots, "wedding_cake")
+                for slot_name in (
+                    "wedding_cake",
+                    "__wedding_cake_gate",
+                    "__wedding_cake_flavor",
+                    "__wedding_cake_filling",
+                    "__wedding_cake_buttercream",
+                ):
+                    if is_filled(slots, slot_name):
+                        clear_slot(slots, slot_name)
+                fill_slot(slots, "__wedding_cake_gate", False)
+                fill_slot(slots, "wedding_cake", "none")
+                ack_text = _scalar_mod_ack_text(
+                    target_slot="wedding_cake",
+                    action="remove",
+                    new_value=None,
+                )
+                next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                    slots=slots,
+                    state=state,
+                )
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "modification": {
+                            "target_slot": "wedding_cake",
+                            "action": "remove",
+                            "old_value": old_value,
+                            "new_value": "none",
+                            "mod_ack_text": ack_text,
+                        },
+                        "next_phase": next_phase,
+                        "next_question_target": next_target,
+                        "next_question_prompt": resume_prompt,
+                    },
+                    input_hint=input_hint,
+                    direct_response=_compose_direct_response(ack_text, resume_prompt),
+                )
             return self._reopen_wedding_cake(slots, state)
 
         return await self._apply_scalar_modification(extracted, message, slots, state, history)
@@ -1288,7 +1498,13 @@ class ModificationTool:
 
         # --- Add / replace phase ---
         added_items_resolved: list[dict] = []
+        already_selected: list[str] = []
+        unavailable: list[str] = []
         if add_texts:
+            # Track items the user requested that are already in their selection.
+            for t in add_texts:
+                already_selected.extend(_matching_names(current_items, t))
+
             if target_slot == "desserts":
                 event_type = (get_slot_value(slots, "event_type") or "").lower()
                 dessert_resolution = await resolve_dessert_choices(
@@ -1369,6 +1585,11 @@ class ModificationTool:
                             state,
                             message=message,
                         )
+                # Nothing resolved anywhere and it isn't already selected: treat as unavailable.
+                for t in add_texts:
+                    if _matching_names(current_items, t):
+                        continue
+                    unavailable.append(t)
 
         # Cross-category confirmation: desserts <-> non-desserts in a replace
         if (
@@ -1518,7 +1739,9 @@ class ModificationTool:
                     if len(unique) == 1:
                         ack_text = f"{unique[0]} is already selected."
                     else:
-                        ack_text = "Those items are already selected."
+                        preview = ", ".join(unique[:6])
+                        suffix = "…" if len(unique) > 6 else ""
+                        ack_text = f"Already selected: {preview}{suffix}."
                 else:
                     missing = ", ".join(add_texts)
                     ack_text = f"'{missing}' isn't on the menu."
@@ -1669,6 +1892,8 @@ class ModificationTool:
                     "action": mod.action,
                     "removed": removed_names,
                     "added": added_names,
+                    "already_selected": sorted({n for n in already_selected if n}),
+                    "unavailable": [t for t in unavailable if t],
                     "additional_changes": (
                         [
                             {
@@ -2443,6 +2668,165 @@ class ModificationTool:
         target_slot = mod.target_slot
         new_value = mod.new_value
         old_value = get_slot_value(slots, target_slot)
+
+        if target_slot in {"bar_service", "coffee_service", "linens", "followup_call_requested", "cocktail_hour"}:
+            wants = _normalize_bool_value(
+                str(new_value or message or ""),
+                truthy_markers=(
+                    "yes",
+                    "include",
+                    "add",
+                    "want",
+                    "need",
+                    "coffee" if target_slot == "coffee_service" else "",
+                    "bar" if target_slot == "bar_service" else "",
+                    "linen" if target_slot == "linens" else "",
+                    "cocktail" if target_slot == "cocktail_hour" else "",
+                ),
+                falsy_markers=("no", "skip", "none", "not needed", "don't", "do not"),
+            )
+            if wants is None:
+                label = _SLOT_LABELS.get(target_slot, target_slot.replace("_", " "))
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "error": "invalid_new_value",
+                        "modification_target_slot": target_slot,
+                        "next_phase": state.get("conversation_phase"),
+                        "next_question_target": "ask_modification_value",
+                    },
+                    direct_response=f"For {label}, reply yes or no.",
+                )
+
+            old = get_slot_value(slots, target_slot)
+            fill_slot(slots, target_slot, wants)
+            effects = apply_cascade(target_slot, old, wants, slots)
+
+            # bar/coffee imply drinks=True
+            if target_slot in {"bar_service", "coffee_service"} and wants is True:
+                old_drinks = get_slot_value(slots, "drinks")
+                fill_slot(slots, "drinks", True)
+                apply_cascade("drinks", old_drinks, True, slots)
+
+            ack_text = _scalar_mod_ack_text(target_slot=target_slot, action=mod.action, new_value=wants)
+            next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                slots=slots,
+                state=state,
+            )
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "modification": {
+                        "target_slot": target_slot,
+                        "action": mod.action,
+                        "old_value": old_value,
+                        "new_value": wants,
+                        "mod_ack_text": ack_text,
+                        "effects": effects,
+                    },
+                    "next_phase": next_phase,
+                    "next_question_target": next_target,
+                    "next_question_prompt": resume_prompt,
+                },
+                input_hint=input_hint,
+                direct_response=_compose_direct_response(ack_text, resume_prompt),
+            )
+
+        if target_slot == "wedding_cake":
+            # Always reopen the wedding cake sub-flow for any non-removal edit.
+            # The actual cake value is composed from flavor/filling/buttercream.
+            if mod.action == "remove" or _looks_like_decline(message):
+                for slot_name in (
+                    "wedding_cake",
+                    "__wedding_cake_gate",
+                    "__wedding_cake_flavor",
+                    "__wedding_cake_filling",
+                    "__wedding_cake_buttercream",
+                ):
+                    if is_filled(slots, slot_name):
+                        clear_slot(slots, slot_name)
+                fill_slot(slots, "__wedding_cake_gate", False)
+                fill_slot(slots, "wedding_cake", "none")
+                ack_text = _scalar_mod_ack_text(target_slot="wedding_cake", action="remove", new_value=None)
+                next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                    slots=slots,
+                    state=state,
+                )
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "modification": {
+                            "target_slot": "wedding_cake",
+                            "action": "remove",
+                            "old_value": old_value,
+                            "new_value": "none",
+                            "mod_ack_text": ack_text,
+                        },
+                        "next_phase": next_phase,
+                        "next_question_target": next_target,
+                        "next_question_prompt": resume_prompt,
+                    },
+                    input_hint=input_hint,
+                    direct_response=_compose_direct_response(ack_text, resume_prompt),
+                )
+            return self._reopen_wedding_cake(slots, state)
+
+        if target_slot in _LABOR_SLOTS:
+            msg = normalize_choice_text(str(new_value or message or "")).strip().lower()
+            yn = _normalize_yes_no(msg)
+            wants: bool | None = None
+            if yn == "yes":
+                wants = True
+            elif yn == "no":
+                wants = False
+            else:
+                aliases = _LABOR_SLOT_ALIASES.get(target_slot, ())
+                if any(a in msg for a in aliases):
+                    wants = True
+                if msg in {"none", "no labor", "no staffing"}:
+                    wants = False
+
+            if wants is None:
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "error": "invalid_new_value",
+                        "next_phase": state.get("conversation_phase"),
+                        "next_question_target": "ask_labor_services",
+                    },
+                    direct_response="For staffing, reply yes/no for that service (or say none to skip staffing).",
+                )
+
+            old = get_slot_value(slots, target_slot)
+            fill_slot(slots, target_slot, wants)
+            apply_cascade(target_slot, old, wants, slots)
+            ack_text = _scalar_mod_ack_text(target_slot=target_slot, action=mod.action, new_value=wants)
+            next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                slots=slots,
+                state=state,
+            )
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "modification": {
+                        "target_slot": target_slot,
+                        "action": mod.action,
+                        "old_value": old_value,
+                        "new_value": wants,
+                        "mod_ack_text": ack_text,
+                    },
+                    "next_phase": next_phase,
+                    "next_question_target": next_target,
+                    "next_question_prompt": resume_prompt,
+                },
+                input_hint=input_hint,
+                direct_response=_compose_direct_response(ack_text, resume_prompt),
+            )
 
         # For slots that have validators (date, enums), re-run full extraction
         # so Pydantic rejects invalid values instead of corrupting state.

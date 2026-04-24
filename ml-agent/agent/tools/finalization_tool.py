@@ -76,10 +76,9 @@ def _next_target(slots: dict) -> str:
         if not is_filled(slots, "__gate_dietary"):
             return "ask_dietary_gate"
         return "collect_dietary_concerns"
+    # Skip "additional notes" entirely (too many closing questions).
     if not is_filled(slots, "additional_notes"):
-        if not is_filled(slots, "__gate_additional_notes"):
-            return "ask_additional_notes_gate"
-        return "collect_additional_notes"
+        fill_slot(slots, "additional_notes", "none")
     if not is_filled(slots, "followup_call_requested"):
         return "ask_followup_call"
     return "review"
@@ -89,7 +88,7 @@ def _phase_of(slots: dict) -> str:
     target = _next_target(slots)
     if target in {"ask_special_requests_gate", "collect_special_requests"}:
         return PHASE_SPECIAL_REQUESTS
-    if target in {"ask_dietary_gate", "collect_dietary_concerns", "ask_additional_notes_gate", "collect_additional_notes"}:
+    if target in {"ask_dietary_gate", "collect_dietary_concerns"}:
         return PHASE_DIETARY
     if target == "ask_followup_call":
         return PHASE_FOLLOWUP
@@ -101,8 +100,6 @@ def _allowed_fields_for_target(target: str) -> set[str]:
         return {"special_requests"}
     if target in {"ask_dietary_gate", "collect_dietary_concerns"}:
         return {"dietary_concerns"}
-    if target in {"ask_additional_notes_gate", "collect_additional_notes"}:
-        return {"additional_notes"}
     if target == "ask_followup_call":
         return {"followup_call_requested"}
     if target == "review":
@@ -161,22 +158,14 @@ def _apply_structured_answer(
             fills.append(("dietary_concerns", "none"))
             return True
 
-    if target == "ask_additional_notes_gate":
-        if _is_gate_yes(message_lower):
-            fill_slot(slots, "__gate_additional_notes", True)
-            fills.append(("__gate_additional_notes", True))
-            return True
-        if _is_gate_no(message_lower):
-            fill_slot(slots, "additional_notes", "none")
-            fills.append(("additional_notes", "none"))
-            return True
-
     if target == "ask_followup_call":
-        if _is_gate_yes(message_lower):
+        # Follow-up call is a pure yes/no gate (no free-text capture), so we
+        # can safely accept prefix variants like "yes, schedule a call".
+        if _is_gate_yes(message_lower) or message_lower.startswith("yes"):
             fill_slot(slots, "followup_call_requested", True)
             fills.append(("followup_call_requested", True))
             return True
-        if _is_gate_no(message_lower):
+        if _is_gate_no(message_lower) or message_lower.startswith("no"):
             fill_slot(slots, "followup_call_requested", False)
             fills.append(("followup_call_requested", False))
             return True
@@ -199,14 +188,6 @@ def _input_hint_for_target(target: str) -> dict | None:
             "options": [
                 {"value": "yes", "label": "Yes, note food or health needs"},
                 {"value": "no", "label": "No dietary concerns"},
-            ],
-        }
-    if target == "ask_additional_notes_gate":
-        return {
-            "type": "options",
-            "options": [
-                {"value": "yes", "label": "Yes, add a final note"},
-                {"value": "no", "label": "No additional notes"},
             ],
         }
     if target == "ask_followup_call":
@@ -243,8 +224,6 @@ def _direct_response_for_target(target: str) -> str | None:
             "diabetes, vegan, or gluten-free?"
         ),
         "collect_dietary_concerns": "Tell me the food or health needs we should note.",
-        "ask_additional_notes_gate": "Is there anything else you want us to remember before we finish?",
-        "collect_additional_notes": "Tell me any last note you want us to remember.",
         "ask_followup_call": "Would you like us to schedule a quick call to go over everything?",
     }
     return prompts.get(target)
@@ -300,16 +279,13 @@ class FinalizationTool:
         if current_target == "collect_dietary_concerns" and not is_filled(slots, "dietary_concerns") and _msg_lower in _DECLINE_RE:
             fill_slot(slots, "dietary_concerns", "none")
             fills.append(("dietary_concerns", "none"))
-        if current_target == "collect_additional_notes" and not is_filled(slots, "additional_notes") and _msg_lower in _DECLINE_RE:
-            fill_slot(slots, "additional_notes", "none")
-            fills.append(("additional_notes", "none"))
 
         # Fallback: detect confirmation at review phase when extractor missed it.
         # The LLM is strict about "confirm_final" so casual phrases like
         # "we are done", "ok", "great", "looks good" slip through — resulting
         # in the review loop that wedges the conversation. Use a dedicated
         # yes/no classifier rather than a regex to avoid past over-match bugs.
-        if not confirm_final and _phase_of(slots) == PHASE_REVIEW:
+        if not confirm_final and current_target == "review":
             if await _classify_review_confirmation(message):
                 confirm_final = True
 
@@ -349,7 +325,6 @@ class FinalizationTool:
         _GATE_TARGETS = {
             "ask_special_requests_gate": ("__gate_special_requests", "special_requests"),
             "ask_dietary_gate": ("__gate_dietary", "dietary_concerns"),
-            "ask_additional_notes_gate": ("__gate_additional_notes", "additional_notes"),
             "ask_followup_call": (None, "followup_call_requested"),
         }
         if next_target in _GATE_TARGETS:

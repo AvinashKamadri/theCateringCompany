@@ -362,6 +362,13 @@ _BASIC_INFO_PROMPTS = {
         "Let's move to the menu. We will start with appetizers and build from there.",
         "Now for the menu. I will walk you through appetizers first, then the rest of the meal.",
     ),
+    # BasicInfoTool uses this target name when it has finished collecting the
+    # required basics and is handing off to add-ons.
+    "transition_to_addons": (
+        "Do you want to add drinks or bar service? (Reply yes or no.)",
+        "Want to include drinks or bar service? (Reply yes or no.)",
+        "Should I add drinks/bar service, or skip it? (Reply yes or no.)",
+    ),
 }
 
 _MENU_SELECTION_PROMPTS = {

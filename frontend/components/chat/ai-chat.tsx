@@ -1093,8 +1093,42 @@ function isAskingForName(content: string): boolean {
 
 function isAskingForPhone(content: string): boolean {
   const lower = content.toLowerCase();
-  return (lower.includes('phone') || lower.includes('mobile') || lower.includes('number to reach')) &&
-    !lower.includes('guest') && !lower.includes('how many');
+  // Avoid false-positives on confirmations like:
+  // "I updated your phone to ... Your phone is now ..."
+  if (
+    lower.includes('updated your phone') ||
+    lower.includes('your phone is now') ||
+    lower.includes('i updated your phone')
+  ) {
+    return false;
+  }
+
+  const isLikelyQuestion =
+    lower.includes('?') ||
+    lower.startsWith('what ') ||
+    lower.startsWith('which ') ||
+    lower.startsWith('can you ') ||
+    lower.startsWith('could you ');
+
+  const matchesKnownPhonePrompts =
+    lower.includes('best phone number') ||
+    lower.includes('phone number to reach') ||
+    lower.includes('number to reach you') ||
+    lower.includes('reach you at') ||
+    lower.includes('use for follow-up') ||
+    lower.includes('reach you quickly') ||
+    lower.includes('which phone number') ||
+    lower.includes('what phone number');
+
+  return (
+    (matchesKnownPhonePrompts ||
+      (isLikelyQuestion &&
+        (lower.includes('phone number') ||
+          lower.includes('mobile number') ||
+          lower.includes('number to reach')))) &&
+    !lower.includes('guest') &&
+    !lower.includes('how many')
+  );
 }
 
 function isAskingForEmail(content: string): boolean {

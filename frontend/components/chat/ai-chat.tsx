@@ -1493,8 +1493,13 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
 
   const handleSendMessage = async (messageText?: string) => {
     // For multi-select menu mode, build content from selections
-    const isMultiSelectSend = !messageText && activeMenuMsgIdx !== null && menuSelections.length > 0;
-    const content = messageText || (isMultiSelectSend ? menuSelections.join(', ') : input.trim());
+    // Only treat as a big-menu multi-select (suppress AI response) when selections
+    // come from a priced list (appetizers/mains/desserts), not small option lists.
+    const activeMsg = activeMenuMsgIdx !== null ? state.messages[activeMenuMsgIdx] : null;
+    const activeMsgItems = activeMsg ? parseListItems(activeMsg.content) : null;
+    const isPricedMenuSend = (activeMsgItems?.filter((i) => i.price).length ?? 0) > 3;
+    const isMultiSelectSend = !messageText && activeMenuMsgIdx !== null && menuSelections.length > 0 && isPricedMenuSend;
+    const content = messageText || (isMultiSelectSend ? menuSelections.join(', ') : (activeMenuMsgIdx !== null && menuSelections.length > 0 ? menuSelections.join(', ') : input.trim()));
     if (!content || state.isLoading) return;
 
     if (content.startsWith('/')) {
@@ -1946,10 +1951,12 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                     <input
                       type="number"
                       value={input}
-                      onChange={(e) => setInput(e.target.value)}
+                      onChange={(e) => setInput(e.target.value.replace(/\D/g, ''))}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSpecialSend(); } }}
                       min={10}
                       max={10000}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       placeholder="Number of guests"
                       className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm text-white placeholder:text-white/40 focus:outline-none"
                       disabled={state.isLoading}

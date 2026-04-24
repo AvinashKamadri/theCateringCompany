@@ -49,6 +49,9 @@ from agent.tools.finalization_tool import _render_review_recap
 from agent.tools import menu_selection_tool as menu_tool_module
 from agent.tools.modification_tool import ModificationTool, _resume_after_modification
 from agent.tools.add_ons_tool import _apply_structured_answer, _next_target
+from agent.tools.finalization_tool import _next_target as _final_next_target
+from agent.tools.finalization_tool import _apply_structured_answer as _final_apply_structured_answer
+from agent.tools.finalization_tool import FinalizationTool
 
 
 @pytest.mark.asyncio
@@ -1505,10 +1508,176 @@ async def test_review_stage_scalar_edit_returns_to_change_picker():
     assert "anything else" in (result.direct_response or "").lower()
 
 
+@pytest.mark.asyncio
+async def test_modification_tool_reopens_wedding_cake_instead_of_storing_raw_text():
+    tool = ModificationTool()
+    slots = initialize_empty_slots()
+    fill_slot(slots, "event_type", "Wedding")
+    fill_slot(slots, "wedding_cake", "none")
+
+    result = await tool._apply_scalar_modification(
+        ModificationExtraction(target_slot="wedding_cake", action="replace", new_value="add wedding cake"),
+        "add wedding cake",
+        slots,
+        {"conversation_phase": PHASE_REVIEW},
+        [],
+    )
+
+    assert result.response_context["next_phase"] == PHASE_WEDDING_CAKE
+    assert result.response_context["next_question_target"] == "ask_wedding_cake"
+    assert get_slot_value(slots, "wedding_cake") is None
+
+
+@pytest.mark.asyncio
+async def test_modification_tool_normalizes_bar_service_and_sets_drinks_true():
+    tool = ModificationTool()
+    slots = initialize_empty_slots()
+    fill_slot(slots, "drinks", False)
+    fill_slot(slots, "bar_service", False)
+
+    await tool._apply_scalar_modification(
+        ModificationExtraction(target_slot="bar_service", action="replace", new_value="yes"),
+        "yes",
+        slots,
+        {"conversation_phase": PHASE_REVIEW},
+        [],
+    )
+
+    assert get_slot_value(slots, "bar_service") is True
+    assert get_slot_value(slots, "drinks") is True
+
+
+@pytest.mark.asyncio
+async def test_modification_tool_multi_updates_email_and_phone_without_llm(monkeypatch):
+    # Ensure we don't accidentally call the LLM extractor for this common case.
+    import agent.tools.modification_tool as mod_tool_module
+
+    async def _nope(*args, **kwargs):
+        raise AssertionError("LLM extract should not be called for deterministic multi updates")
+
+    monkeypatch.setattr(mod_tool_module, "extract", _nope)
+
+    tool = ModificationTool()
+    slots = initialize_empty_slots()
+    fill_slot(slots, "email", "old@example.com")
+    fill_slot(slots, "phone", "+10000000000")
+
+    result = await tool.run(
+        message="change my email to new@example.com and phone number to +1 234 567 8900",
+        history=[],
+        state={"slots": slots, "conversation_phase": PHASE_REVIEW, "messages": []},
+    )
+
+    assert get_slot_value(slots, "email") == "new@example.com"
+    assert get_slot_value(slots, "phone").startswith("+1")
+    assert "updated email" in (result.direct_response or "").lower()
+
+
 def test_prompt_registry_has_wedding_cake_subprompts():
     assert "cake" in fallback_prompt_for_target("basic_info_tool", "ask_wedding_cake_flavor").lower()
     assert "filling" in fallback_prompt_for_target("basic_info_tool", "ask_wedding_cake_filling").lower()
     assert "buttercream" in fallback_prompt_for_target("basic_info_tool", "ask_wedding_cake_buttercream").lower()
+    assert "drinks" in fallback_prompt_for_target("basic_info_tool", "transition_to_addons").lower()
+
+
+@pytest.mark.asyncio
+async def test_response_generator_uses_natural_bool_ack_for_coffee_service():
+    slots = initialize_empty_slots()
+    fill_slot(slots, "coffee_service", False)
+
+    tool_result = ToolResult(
+        state={"slots": slots, "conversation_phase": PHASE_REVIEW, "messages": []},
+        response_context={
+            "tool": "modification_tool",
+            "modification": {
+                "target_slot": "coffee_service",
+                "action": "replace",
+                "old_value": False,
+                "new_value": True,
+            },
+            "next_question_target": "review",
+        },
+        input_hint=None,
+    )
+
+    text = await render(tool_result=tool_result, user_message="yes", history=[])
+    lowered = text.lower()
+    assert "coffee bar" in lowered
+    assert "updated your coffee" not in lowered
+
+
+@pytest.mark.asyncio
+async def test_response_generator_mentions_already_selected_on_replace():
+    slots = initialize_empty_slots()
+    tool_result = ToolResult(
+        state={"slots": slots, "conversation_phase": PHASE_COCKTAIL, "messages": []},
+        response_context={
+            "tool": "modification_tool",
+            "modification": {
+                "target_slot": "appetizers",
+                "action": "replace",
+                "removed": ["White Bean Tapenade w/ Crostini"],
+                "added": [],
+                "already_selected": ["Adobo Lime Chicken Bites"],
+                "unavailable": ["sushi"],
+                "new_value": "mock",
+            },
+            "next_question_target": "ask_appetizer_style",
+        },
+        input_hint=None,
+    )
+
+    text = await render(tool_result=tool_result, user_message="replace", history=[])
+    lowered = text.lower()
+    assert "already" in lowered
+    assert "adobo lime chicken bites" in lowered
+    assert "sushi" in lowered
+
+
+def test_finalization_skips_additional_notes_and_goes_to_followup():
+    slots = initialize_empty_slots()
+    fill_slot(slots, "special_requests", "none")
+    fill_slot(slots, "dietary_concerns", "none")
+    # additional_notes intentionally left empty
+
+    assert _final_next_target(slots) == "ask_followup_call"
+    assert get_slot_value(slots, "additional_notes") == "none"
+
+
+def test_finalization_followup_call_accepts_schedule_call_label():
+    slots = initialize_empty_slots()
+    fills: list[tuple[str, object]] = []
+
+    handled = _final_apply_structured_answer(
+        target="ask_followup_call",
+        message_lower="yes, schedule a call",
+        slots=slots,
+        fills=fills,
+    )
+
+    assert handled is True
+    assert get_slot_value(slots, "followup_call_requested") is True
+
+
+@pytest.mark.asyncio
+async def test_finalization_yes_to_followup_call_does_not_auto_confirm():
+    slots = initialize_empty_slots()
+    # Reach the followup call question
+    fill_slot(slots, "special_requests", "none")
+    fill_slot(slots, "dietary_concerns", "none")
+    fill_slot(slots, "additional_notes", "none")
+
+    tool = FinalizationTool()
+    result = await tool.run(
+        message="yes",
+        history=[],
+        state={"slots": slots, "conversation_phase": PHASE_FOLLOWUP},
+    )
+
+    # Should set followup_call_requested, then move to review (not complete)
+    assert get_slot_value(slots, "followup_call_requested") is True
+    assert result.response_context["next_phase"] == PHASE_REVIEW
+    assert get_slot_value(slots, "conversation_status") is None
 
 
 @pytest.mark.asyncio

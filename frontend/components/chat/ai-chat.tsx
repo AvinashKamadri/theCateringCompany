@@ -386,6 +386,7 @@ function normalizeCardValue(value: string): string {
   const v = value.trim();
   if (/^drop[-\s]?off\b/i.test(v)) return 'drop-off';
   if (/^on[-\s]?site\b|^onsite\b/i.test(v)) return 'on-site';
+  if (/^skip$/i.test(v)) return 'skip';
   return v;
 }
 
@@ -469,7 +470,7 @@ function detectInlineChoices(content: string): InlineChoice | null {
     /would you like to add.*(dessert|coffee|bar)/i,
   ];
   if (YES_NO_PATTERNS.some((p) => p.test(content)))
-    return { items: [{ name: 'Yes' }, { name: 'No' }] };
+    return { items: [{ name: 'Yes' }, { name: 'No' }, { name: 'Skip' }] };
 
   return null;
 }
@@ -767,10 +768,10 @@ function ItemSelector({
   onSelectionChange: (names: string[]) => void;
   multi: boolean;
   maxSelect?: number;
-  /** If set and `multi` is false, clicking an option immediately sends that
-   *  choice instead of waiting for the user to press Send. */
   onAutoSend?: (name: string) => void;
 }) {
+  const [activeTab, setActiveTab] = React.useState(0);
+
   const toggle = (name: string) => {
     if (multi) {
       const isSelected = selected.includes(name);
@@ -794,22 +795,42 @@ function ItemSelector({
 
   if (multi) {
     if (categories && categories.length >= 2) {
+      const safeTab = Math.min(activeTab, categories.length - 1);
+      const currentGroup = categories[safeTab];
       return (
-        <div className="mt-2 w-full space-y-4">
-          {categories.map((group) => (
-            <div key={group.category}>
-              {group.category && (
-                <p className="inline-block bg-white rounded-md border border-neutral-200 px-2.5 py-1 text-xs font-bold text-neutral-900 uppercase tracking-wider mb-2 shadow-sm">
-                  {group.category}
-                </p>
-              )}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {group.items.map((item) => (
-                  <MenuItemCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
-                ))}
-              </div>
-            </div>
-          ))}
+        <div className="mt-2 w-full">
+          {/* Category tabs */}
+          <div className="flex items-center gap-1 flex-wrap mb-3 bg-white/70 backdrop-blur-sm rounded-full px-2 py-1.5 w-fit shadow-sm border border-neutral-200/60">
+            {categories.map((group, i) => {
+              const groupSelected = group.items.filter((it) => selected.includes(it.name)).length;
+              return (
+                <button
+                  key={group.category || i}
+                  onClick={() => setActiveTab(i)}
+                  className={`relative px-3 py-1 text-xs font-semibold rounded-full transition-all whitespace-nowrap ${
+                    safeTab === i
+                      ? 'bg-neutral-900 text-white shadow-sm'
+                      : 'text-neutral-500 hover:text-neutral-800'
+                  }`}
+                >
+                  {group.category || 'Other'}
+                  {groupSelected > 0 && (
+                    <span className={`ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${safeTab === i ? 'bg-white text-neutral-900' : 'bg-neutral-900 text-white'}`}>
+                      {groupSelected}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Items for active tab */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            {currentGroup.items.map((item) => (
+              <MenuItemCard key={item.name} item={item} selected={selected.includes(item.name)} onToggle={() => toggle(item.name)} />
+            ))}
+          </div>
+
           {selected.length > 0 && (
             <p className="mt-2">
               <span className="inline-block bg-white/85 backdrop-blur-sm rounded-md px-2 py-0.5 text-xs text-neutral-700 shadow-sm">
@@ -899,31 +920,19 @@ function ReadOnlySelectionSnapshot({
     );
   };
 
+  // Flatten items from categories if present (preserve order, dedupe)
+  const flatItems = categories && categories.length >= 2
+    ? categories.flatMap((g) => g.items).filter((it, i, arr) => arr.findIndex((x) => x.name === it.name) === i)
+    : items;
+
   return (
     <div className="mt-2 rounded-2xl border border-neutral-200 bg-neutral-50/90 px-3 py-3">
       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">
         Current {heading}
       </p>
-      {categories && categories.length >= 2 ? (
-        <div className="mt-3 space-y-4">
-          {categories.map((group) => (
-            <div key={group.category || 'other'}>
-              {group.category && (
-                <p className="inline-block bg-white rounded-md border border-neutral-200 px-2.5 py-1 text-[11px] font-bold text-neutral-900 uppercase tracking-wider mb-2 shadow-sm">
-                  {group.category}
-                </p>
-              )}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {group.items.map(renderCard)}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {items.map(renderCard)}
-        </div>
-      )}
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {flatItems.map(renderCard)}
+      </div>
     </div>
   );
 }
@@ -1262,6 +1271,51 @@ function DatePickerCalendar({ value, onChange, onConfirm, disabled }: {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function CollapsibleListMessage({ intro, items, time }: { intro: string; items: ListItem[]; time: string }) {
+  const [expanded, setExpanded] = React.useState(false);
+  return (
+    <div className="flex justify-start gap-2.5 tc-msg-ai">
+      <div className="flex flex-col items-center gap-1 shrink-0">
+        <div className="w-7 h-7 rounded-full bg-black flex items-center justify-center">
+          <Sparkles className="w-3.5 h-3.5 text-white" />
+        </div>
+        <span className="text-[10px] text-neutral-400">AI</span>
+      </div>
+      <div className="tc-bubble-ai max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 sm:px-4 py-3 text-neutral-900">
+        {intro && <MarkdownMessage content={intro} />}
+        {expanded ? (
+          <div className="mt-2">
+            <ul className="space-y-0.5">
+              {items.map((item, i) => (
+                <li key={item.name} className="flex items-baseline gap-2 text-xs text-neutral-700">
+                  <span className="text-neutral-400 shrink-0 tabular-nums">{i + 1}.</span>
+                  <span>{item.name}{item.price && <span className="text-neutral-400 ml-1">({item.price})</span>}</span>
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={() => setExpanded(false)}
+              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-neutral-500 hover:text-neutral-800 transition-colors"
+            >
+              <span>Show less</span>
+              <ChevronDown className="w-3 h-3 rotate-180" />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setExpanded(true)}
+            className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 bg-neutral-100 hover:bg-neutral-200 rounded-full text-xs text-neutral-600 font-medium transition-colors cursor-pointer"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 inline-block" />
+            {items.length} options — tap to expand
+          </button>
+        )}
+        <span className="text-xs mt-1.5 block text-neutral-400">{time}</span>
+      </div>
     </div>
   );
 }
@@ -1728,6 +1782,15 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
                   </div>
                 </div>
               );
+            }
+
+            // Collapse past large numbered-list messages (appetizers/mains/desserts)
+            // to intro + item count badge instead of the full wall of text.
+            const pastListItems = msg.role === 'ai' && !isActive ? parseListItems(msg.content) : null;
+            const isPastBigList = pastListItems && pastListItems.length >= 5 && !pastListItems.every((i) => !i.price && pastListItems.length <= 8);
+            if (isPastBigList) {
+              const { intro } = splitAtList(msg.content);
+              return <CollapsibleListMessage key={idx} intro={intro} items={pastListItems} time={time} />;
             }
 
             return (

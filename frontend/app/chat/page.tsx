@@ -13,6 +13,7 @@ import {
   CalendarDays, Users, MapPin, UtensilsCrossed, ChevronDown, Sparkles,
 } from 'lucide-react';
 import { AppNav } from '@/components/layout/app-nav';
+import FoodPatternBg from '@/components/chat/FoodPatternBg';
 
 function getMenuImageUrl(name: string): string | null {
   // Only strip price-parens; keep flavor lists intact.
@@ -462,18 +463,10 @@ function AiIntakeContent() {
 
   if (!isAuthenticated || isStaff) return null;
 
-  const outerBg =
-    view === 'chat'
-      ? { backgroundImage: "url('/chat-bg2.jpg')" }
-      : view === 'picker'
-        ? { backgroundImage: "url('/cat-bg2.jpg')" }
-        : undefined;
-
   return (
-    <div
-      className={`h-screen flex flex-col ${view === 'chat' || view === 'picker' ? 'bg-cover bg-center bg-fixed' : 'bg-neutral-50'}`}
-      style={outerBg}
+    <div className={`h-screen flex flex-col relative ${view === 'chat' || view === 'picker' ? 'bg-[#f8f6f2]' : 'bg-neutral-50'}`}
     >
+      <FoodPatternBg />
       <AppNav />
 
       {/* Full-width chat header spanning across both the chat column and the
@@ -500,10 +493,7 @@ function AiIntakeContent() {
 
           {/* Session Picker */}
           {view === 'picker' && !loadingSessions && (
-            <div
-              className="flex-1 overflow-y-auto p-3 sm:p-6 relative bg-cover bg-center bg-fixed"
-              style={{ backgroundImage: "url('/cat-bg2.jpg')" }}
-            >
+            <div className="flex-1 overflow-y-auto p-3 sm:p-6 relative">
               <div className="max-w-5xl mx-auto space-y-6">
               {/* Hero banner */}
               <div className="relative overflow-hidden rounded-2xl bg-linear-to-br from-neutral-900 via-neutral-800 to-neutral-900 px-6 sm:px-8 py-8 sm:py-10 text-white">
@@ -634,10 +624,7 @@ function AiIntakeContent() {
 
           {/* Chat */}
           {view === 'chat' && (
-            <div
-              className="flex-1 overflow-hidden bg-cover bg-center bg-fixed"
-              style={{ backgroundImage: "url('/chat-bg2.jpg')" }}
-            >
+            <div className="flex-1 overflow-hidden">
               <AiChat
                 hideHeader
                 onComplete={handleComplete}

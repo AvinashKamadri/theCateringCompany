@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 from typing import Any
 
 from langchain_core.messages import BaseMessage
@@ -299,6 +300,8 @@ _TEMPLATE_ONLY_TARGETS = frozenset({
     "ask_utensils",
     "ask_rentals_gate",
     "ask_labor_services",
+    # Basic info constrained options
+    "ask_service_type",
     # Finalization gate questions (yes/no, not free-text collection)
     "ask_special_requests_gate",
     "ask_dietary_gate",
@@ -320,6 +323,21 @@ def _should_force_direct_prompt(ctx: dict[str, Any]) -> bool:
     # re-ask deterministically instead of letting the response LLM generate a
     # vague "clarify" message.
     if ctx.get("tool") == "basic_info_tool" and (ctx.get("rejected_past_date") or ctx.get("wrong_field_for_phase")):
+        return True
+    # If the tool didn't capture anything and the next prompt is a constrained
+    # choice question, do not let the response LLM generate vague "clarify"
+    # replies.
+    filled_this_turn = ctx.get("filled_this_turn") or []
+    if not filled_this_turn and target in {
+        "ask_service_type",
+        "ask_bar_package",
+        "ask_drinks_interest",
+        "ask_drinks_setup",
+        "ask_tableware_gate",
+        "ask_tableware",
+        "ask_utensils",
+        "ask_labor_services",
+    }:
         return True
     return False
 
@@ -380,6 +398,8 @@ def _modification_prompt(ctx: dict[str, Any], state: dict[str, Any] | None = Non
     action = str(mod.get("action") or "replace")
     removed = [str(v) for v in (mod.get("removed") or []) if str(v).strip()]
     added = [str(v) for v in (mod.get("added") or []) if str(v).strip()]
+    already_selected = [str(v) for v in (mod.get("already_selected") or []) if str(v).strip()]
+    unavailable = [str(v) for v in (mod.get("unavailable") or []) if str(v).strip()]
     remaining = [str(v) for v in (mod.get("remaining_items") or []) if str(v).strip()]
     new_value = mod.get("new_value")
 
@@ -389,13 +409,16 @@ def _modification_prompt(ctx: dict[str, Any], state: dict[str, Any] | None = Non
     follow_up = _next_prompt(ctx, state) or (ctx.get("next_question_prompt") or "")
 
     if removed or added:
-        parts: list[str] = []
-        if removed:
-            parts.append(f"removed {', '.join(removed)} from your {label}")
-        if added:
-            parts.append(f"added {', '.join(added)} to your {label}")
-
-        sentences = ["I " + " and ".join(parts) + "."]
+        sentences: list[str] = []
+        if action == "replace" and len(removed) == 1 and len(added) == 1:
+            sentences.append(f"I swapped {removed[0]} for {added[0]} in your {label}.")
+        else:
+            parts: list[str] = []
+            if removed:
+                parts.append(f"removed {', '.join(removed)} from your {label}")
+            if added:
+                parts.append(f"added {', '.join(added)} to your {label}")
+            sentences.append("I " + " and ".join(parts) + ".")
         current_state = _modification_current_state_sentence(
             target=target,
             label=label,
@@ -404,6 +427,24 @@ def _modification_prompt(ctx: dict[str, Any], state: dict[str, Any] | None = Non
         )
         if current_state:
             sentences.append(current_state)
+        if already_selected:
+            preview = ", ".join(already_selected[:6])
+            suffix = "…" if len(already_selected) > 6 else ""
+            seed = _prompt_variant_seed(ctx, state) + "|already"
+            sentences.append(
+                _select_variant_text(
+                    (
+                        f"FYI — already in your selection: {preview}{suffix}.",
+                        f"Already in your selection: {preview}{suffix}.",
+                        f"You already have: {preview}{suffix}.",
+                    ),
+                    seed,
+                )
+            )
+        if unavailable:
+            missing = ", ".join(unavailable[:6])
+            suffix = "…" if len(unavailable) > 6 else ""
+            sentences.append(f"'{missing}{suffix}' isn’t on the menu.")
         sentences.extend(_additional_modification_sentences(mod.get("additional_changes")))
         if follow_up:
             sentences.append(follow_up)
@@ -413,7 +454,15 @@ def _modification_prompt(ctx: dict[str, Any], state: dict[str, Any] | None = Non
         text = f"I removed your {label}."
     else:
         pretty_value = _modification_value_text(target, new_value)
-        if action == "add":
+        if isinstance(new_value, bool) and target in _BOOL_TARGETS:
+            seed = _prompt_variant_seed(ctx, state) + "|bool_ack"
+            text = _bool_modification_sentence(
+                target=target,
+                value=bool(new_value),
+                action=action,
+                seed=seed,
+            )
+        elif action == "add":
             text = f"I added {pretty_value} to your {label}."
         else:
             text = f"I updated your {label} to {pretty_value}."
@@ -451,13 +500,68 @@ def _modification_label(target: str) -> str:
         "utensils": "utensils",
         "bar_package": "bar package",
         "bar_service": "bar service",
-        "coffee_service": "coffee service",
+        "coffee_service": "coffee bar",
         "wedding_cake": "wedding cake",
         "partner_name": "partner's name",
         "company_name": "company name",
         "honoree_name": "honoree's name",
         "event_type": "event type",
     }.get(target, target.replace("_", " "))
+
+
+def _select_variant_text(options: tuple[str, ...], seed: str) -> str:
+    if not options:
+        return ""
+    digest = hashlib.md5(seed.encode("utf-8")).hexdigest()
+    index = int(digest[:8], 16) % len(options)
+    return options[index]
+
+
+_BOOL_TARGETS = frozenset({
+    "drinks",
+    "bar_service",
+    "coffee_service",
+    "linens",
+    "cocktail_hour",
+    "followup_call_requested",
+})
+
+
+def _bool_modification_sentence(*, target: str, value: bool, action: str, seed: str) -> str:
+    label = _modification_label(target)
+    if target == "followup_call_requested":
+        if value:
+            return _select_variant_text(
+                (
+                    "Got it — I’ll note a follow-up call.",
+                    "Okay — I’ll mark that you want a follow-up call.",
+                    "Noted — follow-up call requested.",
+                ),
+                seed,
+            )
+        return _select_variant_text(
+            (
+                "Got it — no follow-up call.",
+                "Okay — I won’t request a follow-up call.",
+                "Noted — no follow-up call needed.",
+            ),
+            seed,
+        )
+
+    if value:
+        return _select_variant_text(
+            (f"Got it — adding {label}.", f"Okay — {label} included.", f"Noted — {label} added."),
+            seed,
+        )
+    if action == "remove":
+        return _select_variant_text(
+            (f"Removed {label}.", f"Okay — removing {label}.", f"Noted — {label} removed."),
+            seed,
+        )
+    return _select_variant_text(
+        (f"Got it — no {label}.", f"Okay — skipping {label}.", f"Noted — {label} not included."),
+        seed,
+    )
 
 
 def _modification_value_text(target: str, value: Any) -> str:

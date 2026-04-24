@@ -1335,6 +1335,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
   const [countryCode, setCountryCode] = useState(COUNTRY_CODES[0]);
   const [menuSelections, setMenuSelections] = useState<string[]>([]);
   const [activeMenuMsgIdx, setActiveMenuMsgIdx] = useState<number | null>(null);
+  const [reviewDismissed, setReviewDismissed] = useState(false);
   const [commandDialog, setCommandDialog] = useState<{ isOpen: boolean; command: 'menu' | 'events' | null }>({
     isOpen: false,
     command: null,
@@ -1831,12 +1832,28 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Completion — intake review accordion */}
-        {state.isComplete && state.contractData && (
+        {/* Completion — intake review modal (overlays chat) */}
+        {state.isComplete && state.contractData && !reviewDismissed && (
           <IntakeReviewPanel
             contractData={state.contractData}
+            isSaving={isSaving}
             onConfirm={() => onComplete?.(state.contractData!)}
+            onClose={() => setReviewDismissed(true)}
           />
+        )}
+        {state.isComplete && state.contractData && reviewDismissed && (
+          <div className="mx-auto mb-2 w-[min(calc(100%-2rem),720px)] px-4 py-3 rounded-2xl bg-neutral-900 text-white flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold">Ready to finalize your event</p>
+              <p className="text-[11px] text-neutral-400 truncate">Review the summary and send it to our team.</p>
+            </div>
+            <button
+              onClick={() => setReviewDismissed(false)}
+              className="shrink-0 px-3 py-1.5 rounded-full bg-white text-neutral-900 text-xs font-semibold hover:bg-neutral-200 transition-colors"
+            >
+              Open review
+            </button>
+          </div>
         )}
 
         {/* Input */}

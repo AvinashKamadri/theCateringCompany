@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Calendar, Users, MapPin, FileText,
   Clock, CheckCircle2, AlertCircle, Loader2, Building2,
   ThumbsUp, ThumbsDown, X, Plus, Trash2, DollarSign, Calculator,
-  ShieldAlert, Leaf, ChevronDown, ChevronRight,
+  ShieldAlert, Leaf, ChevronDown, ChevronRight, Search,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/auth-store';
@@ -71,6 +71,133 @@ const STATUS_CONFIG: Record<string, { label: string; icon: any; style: string }>
   },
 };
 
+interface MenuComboOption {
+  id: string;
+  name: string;
+  unit_price: number | string | null;
+  allergens?: string[];
+  menu_categories?: { name: string } | null;
+}
+
+function MenuItemCombobox({
+  value,
+  onChange,
+  onPick,
+  options,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onPick: (item: MenuComboOption) => void;
+  options: MenuComboOption[];
+  placeholder?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const q = value.trim().toLowerCase();
+  const matches = useMemo(() => {
+    if (!q || options.length === 0) return [];
+    const scored: Array<{ item: MenuComboOption; score: number }> = [];
+    for (const it of options) {
+      const n = it.name.toLowerCase();
+      const cat = it.menu_categories?.name?.toLowerCase() ?? '';
+      let score = 0;
+      if (n === q) score = 100;
+      else if (n.startsWith(q)) score = 60;
+      else if (n.includes(q)) score = 40;
+      else if (cat.includes(q)) score = 15;
+      else {
+        // token-wise match
+        const toks = q.split(/\s+/).filter(Boolean);
+        const allHit = toks.every((t) => n.includes(t));
+        if (allHit) score = 20;
+      }
+      if (score > 0) scored.push({ item: it, score });
+    }
+    scored.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name));
+    return scored.slice(0, 8).map((s) => s.item);
+  }, [q, options]);
+
+  useEffect(() => { setActive(0); }, [q]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  const select = (it: MenuComboOption) => {
+    onPick(it);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <input
+        type="text"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (!open || matches.length === 0) return;
+          if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, matches.length - 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+          else if (e.key === 'Enter') { e.preventDefault(); const it = matches[active]; if (it) select(it); }
+          else if (e.key === 'Escape') { setOpen(false); }
+        }}
+        className={className}
+      />
+      {open && matches.length > 0 && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-neutral-200 rounded-lg shadow-lg overflow-hidden max-h-72 overflow-y-auto">
+          <div className="px-3 py-1.5 text-[10px] font-semibold text-neutral-400 uppercase tracking-wider bg-neutral-50 border-b border-neutral-100 flex items-center gap-1.5">
+            <Search className="h-3 w-3" /> {matches.length} menu match{matches.length === 1 ? '' : 'es'}
+          </div>
+          {matches.map((it, i) => {
+            const price = Number(it.unit_price ?? 0);
+            const hasAllergens = Array.isArray(it.allergens) && it.allergens.length > 0;
+            return (
+              <button
+                key={it.id}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); select(it); }}
+                onMouseEnter={() => setActive(i)}
+                className={cn(
+                  'w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors border-b border-neutral-50 last:border-0',
+                  i === active ? 'bg-neutral-900 text-white' : 'hover:bg-neutral-50',
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium truncate flex items-center gap-1.5">
+                    {it.name}
+                    {hasAllergens && (
+                      <ShieldAlert className={cn('h-3 w-3 shrink-0', i === active ? 'text-amber-300' : 'text-amber-500')} />
+                    )}
+                  </div>
+                  <div className={cn('text-[11px] truncate', i === active ? 'text-neutral-400' : 'text-neutral-400')}>
+                    {it.menu_categories?.name || 'Uncategorized'}
+                    {hasAllergens && <> · {(it.allergens || []).join(', ')}</>}
+                  </div>
+                </div>
+                <span className={cn('text-sm font-semibold tabular-nums shrink-0', i === active ? 'text-white' : 'text-neutral-900')}>
+                  ${price.toFixed(2)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ContractDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -94,6 +221,7 @@ export default function ContractDetailPage() {
   const [taxRate, setTaxRate] = useState(9.4);
   const [onsiteServiceRate, setOnsiteServiceRate] = useState(6.5);
   const [gratuityRate, setGratuityRate] = useState(15);
+  const [discount, setDiscount] = useState(0);
 
   interface LineItemBreakdown {
     description: string;
@@ -106,6 +234,21 @@ export default function ContractDetailPage() {
   const [breakdowns, setBreakdowns] = useState<Record<string, LineItemBreakdown>>({});
   const [expandedLines, setExpandedLines] = useState<Record<number, boolean>>({});
 
+  interface MenuFeedItem {
+    id: string;
+    name: string;
+    unit_price: number | string | null;
+    allergens?: string[];
+    menu_categories?: { name: string } | null;
+  }
+  const [menuFeed, setMenuFeed] = useState<MenuFeedItem[]>([]);
+  useEffect(() => {
+    if (!isStaff) return;
+    apiClient.get('/inventory/menu-feed')
+      .then((data: any) => { if (Array.isArray(data)) setMenuFeed(data); })
+      .catch(() => { /* silent — autocomplete is supplemental */ });
+  }, [isStaff]);
+
   useEffect(() => {
     const controller = new AbortController();
     apiClient.get(`/contracts/${contractId}`, { signal: controller.signal })
@@ -116,6 +259,7 @@ export default function ContractDetailPage() {
         if (pricing?.taxRate != null) setTaxRate(Number(pricing.taxRate));
         if (pricing?.onsiteServiceRate != null) setOnsiteServiceRate(Number(pricing.onsiteServiceRate));
         if (pricing?.gratuityRate != null) setGratuityRate(Number(pricing.gratuityRate));
+        if (pricing?.discount != null) setDiscount(Number(pricing.discount));
       })
       .catch((err: any) => {
         if (controller.signal.aborted) return;
@@ -203,14 +347,27 @@ export default function ContractDetailPage() {
   };
 
   const pricingTotal        = lineItems.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
-  const pricingTax          = Math.round(pricingTotal * (taxRate / 100) * 100) / 100;
-  const pricingOnsiteSvc    = Math.round(pricingTotal * (onsiteServiceRate / 100) * 100) / 100;
-  const pricingGratuity     = Math.round(pricingTotal * (gratuityRate / 100) * 100) / 100;
-  const pricingGrandTotal   = pricingTotal + pricingTax + pricingOnsiteSvc + pricingGratuity;
+  const pricingTaxableBase  = Math.max(pricingTotal - discount, 0);
+  const pricingTax          = Math.round(pricingTaxableBase * (taxRate / 100) * 100) / 100;
+  const pricingOnsiteSvc    = Math.round(pricingTaxableBase * (onsiteServiceRate / 100) * 100) / 100;
+  const pricingGratuity     = Math.round(pricingTaxableBase * (gratuityRate / 100) * 100) / 100;
+  const pricingGrandTotal   = Math.max(pricingTaxableBase + pricingTax + pricingOnsiteSvc + pricingGratuity, 0);
   const pricingDeposit      = Math.round(pricingGrandTotal * 0.50 * 100) / 100;
+  const pricingBalance      = Math.round((pricingGrandTotal - pricingDeposit) * 100) / 100;
 
-  const STAFFING_KEYWORDS = ['Table & Chair Setup', 'Table Preset', 'Reception Cleanup', 'Trash Removal', 'China Service Staffing', 'Travel Fee', 'On-site Service & Labor'];
+  const STAFFING_KEYWORDS = ['Table & Chair Setup', 'Table Preset', 'Reception Cleanup', 'Trash Removal', 'China Service Staffing', 'On-site Service & Labor'];
+  const TRAVEL_KEYWORDS = ['Travel Fee', 'Travel'];
   const isStaffingRow = (desc: string) => STAFFING_KEYWORDS.some((kw) => desc.includes(kw));
+  const isTravelRow = (desc: string) => TRAVEL_KEYWORDS.some((kw) => desc.toLowerCase().includes(kw.toLowerCase()));
+  const lineCategory = (desc: string): 'staffing' | 'travel' | 'food' => {
+    if (isTravelRow(desc)) return 'travel';
+    if (isStaffingRow(desc)) return 'staffing';
+    return 'food';
+  };
+  const foodSubtotal = lineItems.filter(li => lineCategory(li.description) === 'food').reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+  const staffSubtotal = lineItems.filter(li => lineCategory(li.description) === 'staffing').reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+  const travelSubtotal = lineItems.filter(li => lineCategory(li.description) === 'travel').reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+  const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const handleAutoCalculate = async () => {
     setCalculatingPricing(true);
@@ -245,7 +402,7 @@ export default function ContractDetailPage() {
     try {
       const grandTotal = pricingGrandTotal;
       await apiClient.patch(`/staff/contracts/${contractId}/pricing`, {
-        pricing: { lineItems, subtotal: pricingTotal, total: grandTotal, taxRate, onsiteServiceRate, gratuityRate },
+        pricing: { lineItems, subtotal: pricingTotal, total: grandTotal, taxRate, onsiteServiceRate, gratuityRate, discount },
       });
       toast.success('Pricing saved');
       const updated: any = await apiClient.get(`/contracts/${contractId}`);
@@ -438,282 +595,385 @@ export default function ContractDetailPage() {
 
       <div className="max-w-6xl mx-auto px-3 sm:px-6 py-6">
 
-        {/* Staff review panel — full width */}
-        {isStaff && isPending && (
-          <div className="bg-white border border-neutral-200 rounded-2xl mb-4 overflow-hidden">
-            {/* Panel header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-6 py-5 border-b border-neutral-100">
-              <div className="flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-black animate-pulse" />
-                <div>
-                  <p className="text-base font-semibold text-neutral-900">Build the Quote</p>
-                  <p className="text-xs text-neutral-500 mt-0.5">Price the menu and staffing, preview the contract, then send it to the client for signature.</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button onClick={handlePreviewPdf} disabled={previewing}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-neutral-100 text-neutral-700 rounded-xl hover:bg-neutral-200 disabled:opacity-50 text-sm font-semibold transition-colors">
-                  {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                  {previewing ? 'Generating…' : contract.pdf_path ? 'Regenerate Contract PDF' : 'Preview Contract PDF'}
-                </button>
-                <button onClick={handleApprove} disabled={approving || !hasPricingSaved} title={!hasPricingSaved ? 'Save pricing first' : undefined}
-                  className="tc-btn-glossy flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold">
-                  {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ThumbsUp className="h-4 w-4" />}
-                  Approve & Send to Client
-                </button>
-                <button onClick={() => setShowRejectModal(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 border border-neutral-200 text-neutral-700 rounded-xl hover:bg-red-50 hover:border-red-200 hover:text-red-700 text-sm font-semibold transition-colors">
-                  <ThumbsDown className="h-4 w-4" /> Request Changes
-                </button>
-              </div>
-            </div>
+        {/* Staff Quote Builder — industry-standard invoice-style calculator */}
+        {isStaff && isPending && (() => {
+          const allWarnings = new Set<string>();
+          for (const b of Object.values(breakdowns)) for (const w of b.warnings) allWarnings.add(w);
 
-            {/* Pricing editor */}
-            <div className="px-6 py-5">
-              {!hasPricingSaved && (
-                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 font-medium mb-5 flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 text-amber-600" /> Save the quote below before sending to the client.
-                </p>
-              )}
+          const groups: Array<{ key: 'food' | 'staffing' | 'travel'; label: string; hint: string }> = [
+            { key: 'food',     label: 'Food & Beverage',    hint: 'Menu items, packages, drinks' },
+            { key: 'staffing', label: 'Staffing & Service', hint: 'Setup, labor, cleanup' },
+            { key: 'travel',   label: 'Travel',             hint: 'Distance-based travel fees' },
+          ];
+          const indexedItems = lineItems.map((li, i) => ({ ...li, idx: i, cat: lineCategory(li.description) }));
+          const firstVisibleGroupKey = groups.find((g) => indexedItems.some((it) => it.cat === g.key))?.key;
+          const addToGroup = (cat: 'food' | 'staffing' | 'travel') => {
+            const seed = cat === 'travel' ? 'Travel Fee ' : cat === 'staffing' ? 'Service ' : '';
+            setLineItems((prev) => [...prev, { description: seed, quantity: 1, unitPrice: 0 }]);
+          };
 
-              {/* Rate inputs */}
-              <div className="mb-5">
-                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Service Rates</p>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { label: 'Sales & Meals Tax', hint: 'applied to food & beverage', value: taxRate, setter: setTaxRate, step: 0.1 },
-                    { label: 'Onsite Service Fee', hint: 'covers setup & service labor', value: onsiteServiceRate, setter: setOnsiteServiceRate, step: 0.5 },
-                    { label: 'Gratuity', hint: 'shared with service staff', value: gratuityRate, setter: setGratuityRate, step: 0.5 },
-                  ].map(({ label, hint, value, setter, step }) => (
-                    <div key={label}>
-                      <label className="block text-sm font-semibold text-neutral-800 mb-1">{label}</label>
-                      <div className="relative">
-                        <input type="number" min={0} max={50} step={step} value={value}
-                          onChange={(e) => setter(Number(e.target.value) || 0)}
-                          className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black pr-8" />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400 font-medium">%</span>
-                      </div>
-                      <p className="text-xs text-neutral-400 mt-1">{hint}</p>
+          return (
+            <section className="mb-6">
+              {/* Action bar */}
+              <div className="bg-white border border-neutral-200 rounded-2xl mb-4 px-5 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 tc-shadow-soft">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-neutral-900 flex items-center justify-center shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]">
+                    <Calculator className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-semibold text-neutral-900">Quote Builder</h2>
+                      <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wider">Draft</span>
                     </div>
-                  ))}
+                    <p className="text-xs text-neutral-500 mt-0.5 truncate tabular-nums">
+                      {clientName !== '—' && <>{clientName} · </>}
+                      {eventDate && <>{eventDate} · </>}
+                      {guestCount && <>{guestCount} guests · </>}
+                      v{contract.version_number}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => setShowRejectModal(true)}
+                    className="flex items-center gap-2 px-3.5 py-2 border border-neutral-200 text-neutral-700 rounded-lg hover:bg-red-50 hover:border-red-200 hover:text-red-700 text-sm font-medium transition-colors">
+                    <ThumbsDown className="h-3.5 w-3.5" /> Request Changes
+                  </button>
+                  <button onClick={handlePreviewPdf} disabled={previewing}
+                    className="flex items-center gap-2 px-3.5 py-2 bg-neutral-100 text-neutral-700 rounded-lg hover:bg-neutral-200 disabled:opacity-50 text-sm font-medium transition-colors">
+                    {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                    {previewing ? 'Generating…' : contract.pdf_path ? 'Regenerate PDF' : 'Preview PDF'}
+                  </button>
+                  <button onClick={handleApprove} disabled={approving || !hasPricingSaved} title={!hasPricingSaved ? 'Save pricing first' : undefined}
+                    className="tc-btn-glossy flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold">
+                    {approving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsUp className="h-3.5 w-3.5" />}
+                    Approve & Send
+                  </button>
                 </div>
               </div>
 
-              {/* Allergen warnings banner */}
-              {(() => {
-                const allWarnings = new Set<string>();
-                for (const b of Object.values(breakdowns)) for (const w of b.warnings) allWarnings.add(w);
-                if (allWarnings.size === 0 || dietaryRestrictions.length === 0) return null;
-                return (
-                  <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3">
-                    <ShieldAlert className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
-                    <div className="text-sm">
-                      <div className="font-semibold text-red-900">Allergen conflict detected</div>
-                      <div className="text-red-800 mt-1">
-                        Guest restrictions: <span className="font-medium">{dietaryRestrictions.join(', ')}</span>
-                      </div>
-                      <div className="text-red-700 mt-1">
-                        Flagged allergens across selected menu items:{' '}
-                        {Array.from(allWarnings).map((w) => (
-                          <span key={w} className="inline-block ml-1 px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-xs font-medium">
-                            {w}
-                          </span>
-                        ))}
-                      </div>
+              {/* Banners */}
+              {!hasPricingSaved && lineItems.length > 0 && (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 flex items-center gap-2 text-sm text-amber-900">
+                  <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                  Unsaved changes — save the quote before approving.
+                </div>
+              )}
+              {allWarnings.size > 0 && dietaryRestrictions.length > 0 && (
+                <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3">
+                  <ShieldAlert className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+                  <div className="text-sm min-w-0">
+                    <div className="font-semibold text-red-900">Allergen conflict detected</div>
+                    <div className="text-red-800 mt-1">
+                      Guest restrictions: <span className="font-medium">{dietaryRestrictions.join(', ')}</span>
+                    </div>
+                    <div className="text-red-700 mt-1 flex flex-wrap items-center gap-1">
+                      Flagged:
+                      {Array.from(allWarnings).map((w) => (
+                        <span key={w} className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-xs font-medium">{w}</span>
+                      ))}
                     </div>
                   </div>
-                );
-              })()}
+                </div>
+              )}
 
-              {/* Line items toolbar */}
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Menu & Service Charges</p>
-                  <p className="text-xs text-neutral-400 mt-0.5">Packages, menu items, staffing, and travel</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={handlePrefillStaffing}
-                    className="flex items-center gap-2 px-3.5 py-2 bg-white text-neutral-700 border border-neutral-200 rounded-lg hover:bg-neutral-50 text-sm font-semibold transition-colors">
-                    <Users className="h-4 w-4" /> Add Staffing Lines
-                  </button>
-                  <button onClick={handleAutoCalculate} disabled={calculatingPricing}
-                    className="flex items-center gap-2 px-3.5 py-2 bg-black text-white rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm font-semibold transition-colors">
-                    {calculatingPricing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
-                    {calculatingPricing ? 'Calculating…' : 'Auto-Price from Menu'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Line items table with headers */}
-              <div className="border border-neutral-200 rounded-xl overflow-hidden mb-4">
-                <div className="grid grid-cols-[1fr_100px_120px_120px_32px] gap-3 px-4 py-2.5 bg-neutral-50 border-b border-neutral-200 text-xs font-semibold text-neutral-600 uppercase tracking-wider">
-                  <span>Menu Item / Service</span>
-                  <span className="text-right">Quantity</span>
-                  <span className="text-right">Per Unit</span>
-                  <span className="text-right">Line Total</span>
-                  <span></span>
-                </div>
-                <div className="divide-y divide-neutral-100">
-                  {lineItems.length === 0 && (
-                    <div className="px-4 py-8 text-center text-sm text-neutral-400">
-                      No items yet — use <span className="font-semibold text-neutral-600">Auto-Price from Menu</span> or add items manually.
-                    </div>
-                  )}
-                  {lineItems.map((item, idx) => {
-                    const lineTotal = item.quantity * item.unitPrice;
-                    const breakdown = breakdowns[item.description];
-                    const hasBreakdown = !!breakdown && (breakdown.dishes.length > 0 || breakdown.warnings.length > 0);
-                    const expanded = !!expandedLines[idx];
-                    return (
-                      <div key={idx}>
-                      <div className="grid grid-cols-[1fr_100px_120px_120px_32px] gap-3 px-4 py-2.5 items-center hover:bg-neutral-50/50 transition-colors">
-                        <input type="text" placeholder="e.g. Bronze Package, Antipasto Platter…" value={item.description}
-                          onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
-                          className="border border-neutral-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black" />
-                        <input type="number" placeholder="0" min={1} value={item.quantity}
-                          onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, quantity: Number(e.target.value) || 1 } : li))}
-                          className="border border-neutral-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black text-right tabular-nums" />
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">$</span>
-                          <input type="number" placeholder="0.00" min={0} step="0.01" value={item.unitPrice}
-                            onChange={(e) => setLineItems(prev => prev.map((li, i) => i === idx ? { ...li, unitPrice: Number(e.target.value) || 0 } : li))}
-                            className="w-full border border-neutral-200 rounded-lg pl-6 pr-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black text-right tabular-nums" />
-                        </div>
-                        <span className="text-sm font-semibold text-neutral-900 text-right tabular-nums">
-                          ${lineTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                        <button onClick={() => setLineItems(prev => prev.filter((_, i) => i !== idx))}
-                          title="Remove line"
-                          className="text-neutral-300 hover:text-red-500 transition-colors flex items-center justify-center">
-                          <Trash2 className="h-4 w-4" />
+              {/* Invoice two-column layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
+                {/* LEFT: grouped line items + rate controls */}
+                <div className="space-y-4">
+                  {/* Line-item groups */}
+                  <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden tc-shadow-soft">
+                    {/* Toolbar */}
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
+                      <div>
+                        <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">Line Items</p>
+                        <p className="text-xs text-neutral-400 mt-0.5">{lineItems.length} {lineItems.length === 1 ? 'item' : 'items'} · ${fmt(pricingTotal)} subtotal</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={handlePrefillStaffing}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-neutral-700 border border-neutral-200 rounded-md hover:bg-neutral-50 text-xs font-semibold transition-colors">
+                          <Users className="h-3.5 w-3.5" /> Add Staffing
+                        </button>
+                        <button onClick={handleAutoCalculate} disabled={calculatingPricing}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 text-white rounded-md hover:bg-black disabled:opacity-50 text-xs font-semibold transition-colors">
+                          {calculatingPricing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Calculator className="h-3.5 w-3.5" />}
+                          Auto-Price
                         </button>
                       </div>
-                      {hasBreakdown && (
-                        <div className="px-4 pb-2 -mt-1">
-                          <button
-                            type="button"
-                            onClick={() => setExpandedLines((prev) => ({ ...prev, [idx]: !prev[idx] }))}
-                            className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-900"
-                          >
-                            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                            {breakdown.matched_name
-                              ? `Matches: ${breakdown.matched_name} — ${breakdown.dishes.length} dish${breakdown.dishes.length === 1 ? '' : 'es'}`
-                              : 'No menu match'}
-                            {breakdown.warnings.length > 0 && (
-                              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-semibold">
-                                <ShieldAlert className="h-3 w-3" />
-                                {breakdown.warnings.length} allergen warning{breakdown.warnings.length === 1 ? '' : 's'}
-                              </span>
-                            )}
-                          </button>
-                          {expanded && (
-                            <div className="mt-2 ml-4 space-y-2">
-                              {breakdown.warnings.length > 0 && (
-                                <div className="text-xs text-red-700">
-                                  Contains:{' '}
-                                  {breakdown.warnings.map((w) => (
-                                    <span key={w} className="inline-block ml-1 px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-medium">
-                                      ⚠ {w}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                              {breakdown.dishes.length === 0 ? (
-                                <div className="text-xs text-neutral-400">No dishes linked yet — add them in Inventory.</div>
-                              ) : (
-                                <ul className="space-y-1">
-                                  {breakdown.dishes.map((dish) => (
-                                    <li key={dish.id} className="text-xs">
-                                      <div className="font-medium text-neutral-700">{dish.name}</div>
-                                      {dish.ingredients.length > 0 && (
-                                        <div className="mt-0.5 flex flex-wrap gap-1">
-                                          {dish.ingredients.map((ing) => (
-                                            <span
-                                              key={ing.id}
-                                              className={cn(
-                                                'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px]',
-                                                ing.allergens.length > 0
-                                                  ? 'bg-amber-50 text-amber-800'
-                                                  : 'bg-emerald-50 text-emerald-700',
-                                              )}
-                                            >
-                                              <Leaf className="h-2.5 w-2.5" />
-                                              {ing.name}
-                                              {ing.allergens.length > 0 && <span className="opacity-70"> · {ing.allergens.join(', ')}</span>}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
+                    </div>
+
+                    {lineItems.length === 0 ? (
+                      <div className="px-4 py-16 text-center">
+                        <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-neutral-100 flex items-center justify-center">
+                          <Calculator className="h-5 w-5 text-neutral-400" />
+                        </div>
+                        <p className="text-sm font-medium text-neutral-700">No line items yet</p>
+                        <p className="text-xs text-neutral-400 mt-1">Click <span className="font-semibold text-neutral-600">Auto-Price</span> to pull from the menu, or add manually.</p>
+                      </div>
+                    ) : (
+                      groups.map((group, gi) => {
+                        const items = indexedItems.filter((it) => it.cat === group.key);
+                        if (items.length === 0) return null;
+                        const groupSubtotal = items.reduce((s, it) => s + it.quantity * it.unitPrice, 0);
+                        return (
+                          <div key={group.key} className={cn('group', gi > 0 && 'border-t border-neutral-100')}>
+                            {/* Group header */}
+                            <div className="px-4 py-2 bg-neutral-50 flex items-center justify-between">
+                              <div className="flex items-baseline gap-2">
+                                <span className="text-[11px] font-bold text-neutral-700 uppercase tracking-wider">{group.label}</span>
+                                <span className="text-[11px] text-neutral-400">{group.hint}</span>
+                              </div>
+                              <span className="text-xs font-semibold text-neutral-700 tabular-nums">${fmt(groupSubtotal)}</span>
                             </div>
-                          )}
+
+                            {/* Column headers (only on first visible group) */}
+                            {group.key === firstVisibleGroupKey && (
+                              <div className="grid grid-cols-[1fr_80px_110px_110px_28px] gap-2 px-4 py-2 border-b border-neutral-100 text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">
+                                <span>Description</span>
+                                <span className="text-right">Qty</span>
+                                <span className="text-right">Rate</span>
+                                <span className="text-right">Amount</span>
+                                <span></span>
+                              </div>
+                            )}
+
+                            {/* Rows */}
+                            <div className="divide-y divide-neutral-50">
+                              {items.map((item) => {
+                                const idx = item.idx;
+                                const lineTotal = item.quantity * item.unitPrice;
+                                const breakdown = breakdowns[item.description];
+                                const hasBreakdown = !!breakdown && (breakdown.dishes.length > 0 || breakdown.warnings.length > 0);
+                                const expanded = !!expandedLines[idx];
+                                return (
+                                  <div key={idx} className="group/row">
+                                    <div className="grid grid-cols-[1fr_80px_110px_110px_28px] gap-2 px-4 py-2 items-center hover:bg-neutral-50/60 transition-colors">
+                                      {item.cat === 'food' ? (
+                                        <MenuItemCombobox
+                                          value={item.description}
+                                          onChange={(v) => setLineItems((prev) => prev.map((li, i) => i === idx ? { ...li, description: v } : li))}
+                                          onPick={(picked) => setLineItems((prev) => prev.map((li, i) => i === idx ? { ...li, description: picked.name, unitPrice: Number(picked.unit_price ?? 0) } : li))}
+                                          options={menuFeed}
+                                          placeholder="Search menu…"
+                                          className="w-full border border-transparent focus:border-neutral-300 rounded-md px-2 py-1.5 text-sm bg-transparent focus:bg-white focus:outline-none focus:ring-1 focus:ring-neutral-900"
+                                        />
+                                      ) : (
+                                        <input type="text" placeholder="Description…" value={item.description}
+                                          onChange={(e) => setLineItems((prev) => prev.map((li, i) => i === idx ? { ...li, description: e.target.value } : li))}
+                                          className="border border-transparent focus:border-neutral-300 rounded-md px-2 py-1.5 text-sm bg-transparent focus:bg-white focus:outline-none focus:ring-1 focus:ring-neutral-900" />
+                                      )}
+                                      <input type="number" placeholder="0" min={1} value={item.quantity}
+                                        onChange={(e) => setLineItems((prev) => prev.map((li, i) => i === idx ? { ...li, quantity: Number(e.target.value) || 1 } : li))}
+                                        className="border border-transparent focus:border-neutral-300 rounded-md px-2 py-1.5 text-sm bg-transparent focus:bg-white focus:outline-none focus:ring-1 focus:ring-neutral-900 text-right tabular-nums" />
+                                      <div className="relative">
+                                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-neutral-400 pointer-events-none">$</span>
+                                        <input type="number" placeholder="0.00" min={0} step="0.01" value={item.unitPrice}
+                                          onChange={(e) => setLineItems((prev) => prev.map((li, i) => i === idx ? { ...li, unitPrice: Number(e.target.value) || 0 } : li))}
+                                          className="w-full border border-transparent focus:border-neutral-300 rounded-md pl-5 pr-2 py-1.5 text-sm bg-transparent focus:bg-white focus:outline-none focus:ring-1 focus:ring-neutral-900 text-right tabular-nums" />
+                                      </div>
+                                      <span className="text-sm font-semibold text-neutral-900 text-right tabular-nums">${fmt(lineTotal)}</span>
+                                      <button onClick={() => setLineItems((prev) => prev.filter((_, i) => i !== idx))}
+                                        title="Remove" className="text-neutral-300 hover:text-red-500 transition-colors opacity-0 group-hover/row:opacity-100">
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                    {hasBreakdown && (
+                                      <div className="px-4 pb-2 -mt-0.5">
+                                        <button type="button"
+                                          onClick={() => setExpandedLines((prev) => ({ ...prev, [idx]: !prev[idx] }))}
+                                          className="flex items-center gap-1 text-[11px] text-neutral-500 hover:text-neutral-900">
+                                          {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                          {breakdown.matched_name
+                                            ? `${breakdown.matched_name} — ${breakdown.dishes.length} dish${breakdown.dishes.length === 1 ? '' : 'es'}`
+                                            : 'No menu match'}
+                                          {breakdown.warnings.length > 0 && (
+                                            <span className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-red-100 text-red-700 text-[9px] font-bold uppercase">
+                                              <ShieldAlert className="h-2.5 w-2.5" />
+                                              {breakdown.warnings.length}
+                                            </span>
+                                          )}
+                                        </button>
+                                        {expanded && (
+                                          <div className="mt-1.5 ml-4 space-y-1.5">
+                                            {breakdown.warnings.length > 0 && (
+                                              <div className="text-[11px] text-red-700 flex flex-wrap items-center gap-1">
+                                                Contains:
+                                                {breakdown.warnings.map((w) => (
+                                                  <span key={w} className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-medium">⚠ {w}</span>
+                                                ))}
+                                              </div>
+                                            )}
+                                            {breakdown.dishes.length > 0 && (
+                                              <ul className="space-y-1">
+                                                {breakdown.dishes.map((dish) => (
+                                                  <li key={dish.id} className="text-[11px]">
+                                                    <div className="font-medium text-neutral-700">{dish.name}</div>
+                                                    {dish.ingredients.length > 0 && (
+                                                      <div className="mt-0.5 flex flex-wrap gap-1">
+                                                        {dish.ingredients.map((ing) => (
+                                                          <span key={ing.id}
+                                                            className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]',
+                                                              ing.allergens.length > 0 ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700')}>
+                                                            <Leaf className="h-2 w-2" />
+                                                            {ing.name}
+                                                            {ing.allergens.length > 0 && <span className="opacity-70"> · {ing.allergens.join(', ')}</span>}
+                                                          </span>
+                                                        ))}
+                                                      </div>
+                                                    )}
+                                                  </li>
+                                                ))}
+                                              </ul>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Add row to group */}
+                            <button onClick={() => addToGroup(group.key)}
+                              className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs text-neutral-400 hover:text-neutral-900 hover:bg-neutral-50 font-medium transition-colors">
+                              <Plus className="h-3.5 w-3.5" /> Add {group.label.toLowerCase()} line
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+
+                    {/* Global add row (for items that don't fit categories yet) */}
+                    {lineItems.length > 0 && indexedItems.every(it => it.cat === 'food') && (
+                      <button onClick={() => setLineItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }])}
+                        className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm text-neutral-600 hover:text-black hover:bg-neutral-50 font-semibold transition-colors border-t border-neutral-100">
+                        <Plus className="h-4 w-4" /> Add Line Item
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Rates & adjustments */}
+                  <div className="bg-white border border-neutral-200 rounded-2xl p-4 tc-shadow-soft">
+                    <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider mb-3">Tax, Fees & Discount</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {[
+                        { label: 'Sales Tax',   hint: 'Applied after discount', value: taxRate,           setter: setTaxRate,           step: 0.1, suffix: '%' },
+                        { label: 'Onsite Fee',  hint: 'Service & setup',        value: onsiteServiceRate, setter: setOnsiteServiceRate, step: 0.5, suffix: '%' },
+                        { label: 'Gratuity',    hint: 'Service staff tip',      value: gratuityRate,      setter: setGratuityRate,      step: 0.5, suffix: '%' },
+                        { label: 'Discount',    hint: 'Flat amount off',        value: discount,          setter: setDiscount,          step: 25,  prefix: '$' },
+                      ].map(({ label, hint, value, setter, step, suffix, prefix }) => (
+                        <div key={label}>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">{label}</label>
+                          <div className="relative">
+                            {prefix && <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-neutral-400 pointer-events-none">{prefix}</span>}
+                            <input type="number" min={0} max={label === 'Discount' ? 999999 : 50} step={step} value={value}
+                              onChange={(e) => setter(Number(e.target.value) || 0)}
+                              className={cn('w-full border border-neutral-200 rounded-lg py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-900 tabular-nums',
+                                prefix ? 'pl-6 pr-2' : 'pl-3 pr-7')} />
+                            {suffix && <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-neutral-400 font-medium pointer-events-none">{suffix}</span>}
+                          </div>
+                          <p className="text-[10px] text-neutral-400 mt-1">{hint}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* RIGHT: sticky summary panel */}
+                <aside className="lg:sticky lg:top-4 h-max">
+                  <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden tc-shadow-soft">
+                    {/* Header */}
+                    <div className="px-5 py-4 bg-gradient-to-br from-neutral-900 to-neutral-800 text-white">
+                      <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Invoice Summary</p>
+                      <p className="text-2xl font-bold tabular-nums mt-1">${fmt(pricingGrandTotal)}</p>
+                      {guestCount && Number(guestCount) > 0 && pricingGrandTotal > 0 ? (
+                        <p className="text-xs text-neutral-400 tabular-nums mt-0.5">${fmt(pricingGrandTotal / Number(guestCount))} per guest</p>
+                      ) : null}
+                    </div>
+
+                    {/* Breakdown */}
+                    <div className="px-5 py-4 space-y-1.5 text-sm tabular-nums">
+                      {foodSubtotal > 0 && (
+                        <div className="flex justify-between text-neutral-600">
+                          <span>Food & Beverage</span>
+                          <span>${fmt(foodSubtotal)}</span>
                         </div>
                       )}
+                      {staffSubtotal > 0 && (
+                        <div className="flex justify-between text-neutral-600">
+                          <span>Staffing & Service</span>
+                          <span>${fmt(staffSubtotal)}</span>
+                        </div>
+                      )}
+                      {travelSubtotal > 0 && (
+                        <div className="flex justify-between text-neutral-600">
+                          <span>Travel</span>
+                          <span>${fmt(travelSubtotal)}</span>
+                        </div>
+                      )}
+
+                      <div className="h-px bg-neutral-100 my-2" />
+
+                      <div className="flex justify-between text-neutral-900 font-semibold">
+                        <span>Subtotal</span>
+                        <span>${fmt(pricingTotal)}</span>
                       </div>
-                    );
-                  })}
-                </div>
-                <button onClick={() => setLineItems(prev => [...prev, { description: '', quantity: 1, unitPrice: 0 }])}
-                  className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm text-neutral-600 hover:text-black hover:bg-neutral-50 font-semibold transition-colors border-t border-neutral-100">
-                  <Plus className="h-4 w-4" /> Add Line Item
-                </button>
+                      {discount > 0 && (
+                        <div className="flex justify-between text-emerald-700">
+                          <span>Discount</span>
+                          <span>−${fmt(discount)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-neutral-500 text-xs">
+                        <span>Sales Tax ({taxRate}%)</span>
+                        <span>${fmt(pricingTax)}</span>
+                      </div>
+                      <div className="flex justify-between text-neutral-500 text-xs">
+                        <span>Onsite Fee ({onsiteServiceRate}%)</span>
+                        <span>${fmt(pricingOnsiteSvc)}</span>
+                      </div>
+                      <div className="flex justify-between text-neutral-500 text-xs">
+                        <span>Gratuity ({gratuityRate}%)</span>
+                        <span>${fmt(pricingGratuity)}</span>
+                      </div>
+
+                      <div className="h-px bg-neutral-200 my-2" />
+
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Grand Total</span>
+                        <span className="text-lg font-bold text-neutral-900">${fmt(pricingGrandTotal)}</span>
+                      </div>
+                    </div>
+
+                    {/* Payment schedule */}
+                    {pricingGrandTotal > 0 && (
+                      <div className="mx-5 mb-4 p-3 rounded-xl bg-neutral-50 border border-neutral-100 space-y-1.5 text-xs tabular-nums">
+                        <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1.5">Payment Schedule</p>
+                        <div className="flex justify-between">
+                          <span className="text-neutral-600">Deposit <span className="text-neutral-400">(50% at signing)</span></span>
+                          <span className="font-semibold text-neutral-900">${fmt(pricingDeposit)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-neutral-600">Balance <span className="text-neutral-400">(at event)</span></span>
+                          <span className="font-semibold text-neutral-900">${fmt(pricingBalance)}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Save */}
+                    <div className="px-5 pb-5">
+                      <button onClick={handleSavePricing} disabled={savingPricing || lineItems.length === 0}
+                        className="tc-btn-glossy w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold">
+                        {savingPricing ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
+                        {savingPricing ? 'Saving Quote…' : hasPricingSaved ? 'Update Quote' : 'Save Quote'}
+                      </button>
+                    </div>
+                  </div>
+                </aside>
               </div>
-
-              {/* Pricing summary */}
-              {lineItems.length > 0 && (
-                <div className="bg-gradient-to-br from-neutral-50 to-white border border-neutral-200 rounded-xl p-5 mb-4 text-sm space-y-2 tabular-nums">
-                  {pricingBreakdown?.packageName && (
-                    <div className="flex justify-between text-neutral-500 text-xs pb-2 border-b border-neutral-100">
-                      <span>Package</span>
-                      <span>{pricingBreakdown.packageName} (${pricingBreakdown.packagePerPersonRate}/pp)</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-neutral-700">
-                    <span className="font-medium">Food & Service Subtotal</span>
-                    <span className="font-semibold">${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-500">
-                    <span>Sales & Meals Tax ({taxRate}%)</span>
-                    <span>${pricingTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-500">
-                    <span>Onsite Service Fee ({onsiteServiceRate}%)</span>
-                    <span>${pricingOnsiteSvc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-500">
-                    <span>Gratuity ({gratuityRate}%)</span>
-                    <span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between font-bold text-neutral-900 border-t border-neutral-200 pt-3 mt-1 text-base">
-                    <span>Grand Total</span>
-                    <span>${pricingGrandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-500 text-xs">
-                    <span>50% Deposit Due at Signing</span>
-                    <span className="font-semibold">${pricingDeposit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                  {guestCount ? (
-                    <div className="flex justify-between text-neutral-400 text-xs pt-1 border-t border-neutral-100">
-                      <span>Effective Per-Guest Cost</span>
-                      <span>${(pricingGrandTotal / Number(guestCount)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/pp</span>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-
-              {lineItems.length > 0 && (
-                <button onClick={handleSavePricing} disabled={savingPricing}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-black text-white rounded-xl hover:bg-neutral-800 disabled:opacity-50 text-sm font-semibold transition-colors shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_6px_14px_-6px_rgba(0,0,0,0.3)]">
-                  {savingPricing ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
-                  {savingPricing ? 'Saving Quote…' : 'Save Quote'}
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+            </section>
+          );
+        })()}
 
         {/* Bento grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
@@ -775,12 +1035,14 @@ export default function ContractDetailPage() {
                 {(isStaff || contract.status === 'signed') && (
                   lineItems.length > 0 ? (
                     <>
-                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Subtotal</span><span>${pricingTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Tax ({taxRate}%)</span><span>${pricingTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Onsite Fee ({onsiteServiceRate}%)</span><span>${pricingOnsiteSvc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Gratuity ({gratuityRate}%)</span><span>${pricingGratuity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                      <div className="flex justify-between border-t border-neutral-100 pt-2"><span className="font-semibold text-neutral-900">Grand Total</span><span className="font-bold text-neutral-900">${pricingGrandTotal.toLocaleString()}</span></div>
-                      <div className="flex justify-between text-xs"><span className="text-neutral-400">50% Deposit</span><span>${pricingDeposit.toLocaleString()}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Subtotal</span><span className="tabular-nums">${fmt(pricingTotal)}</span></div>
+                      {discount > 0 && <div className="flex justify-between text-xs"><span className="text-neutral-400">Discount</span><span className="tabular-nums text-emerald-700">−${fmt(discount)}</span></div>}
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Tax ({taxRate}%)</span><span className="tabular-nums">${fmt(pricingTax)}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Onsite Fee ({onsiteServiceRate}%)</span><span className="tabular-nums">${fmt(pricingOnsiteSvc)}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Gratuity ({gratuityRate}%)</span><span className="tabular-nums">${fmt(pricingGratuity)}</span></div>
+                      <div className="flex justify-between border-t border-neutral-100 pt-2"><span className="font-semibold text-neutral-900">Grand Total</span><span className="font-bold text-neutral-900 tabular-nums">${fmt(pricingGrandTotal)}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Deposit</span><span className="tabular-nums">${fmt(pricingDeposit)}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-neutral-400">Balance</span><span className="tabular-nums">${fmt(pricingBalance)}</span></div>
                     </>
                   ) : contract.total_amount != null ? (
                     <div className="flex justify-between border-t border-neutral-100 pt-2">

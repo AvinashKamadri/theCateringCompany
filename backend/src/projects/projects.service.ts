@@ -589,13 +589,31 @@ export class ProjectsService {
         console.log(`📅 [Contract] Event: ${dto.event_type} on ${dto.event_date}`);
         console.log(`👥 [Contract] Guest count: ${dto.guest_count}`);
 
+        // Idempotent: if a contract already exists for this project group, bump
+        // the version number. Clients can legitimately re-submit the finalize
+        // step after corrections — we treat each submission as a new revision.
+        const latest = await tx.contracts.findFirst({
+          where: { contract_group_id: project.id },
+          orderBy: { version_number: 'desc' },
+          select: { version_number: true },
+        });
+        const nextVersion = (latest?.version_number ?? 0) + 1;
+
+        // Mark all prior versions inactive so only the newest is the active row.
+        if (latest) {
+          await tx.contracts.updateMany({
+            where: { contract_group_id: project.id },
+            data: { is_active: false },
+          });
+        }
+
         // Create contract with AI-generated data
         // Status: pending_staff_approval - needs staff review before sending to client
         contract = await tx.contracts.create({
           data: {
             project_id: project.id,
             contract_group_id: project.id, // Use project ID as contract group ID (valid UUID)
-            version_number: 1,
+            version_number: nextVersion,
             status: 'pending_staff_approval', // ✅ Changed from 'draft'
             title: `Contract - ${dto.event_type || 'Event'} for ${dto.client_name || 'Client'}`,
             body: {

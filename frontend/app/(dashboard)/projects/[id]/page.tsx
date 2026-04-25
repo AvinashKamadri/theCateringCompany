@@ -11,8 +11,6 @@ import {
   Calendar, Users, MapPin, FileText, MessageSquare, Loader2,
   ArrowLeft, UserPlus, Trash2, Copy, Check, Crown, Shield, Link2, Flame, X,
 } from 'lucide-react';
-import BentoInfoCard from '@/components/ui/BentoInfoCard';
-import AiHint from '@/components/ui/AiHint';
 
 interface Contract {
   id: string;
@@ -57,12 +55,12 @@ const CONTRACT_STATUS_LABEL: Record<string, string> = {
 };
 
 const CONTRACT_STATUS_STYLE: Record<string, string> = {
-  pending_staff_approval: 'bg-amber-50 text-amber-800 border border-amber-200',
-  approved: 'bg-neutral-900 text-white',
+  pending_staff_approval: 'bg-amber-100 text-amber-800',
+  approved: 'bg-white text-neutral-900',
   sent: 'bg-neutral-200 text-neutral-800',
-  signed: 'bg-black text-white',
-  rejected: 'bg-red-50 text-red-700',
-  draft: 'bg-neutral-100 text-neutral-500',
+  signed: 'bg-white text-neutral-900',
+  rejected: 'bg-red-100 text-red-700',
+  draft: 'bg-neutral-700 text-neutral-200',
 };
 
 const ROLE_BADGE: Record<CollaboratorRole, string> = {
@@ -70,6 +68,42 @@ const ROLE_BADGE: Record<CollaboratorRole, string> = {
   manager: 'bg-neutral-200 text-neutral-800',
   collaborator: 'bg-neutral-100 text-neutral-700',
   viewer: 'bg-neutral-100 text-neutral-500',
+};
+
+const relativeTime = (dateStr: string) => {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days !== 1 ? 's' : ''} ago`;
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+const getFoodEmoji = (item: string): string => {
+  const l = item.toLowerCase();
+  if (l.includes('chicken')) return '🍗';
+  if (l.includes('ham') || l.includes('beef') || l.includes('steak') || l.includes('pork')) return '🥩';
+  if (l.includes('fish') || l.includes('salmon') || l.includes('seafood') || l.includes('shrimp')) return '🐟';
+  if (l.includes('salad')) return '🥗';
+  if (l.includes('pasta') || l.includes('noodle')) return '🍝';
+  if (l.includes('potato')) return '🥔';
+  if (l.includes('fruit')) return '🍓';
+  if (l.includes('bread') || l.includes('roll')) return '🥖';
+  if (l.includes('soup')) return '🍲';
+  if (l.includes('cheese')) return '🧀';
+  if (l.includes('meatball') || l.includes('bbq') || l.includes('grill')) return '🍖';
+  if (l.includes('slider') || l.includes('burger')) return '🍔';
+  if (l.includes('cake') || l.includes('tart') || l.includes('brownie')) return '🎂';
+  if (l.includes('mini') || l.includes('dessert') || l.includes('sweet') || l.includes('cookie')) return '🍬';
+  if (l.includes('pizza')) return '🍕';
+  if (l.includes('rice') || l.includes('grain')) return '🍚';
+  if (l.includes('vegetable') || l.includes('veggie') || l.includes('veg')) return '🥦';
+  if (l.includes('bar')) return '🍽️';
+  if (l.includes('platter')) return '🍱';
+  return '🍽️';
 };
 
 export default function ProjectDetailPage() {
@@ -106,7 +140,7 @@ export default function ProjectDetailPage() {
       const data = await apiClient.get(`/projects/${projectId}/waste-logs`);
       setEventWasteLogs((Array.isArray(data) ? data : []) as EventWasteLog[]);
     } catch {
-      // silent — waste logs may not exist, or user may not have access
+      // silent
     }
   };
 
@@ -247,48 +281,69 @@ export default function ProjectDetailPage() {
 
   const addons: string[] = (Array.isArray(summary.addons) ? summary.addons : []).filter(Boolean);
 
+  const filledCount = [
+    project.event_date,
+    project.guest_count != null,
+    (summary.venue_name || summary.venue),
+    summary.event_type,
+    summary.service_type,
+    summary.dietary_concerns,
+  ].filter(Boolean).length;
+
+  const readinessLabel = filledCount === 6 ? 'Complete' : filledCount >= 5 ? 'Almost ready' : filledCount >= 3 ? 'In progress' : 'Just started';
+  const readinessColor = filledCount >= 5 ? 'text-emerald-600' : filledCount >= 3 ? 'text-amber-500' : 'text-neutral-500';
+
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <div className="min-h-screen bg-[#f5f4f0]">
       {/* Header */}
-      <div className="bg-white border-b border-neutral-200">
-        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-5">
-          <button
-            onClick={() => router.push('/projects')}
-            className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-900 mb-4 transition-colors"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Projects
-          </button>
+      <div className="bg-white border-b border-neutral-100">
+        <div className="max-w-6xl mx-auto px-6 py-5">
+          <div className="flex items-center gap-1.5 text-sm text-neutral-400 mb-3">
+            <button
+              onClick={() => router.push('/projects')}
+              className="hover:text-neutral-700 transition-colors"
+            >
+              ← Projects
+            </button>
+            {summary.event_type && (
+              <>
+                <span>·</span>
+                <span className="capitalize">{summary.event_type}</span>
+              </>
+            )}
+          </div>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl font-bold text-neutral-900">{project.title}</h1>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h1 className="text-2xl font-bold text-neutral-900">{project.title}</h1>
                 {project.status === 'draft' && summary.thread_id && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 bg-green-50 border border-green-200 rounded-full text-xs font-medium text-green-700">
+                  <span className="flex items-center gap-1.5 px-2.5 py-0.5 bg-green-50 border border-green-200 rounded-full text-xs font-semibold text-green-700">
                     <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
                     Live
                   </span>
                 )}
               </div>
-              <p className="text-sm text-neutral-400 mt-0.5">
-                Created {new Date(project.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              <p className="text-sm text-neutral-400 mt-1">
+                Created {new Date(project.created_at).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                {' · '}Last updated {relativeTime(project.updated_at)}
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {summary.thread_id && (
-                <button
-                  onClick={() => router.push(`/chat?thread=${summary.thread_id}`)}
-                  className="tc-btn-glossy flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg"
-                >
-                  <MessageSquare className="h-3.5 w-3.5" />
-                  {contract ? 'View Chat' : 'Continue Planning'}
-                </button>
-              )}
               {myRole === 'owner' && (
                 <button
                   onClick={handleDeleteProject}
-                  className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-500 border border-neutral-200 rounded-lg hover:border-neutral-400 hover:text-neutral-900 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-neutral-600 border border-neutral-200 rounded-xl hover:border-neutral-400 hover:text-neutral-900 transition-colors"
                 >
                   <Trash2 className="h-3.5 w-3.5" /> Delete
+                </button>
+              )}
+              {summary.thread_id && (
+                <button
+                  onClick={() => router.push(`/chat?thread=${summary.thread_id}`)}
+                  className="tc-btn-glossy flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-xl"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  {contract ? 'View Chat' : 'Continue Planning'}
                 </button>
               )}
             </div>
@@ -296,171 +351,132 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Bento grid */}
-      <div className="max-w-6xl mx-auto px-3 sm:px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 auto-rows-min">
+      {/* Event readiness bar */}
+      <div className="max-w-6xl mx-auto px-6 pt-5 pb-2">
+        <div className="bg-white rounded-xl border border-neutral-200 px-5 py-4 flex items-center gap-4">
+          <span className="text-sm font-medium text-neutral-700 shrink-0">
+            Event readiness — <span className="font-semibold">{filledCount} of 6 fields complete</span>
+          </span>
+          <div className="flex-1 h-2 bg-neutral-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-neutral-900 rounded-full transition-all"
+              style={{ width: `${(filledCount / 6) * 100}%` }}
+            />
+          </div>
+          <span className={`text-xs font-semibold shrink-0 ${readinessColor}`}>{readinessLabel}</span>
+        </div>
+      </div>
 
-          {/* ── Event Details ── spans 2 cols */}
-          <BentoInfoCard className="lg:col-span-2 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Event Details</p>
-              {(() => {
-                const filled = [
-                  project.event_date, project.guest_count != null,
-                  (summary.venue_name || summary.venue), summary.event_type,
-                  summary.service_type, summary.dietary_concerns,
-                ].filter(Boolean).length;
-                return (
-                  <span className="text-[10px] font-medium text-neutral-400 tabular-nums">
-                    {filled}/6 fields
-                  </span>
-                );
-              })()}
-            </div>
-            {(() => {
-              const hasAny =
-                project.event_date || project.guest_count != null ||
-                summary.venue_name || summary.venue || summary.event_type ||
-                summary.service_type || summary.dietary_concerns;
-              if (!hasAny) {
-                return (
-                  <div className="flex flex-col items-center justify-center py-10 text-center">
-                    <div className="w-12 h-12 rounded-2xl bg-neutral-100 flex items-center justify-center mb-3">
-                      <Calendar className="h-5 w-5 text-neutral-400" />
-                    </div>
-                    <p className="text-sm font-medium text-neutral-700">Details will appear here</p>
-                    <p className="text-xs text-neutral-500 mt-1 max-w-xs">
-                      {summary.thread_id
-                        ? 'Finish the AI intake and we\'ll populate the date, venue, guest count, and more.'
-                        : 'Start the AI intake to capture the event information.'}
-                    </p>
+      {/* Main layout */}
+      <div className="max-w-6xl mx-auto px-6 py-5 pb-16">
+        <div className="flex flex-col lg:flex-row gap-5">
+
+          {/* Left sidebar */}
+          <div className="w-full lg:w-72 shrink-0 space-y-4">
+
+            {/* EVENT SNAPSHOT */}
+            <div className="bg-white rounded-2xl border border-neutral-100 p-5">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 mb-5">Event Snapshot</p>
+              {project.event_date ? (
+                <div className="mb-4">
+                  <div className="text-4xl font-black text-neutral-900 leading-none tracking-tight">
+                    {new Date(project.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                   </div>
-                );
-              }
-              return (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
-                  {project.event_date && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-neutral-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</span>
-                      <span className="text-sm font-semibold text-neutral-900">
-                        {new Date(project.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-                      </span>
-                    </div>
-                  )}
-                  {project.guest_count != null && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-neutral-400 flex items-center gap-1"><Users className="h-3 w-3" /> Guests</span>
-                      <span className="text-sm font-semibold text-neutral-900">{project.guest_count}</span>
-                    </div>
-                  )}
-                  {(summary.venue_name || summary.venue) && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-neutral-400 flex items-center gap-1"><MapPin className="h-3 w-3" /> Venue</span>
-                      <span className="text-sm font-semibold text-neutral-900">{summary.venue_name || summary.venue}</span>
-                    </div>
-                  )}
-                  {summary.event_type && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-neutral-400">Event Type</span>
-                      <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.event_type}</span>
-                    </div>
-                  )}
-                  {summary.service_type && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-neutral-400">Service</span>
-                      <span className="text-sm font-semibold text-neutral-900 capitalize">{summary.service_type}</span>
-                    </div>
-                  )}
-                  {summary.dietary_concerns && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-neutral-400">Dietary</span>
-                      <span className="text-sm font-semibold text-neutral-900">{summary.dietary_concerns}</span>
-                    </div>
-                  )}
+                  <div className="text-sm text-neutral-500 mt-1.5">
+                    {new Date(project.event_date).getFullYear()}
+                  </div>
                 </div>
-              );
-            })()}
-            {summary.special_requests && summary.special_requests !== 'none' && (
-              <div className="mt-4 pt-4 border-t border-neutral-100">
-                <span className="text-xs text-neutral-400">Special Requests</span>
-                <p className="text-sm text-neutral-700 mt-1">{summary.special_requests}</p>
+              ) : (
+                <div className="mb-4 text-sm text-neutral-400">No date set</div>
+              )}
+              {summary.event_type && (
+                <span className="inline-block px-3 py-1 bg-neutral-900 text-white text-xs font-semibold rounded-full mb-5 capitalize">
+                  {summary.event_type} Event
+                </span>
+              )}
+              <div className="space-y-3">
+                {project.guest_count != null && (
+                  <div className="flex items-center gap-2.5 text-sm text-neutral-700">
+                    <Users className="h-4 w-4 text-neutral-400 shrink-0" />
+                    <span>{project.guest_count} guests</span>
+                  </div>
+                )}
+                {summary.service_type && (
+                  <div className="flex items-center gap-2.5 text-sm text-neutral-700">
+                    <FileText className="h-4 w-4 text-neutral-400 shrink-0" />
+                    <span className="capitalize">{summary.service_type}</span>
+                  </div>
+                )}
+                {(summary.venue_name || summary.venue) && (
+                  <div className="flex items-center gap-2.5 text-sm text-neutral-700">
+                    <MapPin className="h-4 w-4 text-neutral-400 shrink-0" />
+                    <span>{summary.venue_name || summary.venue}</span>
+                  </div>
+                )}
               </div>
-            )}
-          </BentoInfoCard>
+            </div>
 
-          {/* ── Status + Contract ── 1 col */}
-          <div className="flex flex-col gap-4">
-            {/* Status tile */}
-            <BentoInfoCard className="p-5">
-              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Status</p>
-              <div className={cn(
-                'inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]',
-                project.status === 'confirmed' ? 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white' :
-                project.status === 'completed' ? 'bg-gradient-to-br from-neutral-800 to-black text-white' :
-                project.status === 'cancelled' ? 'bg-gradient-to-br from-red-500 to-red-700 text-white' :
-                'bg-gradient-to-br from-neutral-100 to-neutral-200 text-neutral-800 border border-neutral-300 shadow-none'
-              )}>
-                <span className={cn(
-                  'h-1.5 w-1.5 rounded-full',
-                  project.status === 'confirmed' ? 'bg-emerald-200' :
-                  project.status === 'completed' ? 'bg-white' :
-                  project.status === 'cancelled' ? 'bg-red-200' :
-                  'bg-neutral-500'
-                )} />
-                <span className="capitalize">{project.status}</span>
-              </div>
-            </BentoInfoCard>
-
-            {/* Contract tile */}
+            {/* CONTRACT dark card */}
             {contract ? (
-              <BentoInfoCard className="p-5">
-                <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Contract</p>
-                <div className="space-y-2 mb-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-neutral-400">Status</span>
-                    <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', CONTRACT_STATUS_STYLE[contract.status] ?? CONTRACT_STATUS_STYLE.draft)}>
-                      {CONTRACT_STATUS_LABEL[contract.status] ?? contract.status.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-neutral-400">Version</span>
-                    <span className="text-xs font-semibold text-neutral-700">v{contract.version_number}</span>
-                  </div>
-                  {contract.total_amount != null && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-neutral-400">Amount</span>
-                      <span className="text-sm font-bold text-neutral-900">${contract.total_amount.toLocaleString()}</span>
-                    </div>
-                  )}
+              <div className="bg-neutral-900 rounded-2xl p-5 text-white">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 mb-4">Contract</p>
+                <p className="text-[10px] uppercase tracking-[0.15em] text-neutral-500 mb-1">Total Amount</p>
+                <p className="text-3xl font-black leading-none mb-5">
+                  ${contract.total_amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '—'}
+                </p>
+                <div className="flex items-center justify-between mb-5">
+                  <span className={cn('px-2.5 py-1 rounded-full text-xs font-semibold', CONTRACT_STATUS_STYLE[contract.status] ?? CONTRACT_STATUS_STYLE.draft)}>
+                    {CONTRACT_STATUS_LABEL[contract.status] ?? contract.status.replace(/_/g, ' ')}
+                  </span>
+                  <span className="text-xs text-neutral-500 font-medium">v{contract.version_number}</span>
                 </div>
                 <button
                   onClick={() => router.push(`/contracts/${contract.id}`)}
-                  className="tc-btn-glossy w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl"
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-white/10 hover:bg-white/15 text-white text-sm font-semibold rounded-xl transition-colors"
                 >
                   <FileText className="h-3.5 w-3.5" /> View Contract
                 </button>
-              </BentoInfoCard>
+              </div>
             ) : (
-              <BentoInfoCard className="p-5 bg-neutral-900! border-neutral-700!" glowColor="255, 255, 255">
-                <p className="text-sm font-semibold mb-1">No contract yet</p>
-                <p className="text-xs text-neutral-400 mb-4">
-                  {summary.thread_id ? 'The intake is in progress.' : 'Complete the AI intake to generate a contract.'}
+              <div className="bg-neutral-900 rounded-2xl p-5 text-white">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500 mb-3">Contract</p>
+                <p className="text-sm text-neutral-400 mb-4">
+                  {summary.thread_id ? 'Intake in progress…' : 'Complete the AI intake to generate a contract.'}
                 </p>
                 <button
                   onClick={() => router.push(summary.thread_id ? `/chat?thread=${summary.thread_id}` : '/chat')}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-black text-sm font-semibold rounded-xl hover:bg-neutral-100 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-white text-black text-sm font-semibold rounded-xl hover:bg-neutral-100 transition-colors"
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
                   {summary.thread_id ? 'Continue Planning' : 'Plan This Event'}
                 </button>
-            </BentoInfoCard>
+              </div>
             )}
 
+            {/* CLIENT card */}
+            {(summary.client_name || summary.name) && (
+              <div className="bg-white rounded-2xl border border-neutral-100 p-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-neutral-200 flex items-center justify-center text-sm font-bold text-neutral-600 uppercase shrink-0">
+                    {(summary.client_name || summary.name)?.[0]}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-900">{summary.client_name || summary.name}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-neutral-400 mt-0.5">Client</p>
+                  </div>
+                </div>
+                {summary.contact_email && (
+                  <p className="text-xs text-neutral-400 mt-3">{summary.contact_email}</p>
+                )}
+              </div>
+            )}
+
+            {/* Food Waste (staff only) */}
             {isStaff && (
-              <BentoInfoCard className="p-5">
-                <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Food Waste</p>
+              <div className="bg-white rounded-2xl border border-neutral-100 p-5">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 mb-4">Food Waste</p>
                 {eventWasteLogs.length > 0 && (
-                  <div className="mb-3 max-h-40 overflow-y-auto space-y-1.5">
+                  <div className="mb-3 max-h-36 overflow-y-auto space-y-1.5">
                     {eventWasteLogs.slice(0, 4).map((w) => (
                       <div key={w.id} className="flex items-start justify-between gap-2 text-xs border-b border-neutral-100 pb-1.5 last:border-b-0">
                         <div className="min-w-0 flex-1">
@@ -502,228 +518,219 @@ export default function ProjectDetailPage() {
                     Log ingredient waste
                   </button>
                 </div>
-              </BentoInfoCard>
+              </div>
             )}
           </div>
 
-          {/* ── Client ── 1 col */}
-          {(summary.client_name || summary.contact_email || summary.contact_phone || summary.name) && (
-            <BentoInfoCard className="p-6">
-              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Client</p>
-              <div className="space-y-3">
-                {(summary.client_name || summary.name) && (
-                  <div>
-                    <p className="text-xs text-neutral-400">Name</p>
-                    <p className="text-sm font-semibold text-neutral-900 mt-0.5">{summary.client_name || summary.name}</p>
-                  </div>
-                )}
-                {summary.contact_email && (
-                  <div>
-                    <p className="text-xs text-neutral-400">Email</p>
-                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{summary.contact_email}</p>
-                  </div>
-                )}
-                {summary.contact_phone && (
-                  <div>
-                    <p className="text-xs text-neutral-400">Phone</p>
-                    <p className="text-sm font-medium text-neutral-900 mt-0.5">{summary.contact_phone}</p>
-                  </div>
-                )}
-              </div>
-            </BentoInfoCard>
-          )}
+          {/* Right main content */}
+          <div className="flex-1 min-w-0 space-y-4">
 
-          {/* ── Menu ── spans 2 cols */}
-          {menuItems.length > 0 && (
-            <BentoInfoCard className={cn('p-6', (summary.client_name || summary.name) ? 'lg:col-span-2' : 'lg:col-span-3')}>
-              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Menu</p>
-              <div className="space-y-4">
+            {/* Menu Selection */}
+            {(summary.appetizers?.length > 0 || summary.main_dishes?.length > 0 || summary.desserts?.length > 0) ? (
+              <div className="bg-white rounded-2xl border border-neutral-100 p-6">
+                <div className="flex items-baseline justify-between mb-5">
+                  <h2 className="text-base font-bold text-neutral-900">Menu Selection</h2>
+                  <p className="text-xs text-neutral-400">{menuItems.length} item{menuItems.length !== 1 ? 's' : ''}</p>
+                </div>
+
                 {summary.appetizers?.length > 0 && (
-                  <div>
-                    <p className="text-xs text-neutral-400 mb-2">Appetizers</p>
-                    <div className="flex flex-wrap gap-1.5">
+                  <div className="mb-6">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 mb-3">Appetizers</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
                       {summary.appetizers.map((item: string, i: number) => (
-                        <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>
+                        <div key={i} className="rounded-xl border border-neutral-100 p-3 hover:border-neutral-200 transition-colors">
+                          <span className="text-xl mb-2 block">{getFoodEmoji(item)}</span>
+                          <p className="text-xs font-medium text-neutral-800 leading-snug">{item}</p>
+                        </div>
                       ))}
                     </div>
                   </div>
                 )}
+
                 {summary.main_dishes?.length > 0 && (
-                  <div>
-                    <p className="text-xs text-neutral-400 mb-2">Main Dishes</p>
-                    <div className="flex flex-wrap gap-1.5">
+                  <div className="mb-6">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 mb-3">Main Dishes</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
                       {summary.main_dishes.map((item: string, i: number) => (
-                        <span key={i} className="px-2.5 py-1 bg-neutral-900 text-white rounded-lg text-xs font-medium">{item}</span>
+                        <div key={i} className="rounded-xl bg-neutral-900 p-3">
+                          <span className="text-xl mb-2 block">{getFoodEmoji(item)}</span>
+                          <p className="text-xs font-medium text-white leading-snug">{item}</p>
+                        </div>
                       ))}
                     </div>
                   </div>
                 )}
+
                 {summary.desserts?.length > 0 && (
                   <div>
-                    <p className="text-xs text-neutral-400 mb-2">Desserts</p>
-                    <div className="flex flex-wrap gap-1.5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 mb-3">Desserts</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
                       {summary.desserts.map((item: string, i: number) => (
-                        <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{item}</span>
+                        <div key={i} className="rounded-xl border border-neutral-100 p-3 hover:border-neutral-200 transition-colors">
+                          <span className="text-xl mb-2 block">{getFoodEmoji(item)}</span>
+                          <p className="text-xs font-medium text-neutral-800 leading-snug">{item}</p>
+                        </div>
                       ))}
                     </div>
                   </div>
                 )}
               </div>
-            </BentoInfoCard>
-          )}
-
-          {/* ── Add-ons ── 1 col */}
-          {addons.length > 0 && (
-            <BentoInfoCard className="p-6">
-              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-4">Add-ons</p>
-              <div className="flex flex-wrap gap-1.5">
-                {addons.map((addon: string, i: number) => (
-                  <span key={i} className="px-2.5 py-1 bg-neutral-100 rounded-lg text-xs font-medium text-neutral-700">{addon}</span>
-                ))}
+            ) : menuItems.length > 0 ? (
+              <div className="bg-white rounded-2xl border border-neutral-100 p-6">
+                <h2 className="text-base font-bold text-neutral-900 mb-4">Menu Selection</h2>
+                <div className="flex flex-wrap gap-2">
+                  {menuItems.map((item, i) => (
+                    <span key={i} className="px-3 py-1.5 bg-neutral-100 rounded-xl text-xs font-medium text-neutral-700">{item}</span>
+                  ))}
+                </div>
               </div>
-            </BentoInfoCard>
-          )}
+            ) : null}
 
-          {/* ── Collaborators ── spans full width */}
-          <BentoInfoCard className="lg:col-span-3 p-6" enableTilt={false}>
-            <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-              <div className="flex items-center gap-2">
+            {/* Add-ons */}
+            {addons.length > 0 && (
+              <div className="bg-white rounded-2xl border border-neutral-100 p-6">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 mb-3">Add-ons</p>
+                <div className="flex flex-wrap gap-2">
+                  {addons.map((addon: string, i: number) => (
+                    <span key={i} className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-50 border border-neutral-200 rounded-full text-xs font-medium text-neutral-700">
+                      🌿 {addon}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Collaborators */}
+            <div className="bg-white rounded-2xl border border-neutral-100 p-6">
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
                 <div>
-                  <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Collaborators</p>
-                  <p className="text-sm text-neutral-500 mt-0.5">{collaborators.length} member{collaborators.length !== 1 ? 's' : ''}</p>
+                  <h2 className="text-base font-bold text-neutral-900">Collaborators</h2>
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    {collaborators.length} member{collaborators.length !== 1 ? 's' : ''}
+                    {myRole === 'owner' ? ' — you are the owner' : ''}
+                  </p>
                 </div>
                 {canManage && (
-                  <AiHint
-                    placement="bottom-right"
-                    message="Click Generate Link to share a join URL, or Add Collaborator to invite someone by email and assign them a role."
-                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => { await loadJoinCode(); }}
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-neutral-600 border border-neutral-200 rounded-xl hover:bg-neutral-50 hover:border-neutral-400 transition-colors"
+                    >
+                      <Link2 className="h-3.5 w-3.5" />
+                      {joinUrl ? 'Invite Link' : 'Generate Link'}
+                    </button>
+                    <button
+                      onClick={() => { setShowAddForm(!showAddForm); loadJoinCode(); }}
+                      className="tc-btn-glossy flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl"
+                    >
+                      <UserPlus className="h-3.5 w-3.5" />
+                      + Add Collaborator
+                    </button>
+                  </div>
                 )}
               </div>
-              {canManage && (
-                <div className="flex items-center gap-2">
-                  {/* Generate invite link button */}
+
+              {joinUrl && canManage && (
+                <div className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-3 mb-4">
+                  <Link2 className="h-4 w-4 text-neutral-400 shrink-0" />
+                  <span className="flex-1 text-xs text-neutral-600 truncate select-all">{joinUrl}</span>
                   <button
-                    onClick={async () => { await loadJoinCode(); }}
-                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-700 border border-neutral-200 rounded-xl hover:bg-neutral-50 hover:border-neutral-400 transition-colors"
+                    onClick={copyCode}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-black text-white text-xs font-medium rounded-lg hover:bg-neutral-800 transition-colors shrink-0"
                   >
-                    <Link2 className="h-3.5 w-3.5" />
-                    {joinUrl ? 'Invite Link' : 'Generate Link'}
+                    {codeCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                    {codeCopied ? 'Copied!' : 'Copy'}
                   </button>
-                  {/* Add collaborator button */}
-                  <button
-                    onClick={() => { setShowAddForm(!showAddForm); loadJoinCode(); }}
-                    className="tc-btn-glossy flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl"
-                  >
-                    <UserPlus className="h-3.5 w-3.5" />
-                    Add Collaborator
-                  </button>
+                </div>
+              )}
+
+              {showAddForm && canManage && (
+                <form onSubmit={handleAddCollaborator} className="bg-neutral-50 rounded-xl border border-neutral-200 p-4 mb-4">
+                  <p className="text-sm font-semibold text-neutral-900 mb-3">Add by email</p>
+                  <div className="flex gap-2 flex-wrap">
+                    <input
+                      type="email"
+                      required
+                      placeholder="colleague@email.com"
+                      value={addEmail}
+                      onChange={(e) => setAddEmail(e.target.value)}
+                      className="flex-1 min-w-[200px] px-3 py-2 text-sm border border-neutral-200 rounded-xl focus:ring-2 focus:ring-black outline-none bg-white"
+                      disabled={addingCollaborator}
+                    />
+                    <select
+                      value={addRole}
+                      onChange={(e) => setAddRole(e.target.value as CollaboratorRole)}
+                      className="px-3 py-2 text-sm border border-neutral-200 rounded-xl focus:ring-2 focus:ring-black outline-none bg-white"
+                      disabled={addingCollaborator}
+                    >
+                      {myRole === 'owner' && <option value="manager">Manager</option>}
+                      <option value="collaborator">Collaborator</option>
+                      <option value="viewer">Viewer</option>
+                    </select>
+                    <button
+                      type="submit"
+                      disabled={addingCollaborator}
+                      className="px-5 py-2 text-sm font-semibold bg-black text-white rounded-xl hover:bg-neutral-800 disabled:opacity-50 transition-colors"
+                    >
+                      {addingCollaborator ? 'Adding…' : 'Add'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {collaborators.length === 0 ? (
+                <div className="text-center py-8 text-neutral-400">
+                  <Users className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">No collaborators yet. Invite someone to get started.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {collaborators.map((c) => (
+                    <div key={c.user_id} className="flex items-center gap-3 p-3 rounded-xl border border-neutral-100 bg-neutral-50">
+                      <div className="w-10 h-10 rounded-full bg-neutral-200 flex items-center justify-center text-sm font-bold text-neutral-600 uppercase shrink-0">
+                        {c.first_name?.[0] ?? c.email[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          {roleIcon(c.role)}
+                          <span className="text-sm font-semibold text-neutral-900 truncate">
+                            {c.first_name && c.last_name ? `${c.first_name} ${c.last_name}` : c.email}
+                          </span>
+                        </div>
+                        {(c.first_name || c.last_name) && (
+                          <p className="text-xs text-neutral-400 truncate">{c.email}</p>
+                        )}
+                      </div>
+                      {canManage && c.role !== 'owner' && c.user_id !== currentUser?.id ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <select
+                            value={c.role}
+                            onChange={(e) => handleUpdateRole(c.user_id, e.target.value as CollaboratorRole)}
+                            className="text-xs border border-neutral-200 rounded-lg px-1.5 py-0.5 bg-white outline-none"
+                          >
+                            {myRole === 'owner' && <option value="manager">Manager</option>}
+                            <option value="collaborator">Collaborator</option>
+                            <option value="viewer">Viewer</option>
+                          </select>
+                          <button
+                            onClick={() => handleRemove(c.user_id, c.email)}
+                            className="p-1 text-neutral-300 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className={cn('text-xs px-2.5 py-1 rounded-full font-semibold shrink-0', ROLE_BADGE[c.role])}>
+                          {c.role}
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
 
-            {/* Invite link bar */}
-            {joinUrl && canManage && (
-              <div className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-3 mb-5">
-                <Link2 className="h-4 w-4 text-neutral-400 shrink-0" />
-                <span className="flex-1 text-xs text-neutral-600 truncate select-all">{joinUrl}</span>
-                <button
-                  onClick={copyCode}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-black text-white text-xs font-medium rounded-lg hover:bg-neutral-800 transition-colors shrink-0"
-                >
-                  {codeCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                  {codeCopied ? 'Copied!' : 'Copy'}
-                </button>
-              </div>
-            )}
-
-            {/* Add collaborator form */}
-            {showAddForm && canManage && (
-              <form onSubmit={handleAddCollaborator} className="bg-neutral-50 rounded-xl border border-neutral-200 p-4 mb-5">
-                <p className="text-sm font-semibold text-neutral-900 mb-3">Add by email</p>
-                <div className="flex gap-2 flex-wrap">
-                  <input
-                    type="email"
-                    required
-                    placeholder="colleague@email.com"
-                    value={addEmail}
-                    onChange={(e) => setAddEmail(e.target.value)}
-                    className="flex-1 min-w-[200px] px-3 py-2 text-sm border border-neutral-200 rounded-xl focus:ring-2 focus:ring-black outline-none bg-white"
-                    disabled={addingCollaborator}
-                  />
-                  <select
-                    value={addRole}
-                    onChange={(e) => setAddRole(e.target.value as CollaboratorRole)}
-                    className="px-3 py-2 text-sm border border-neutral-200 rounded-xl focus:ring-2 focus:ring-black outline-none bg-white"
-                    disabled={addingCollaborator}
-                  >
-                    {myRole === 'owner' && <option value="manager">Manager</option>}
-                    <option value="collaborator">Collaborator</option>
-                    <option value="viewer">Viewer</option>
-                  </select>
-                  <button
-                    type="submit"
-                    disabled={addingCollaborator}
-                    className="px-5 py-2 text-sm font-semibold bg-black text-white rounded-xl hover:bg-neutral-800 disabled:opacity-50 transition-colors"
-                  >
-                    {addingCollaborator ? 'Adding…' : 'Add'}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Collaborator list */}
-            {collaborators.length === 0 ? (
-              <div className="text-center py-8 text-neutral-400">
-                <Users className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">No collaborators yet. Invite someone to get started.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {collaborators.map((c) => (
-                  <div key={c.user_id} className="flex items-center gap-3 p-3 rounded-xl border border-neutral-200 bg-neutral-50">
-                    <div className="w-9 h-9 rounded-full bg-neutral-200 flex items-center justify-center text-sm font-semibold text-neutral-600 uppercase shrink-0">
-                      {c.first_name?.[0] ?? c.email[0]}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        {roleIcon(c.role)}
-                        <span className="text-sm font-semibold text-neutral-900 truncate">
-                          {c.first_name && c.last_name ? `${c.first_name} ${c.last_name}` : c.email}
-                        </span>
-                      </div>
-                      {(c.first_name || c.last_name) && (
-                        <p className="text-xs text-neutral-400 truncate">{c.email}</p>
-                      )}
-                    </div>
-                    {canManage && c.role !== 'owner' && c.user_id !== currentUser?.id ? (
-                      <div className="flex items-center gap-1 shrink-0">
-                        <select
-                          value={c.role}
-                          onChange={(e) => handleUpdateRole(c.user_id, e.target.value as CollaboratorRole)}
-                          className="text-xs border border-neutral-200 rounded-lg px-1.5 py-0.5 bg-white outline-none"
-                        >
-                          {myRole === 'owner' && <option value="manager">Manager</option>}
-                          <option value="collaborator">Collaborator</option>
-                          <option value="viewer">Viewer</option>
-                        </select>
-                        <button
-                          onClick={() => handleRemove(c.user_id, c.email)}
-                          className="p-1 text-neutral-300 hover:text-red-500 transition-colors"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <span className={cn('text-xs px-2.5 py-1 rounded-full font-medium shrink-0', ROLE_BADGE[c.role])}>
-                        {c.role}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </BentoInfoCard>
-
+          </div>
         </div>
       </div>
 

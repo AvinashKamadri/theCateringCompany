@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Signin / Signup — Hero overlay</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --black: #0e0e0e;
+      --ink: #1a1a1a;
+      --slate: #4a4a4a;
+      --gray: #8a8a8a;
+      --line: #e5e3df;
+      --paper: #f8f6f1;
+      --paper-2: #fcfaf5;
+      --white: #ffffff;
+    }
+    html, body { font-family: 'Inter', system-ui, sans-serif; color: var(--ink); background: var(--black); }
+    .serif { font-family: 'Cormorant Garamond', serif; letter-spacing: -0.005em; }
+    .fade-up { animation: fadeUp 800ms cubic-bezier(0.2,0.8,0.2,1) both; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .scale-in { animation: scaleIn 700ms cubic-bezier(0.2,0.8,0.2,1) both; }
+    @keyframes scaleIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+    .tc-input { background: transparent; border: none; border-bottom: 1px solid var(--line); padding: 12px 0; font-size: 15px; color: var(--ink); width: 100%; transition: border-color 240ms; }
+    .tc-input:focus { outline: none; border-color: var(--ink); }
+    .tc-input::placeholder { color: var(--gray); font-weight: 300; }
+    .tc-btn { transition: all 280ms cubic-bezier(0.2,0.8,0.2,1); }
+    .tc-btn:hover { transform: translateY(-1px); box-shadow: 0 18px 32px -16px rgba(14,14,14,0.5); }
+    .img-warm { filter: saturate(1.08) contrast(1.06); }
+    .sub-tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+    .sub-tab { color: var(--gray); border-bottom: 2px solid transparent; }
+    .img-pick.active { background: var(--ink); color: var(--white); }
+    .img-pick { color: var(--gray); }
+  </style>
+</head>
+<body>
+
+  <!-- Top floating control panel -->
+  <div class="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-3">
+    <!-- Mode toggle -->
+    <div class="flex gap-6 px-5 py-2 rounded-full bg-white border border-neutral-200 shadow-md">
+      <button onclick="setMode('signin')" id="mode-signin" class="sub-tab active text-[11px] font-semibold tracking-[0.2em] uppercase pb-1">Sign in</button>
+      <button onclick="setMode('signup')" id="mode-signup" class="sub-tab text-[11px] font-semibold tracking-[0.2em] uppercase pb-1">Sign up</button>
+    </div>
+    <!-- Image picker -->
+    <div class="flex gap-1 px-2 py-1 rounded-full bg-white border border-neutral-200 text-[10px] tracking-wider uppercase shadow-md">
+      <span class="px-2 py-1 text-neutral-500">Image:</span>
+      <button onclick="setImage('catering-bg1.jpg')" id="img-1" class="img-pick px-3 py-1 rounded-full active">1</button>
+      <button onclick="setImage('catering-bg-2.jpg')" id="img-2" class="img-pick px-3 py-1 rounded-full">2</button>
+      <button onclick="setImage('catering-bg3.jpg')" id="img-3" class="img-pick px-3 py-1 rounded-full">3</button>
+      <button onclick="setImage('cat-bg2.jpg')" id="img-4" class="img-pick px-3 py-1 rounded-full">4</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- HERO OVERLAY: catering image full-bleed + form card centered  -->
+  <!-- ============================================================ -->
+  <section class="min-h-screen relative overflow-hidden">
+
+    <!-- Background slideshow: stacks 3 images, fades between every 3s -->
+    <div class="absolute inset-0">
+      <img id="slide-0" src="/catering-bg1.jpg" alt="" class="slide absolute inset-0 w-full h-full object-cover img-warm" style="opacity:1; transition: opacity 1200ms ease-in-out;" />
+      <img id="slide-1" src="/catering-bg-2.jpg" alt="" class="slide absolute inset-0 w-full h-full object-cover img-warm" style="opacity:0; transition: opacity 1200ms ease-in-out;" />
+      <img id="slide-2" src="/catering-bg3.jpg" alt="" class="slide absolute inset-0 w-full h-full object-cover img-warm" style="opacity:0; transition: opacity 1200ms ease-in-out;" />
+      <!-- Subtle dark wash for legibility -->
+      <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(14,14,14,0.45) 0%, rgba(14,14,14,0.25) 30%, rgba(14,14,14,0.55) 70%, rgba(14,14,14,0.85) 100%);"></div>
+    </div>
+
+    <!-- Top brand strip overlaid on image -->
+    <div class="relative z-10 flex justify-between items-center px-8 lg:px-14 py-7 fade-up">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-md" style="background: rgba(252,250,245,0.16); border: 1px solid rgba(252,250,245,0.25);">
+          <span class="text-[11px] font-bold text-white">TC</span>
+        </div>
+        <div class="text-white">
+          <div class="text-sm font-semibold tracking-tight drop-shadow">TheCateringCompany</div>
+          <div class="text-[10px] tracking-[0.25em] uppercase text-white/70">Crafted with care · est. 2025</div>
+        </div>
+      </div>
+      <div class="hidden md:flex items-center gap-3">
+        <span class="text-[11px] tracking-[0.2em] uppercase text-white/70">Need help?</span>
+        <span class="px-4 py-1.5 rounded-full backdrop-blur-md text-[11px] tracking-[0.2em] uppercase text-white" style="background: rgba(252,250,245,0.14); border: 1px solid rgba(252,250,245,0.22);">support@flashbackai.org</span>
+      </div>
+    </div>
+
+    <!-- Centered form card overlaid on top of image -->
+    <div class="relative z-10 flex flex-col items-center justify-center px-6 pb-16" style="min-height: calc(100vh - 200px);">
+
+      <!-- Hero tagline above form -->
+      <div class="text-center mb-8 lg:mb-10 fade-up max-w-3xl" style="animation-delay:80ms;">
+        <div class="inline-flex items-center gap-3">
+          <div class="w-12 h-[1px] bg-white/70"></div>
+          <span class="text-[11px] tracking-[0.3em] uppercase text-white/85 font-medium drop-shadow"
+                data-mode-text data-signin="Welcome back" data-signup="Begin your story">Welcome back</span>
+          <div class="w-12 h-[1px] bg-white/70"></div>
+        </div>
+        <h1 class="serif text-white font-medium leading-[1.05] mt-6 drop-shadow-[0_2px_18px_rgba(0,0,0,0.6)]" style="font-size: clamp(40px, 5vw, 78px);"
+            data-mode-html data-signin='Crafted gatherings,<br/><span class="italic font-normal">to the last detail.</span>'
+            data-signup='Plan something<br/><span class="italic font-normal">unforgettable.</span>'>
+          Crafted gatherings,<br/>
+          <span class="italic font-normal">to the last detail.</span>
+        </h1>
+      </div>
+
+      <!-- Form card -->
+      <div class="w-full max-w-md scale-in" style="animation-delay:160ms;">
+
+        <!-- SIGN IN -->
+        <div class="mode-signin-only rounded-2xl p-9 lg:p-11" style="background: var(--paper-2); box-shadow: 0 40px 90px -30px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08);">
+          <div class="text-center mb-8">
+            <div class="text-[11px] tracking-[0.3em] uppercase mb-1" style="color: var(--gray);">Member access</div>
+            <h2 class="serif text-3xl font-medium tracking-tight" style="color: var(--ink);">
+              Sign in <span class="italic font-normal" style="color: var(--slate);">to continue</span>
+            </h2>
+          </div>
+
+          <form class="space-y-6">
+            <div>
+              <label class="block text-[10px] font-semibold uppercase tracking-[0.3em] mb-1" style="color: var(--gray);">Email</label>
+              <input type="email" class="tc-input" placeholder="you@example.com" />
+            </div>
+            <div>
+              <div class="flex justify-between items-end mb-1">
+                <label class="block text-[10px] font-semibold uppercase tracking-[0.3em]" style="color: var(--gray);">Password</label>
+                <a href="#" class="text-[11px] hover:underline font-medium" style="color: var(--ink);">Forgot?</a>
+              </div>
+              <input type="password" class="tc-input" placeholder="••••••••" />
+            </div>
+            <button type="button" class="tc-btn w-full py-4 rounded-full text-[12px] font-semibold tracking-[0.25em] uppercase flex items-center justify-center gap-3 mt-2" style="background: var(--ink); color: var(--white);">
+              Sign in
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+            </button>
+          </form>
+
+          <div class="mt-7 pt-6 border-t text-center" style="border-color: var(--line);">
+            <p class="text-sm" style="color: var(--slate);">
+              Don't have an account?
+              <a href="#" onclick="setMode('signup')" class="font-semibold hover:underline ml-1" style="color: var(--ink);">Create one →</a>
+            </p>
+          </div>
+        </div>
+
+        <!-- SIGN UP -->
+        <div class="mode-signup-only rounded-2xl p-9 lg:p-11 hidden" style="background: var(--paper-2); box-shadow: 0 40px 90px -30px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08);">
+          <div class="text-center mb-7">
+            <div class="text-[11px] tracking-[0.3em] uppercase mb-1" style="color: var(--gray);">Begin your story</div>
+            <h2 class="serif text-3xl font-medium tracking-tight" style="color: var(--ink);">
+              Create <span class="italic font-normal" style="color: var(--slate);">your account</span>
+            </h2>
+          </div>
+
+          <form class="space-y-5">
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-[10px] font-semibold uppercase tracking-[0.3em] mb-1" style="color: var(--gray);">First</label>
+                <input type="text" class="tc-input" placeholder="John" />
+              </div>
+              <div>
+                <label class="block text-[10px] font-semibold uppercase tracking-[0.3em] mb-1" style="color: var(--gray);">Last</label>
+                <input type="text" class="tc-input" placeholder="Doe" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-[10px] font-semibold uppercase tracking-[0.3em] mb-1" style="color: var(--gray);">Email</label>
+              <input type="email" class="tc-input" placeholder="you@example.com" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-semibold uppercase tracking-[0.3em] mb-1" style="color: var(--gray);">Password</label>
+              <input type="password" class="tc-input" placeholder="Create a strong password" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-semibold uppercase tracking-[0.3em] mb-1" style="color: var(--gray);">Phone <span class="normal-case tracking-normal opacity-60">(optional)</span></label>
+              <input type="tel" class="tc-input" placeholder="+1 (555) 000-0000" />
+            </div>
+            <button type="button" class="tc-btn w-full py-4 rounded-full text-[12px] font-semibold tracking-[0.25em] uppercase flex items-center justify-center gap-3 mt-2" style="background: var(--ink); color: var(--white);">
+              Create account
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+            </button>
+          </form>
+
+          <div class="mt-6 pt-5 border-t text-center" style="border-color: var(--line);">
+            <p class="text-sm" style="color: var(--slate);">
+              Already have an account?
+              <a href="#" onclick="setMode('signin')" class="font-semibold hover:underline ml-1" style="color: var(--ink);">Sign in →</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom overlay tagline -->
+    <div class="absolute bottom-6 left-0 right-0 z-10 px-8 lg:px-14 fade-up" style="animation-delay:280ms;">
+      <div class="flex justify-between items-end text-white/80">
+        <div class="serif italic text-base lg:text-lg drop-shadow"
+             data-mode-text data-signin="You celebrate. We'll handle the rest." data-signup="Every occasion, made memorable.">
+          You celebrate. We'll handle the rest.
+        </div>
+        <div class="text-[10px] tracking-[0.25em] uppercase">© 2026 · TheCateringCompany</div>
+      </div>
+    </div>
+
+  </section>
+
+  <script>
+    let currentMode = 'signin';
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.querySelectorAll('.mode-signin-only').forEach(el => {
+        if (mode === 'signin') el.classList.remove('hidden');
+        else el.classList.add('hidden');
+      });
+      document.querySelectorAll('.mode-signup-only').forEach(el => {
+        if (mode === 'signup') el.classList.remove('hidden');
+        else el.classList.add('hidden');
+      });
+      ['signin','signup'].forEach(m => {
+        const btn = document.getElementById('mode-' + m);
+        if (m === mode) btn.classList.add('active');
+        else btn.classList.remove('active');
+      });
+      document.querySelectorAll('[data-mode-text]').forEach(el => {
+        el.textContent = el.dataset[mode];
+      });
+      document.querySelectorAll('[data-mode-html]').forEach(el => {
+        el.innerHTML = el.dataset[mode];
+      });
+    }
+
+    // Auto-rotate slideshow every 3 seconds
+    let currentSlide = 0;
+    const totalSlides = 3;
+    let slideInterval = setInterval(rotateSlide, 3000);
+
+    function rotateSlide() {
+      const next = (currentSlide + 1) % totalSlides;
+      document.getElementById('slide-' + currentSlide).style.opacity = '0';
+      document.getElementById('slide-' + next).style.opacity = '1';
+      currentSlide = next;
+    }
+
+    // Manual image override (pauses auto-rotation, sets all 3 slides to that image)
+    function setImage(filename) {
+      clearInterval(slideInterval);
+      ['slide-0','slide-1','slide-2'].forEach(id => {
+        document.getElementById(id).src = '/' + filename;
+        document.getElementById(id).style.opacity = (id === 'slide-0' ? '1' : '0');
+      });
+      currentSlide = 0;
+      document.querySelectorAll('.img-pick').forEach(b => b.classList.remove('active'));
+      const map = { 'catering-bg1.jpg':'img-1', 'catering-bg-2.jpg':'img-2', 'catering-bg3.jpg':'img-3', 'cat-bg2.jpg':'img-4' };
+      const id = map[filename];
+      if (id) document.getElementById(id).classList.add('active');
+    }
+  </script>
+</body>
+</html>

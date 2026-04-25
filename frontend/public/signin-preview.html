@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Signin designs — TheCateringCompany</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Dancing+Script:wght@500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --cream: #f7f2e9;
+      --cream-2: #fcfaf5;
+      --ink: #1f1a14;
+      --muted: #7a6e5e;
+      --amber: #b8935f;
+      --amber-dark: #8a6c43;
+      --sage: #d4c3a5;
+      --border: #e8dfce;
+    }
+    html, body { font-family: 'Inter', system-ui, sans-serif; background: var(--cream); color: var(--ink); }
+    .serif { font-family: 'Cormorant Garamond', serif; }
+    .script { font-family: 'Dancing Script', cursive; }
+    .fade-up { animation: fadeUp 600ms cubic-bezier(0.2,0.8,0.2,1) both; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+    .tc-btn { transition: transform 200ms, box-shadow 260ms; }
+    .tc-btn:hover { transform: translateY(-1px); box-shadow: 0 14px 28px -10px rgba(138,108,67,0.45); }
+    .tc-input { background: var(--cream-2); border: 1px solid var(--border); transition: all 180ms; }
+    .tc-input:focus { outline: none; border-color: var(--amber); box-shadow: 0 0 0 3px rgba(184,147,95,0.15); background: #fff; }
+    .glass { backdrop-filter: blur(24px) saturate(140%); -webkit-backdrop-filter: blur(24px) saturate(140%); }
+    .view { display: none; }
+    .view.active { display: block; }
+    .tab-btn.active { background: var(--ink); color: var(--cream-2); }
+    .tab-btn { color: var(--muted); }
+  </style>
+</head>
+<body class="min-h-screen">
+
+  <!-- TABS -->
+  <div class="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex gap-1 rounded-full p-1 border shadow-lg" style="background: var(--cream-2); border-color: var(--border);">
+    <button onclick="showView('A')" id="tab-A" class="tab-btn active px-5 py-2 text-sm font-medium rounded-full">A · Immersive</button>
+    <button onclick="showView('B')" id="tab-B" class="tab-btn px-5 py-2 text-sm font-medium rounded-full">B · Bento</button>
+    <button onclick="showView('C')" id="tab-C" class="tab-btn px-5 py-2 text-sm font-medium rounded-full">C · Editorial</button>
+  </div>
+
+  <!-- ==================== DESIGN A: IMMERSIVE FULL-BLEED ==================== -->
+  <div id="view-A" class="view active">
+    <section class="min-h-screen relative overflow-hidden">
+      <!-- Full-bleed background image -->
+      <div class="absolute inset-0">
+        <img src="/catering-bg1.jpg" alt="" class="w-full h-full object-cover" />
+        <!-- Vignette from left for form legibility -->
+        <div class="absolute inset-0" style="background: linear-gradient(90deg, rgba(31,26,20,0.55) 0%, rgba(31,26,20,0.25) 40%, rgba(31,26,20,0) 60%, rgba(31,26,20,0.4) 100%);"></div>
+        <!-- Warm tint -->
+        <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(247,242,233,0.1) 0%, rgba(31,26,20,0.4) 100%);"></div>
+      </div>
+
+      <!-- Top nav strip -->
+      <div class="relative z-10 flex justify-between items-center px-10 lg:px-16 py-8">
+        <div class="flex items-center gap-2.5 fade-up">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg glass" style="background: rgba(252,250,245,0.15); border: 1px solid rgba(252,250,245,0.25);">
+            <span class="text-sm font-bold text-white">TC</span>
+          </div>
+          <div>
+            <div class="text-base font-semibold tracking-tight text-white drop-shadow">TheCateringCompany</div>
+            <div class="text-[11px] script text-amber-200">Crafted with care.</div>
+          </div>
+        </div>
+        <div class="hidden lg:flex items-center gap-6 text-sm text-white/80 fade-up" style="animation-delay:100ms;">
+          <span>Need help?</span>
+          <span class="px-4 py-1.5 rounded-full glass" style="background: rgba(252,250,245,0.12); border: 1px solid rgba(252,250,245,0.2);">support@cateringco</span>
+        </div>
+      </div>
+
+      <!-- Floating form card - offset right -->
+      <div class="relative z-10 flex items-center justify-end px-10 lg:px-16 pb-16" style="min-height: calc(100vh - 180px);">
+        <div class="w-full max-w-md fade-up" style="animation-delay:150ms;">
+          <div class="glass rounded-[28px] p-10 lg:p-12" style="background: rgba(252,250,245,0.92); border: 1px solid rgba(252,250,245,0.4); box-shadow: 0 40px 80px -30px rgba(31,26,20,0.5);">
+            <div class="mb-7">
+              <div class="text-xs uppercase tracking-[0.25em]" style="color: var(--amber-dark);">Welcome back</div>
+              <h1 class="serif text-5xl font-semibold tracking-tight mt-3 leading-[1.05]" style="color: var(--ink);">
+                Let&rsquo;s pick up<br/>
+                <span class="italic" style="color: var(--amber-dark);">where you left off.</span>
+              </h1>
+            </div>
+            <form class="space-y-5">
+              <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider mb-2" style="color: var(--muted);">Email</label>
+                <input type="email" placeholder="you@example.com" class="tc-input w-full px-4 py-3.5 rounded-lg text-[15px]" />
+              </div>
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <label class="block text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Password</label>
+                  <a href="#" class="text-xs hover:underline" style="color: var(--amber-dark);">Forgot?</a>
+                </div>
+                <input type="password" placeholder="Enter your password" class="tc-input w-full px-4 py-3.5 rounded-lg text-[15px]" />
+              </div>
+              <button type="button" class="tc-btn w-full py-3.5 rounded-full font-semibold text-[15px] flex items-center justify-center gap-2 mt-2" style="background: var(--amber-dark); color: white;">
+                Sign in
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+              </button>
+            </form>
+            <p class="mt-6 text-sm text-center" style="color: var(--muted);">
+              New to us? <a href="#" class="font-semibold hover:underline" style="color: var(--amber-dark);">Create an account</a>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom-left floating tagline -->
+      <div class="absolute bottom-12 left-10 lg:left-16 z-10 fade-up max-w-sm" style="animation-delay:200ms;">
+        <div class="serif italic text-2xl text-white/95 drop-shadow">Flavors that bring</div>
+        <div class="script text-4xl text-amber-200 drop-shadow">people together.</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ==================== DESIGN B: BENTO GRID ==================== -->
+  <div id="view-B" class="view">
+    <section class="min-h-screen p-6 lg:p-10" style="background: var(--cream);">
+      <div class="max-w-[1500px] mx-auto">
+
+        <!-- Top nav -->
+        <div class="flex justify-between items-center mb-6 fade-up">
+          <div class="flex items-center gap-2.5">
+            <div class="flex h-10 w-10 items-center justify-center rounded-lg" style="background: var(--ink);">
+              <span class="text-sm font-bold" style="color: var(--cream);">TC</span>
+            </div>
+            <div>
+              <div class="text-base font-semibold tracking-tight" style="color: var(--ink);">TheCateringCompany</div>
+              <div class="text-[11px] script" style="color: var(--amber);">Crafted with care.</div>
+            </div>
+          </div>
+          <div class="text-xs uppercase tracking-[0.2em]" style="color: var(--muted);">Sign in</div>
+        </div>
+
+        <!-- Bento grid: 4 columns, staggered heights -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 auto-rows-[130px]">
+
+          <!-- FORM CARD (col 1-5, row 1-4) -->
+          <div class="lg:col-span-5 lg:row-span-4 rounded-3xl p-10 fade-up" style="background: var(--cream-2); border: 1px solid var(--border); box-shadow: 0 10px 30px -15px rgba(138,108,67,0.2);">
+            <div class="mb-6">
+              <div class="inline-block text-xs uppercase tracking-[0.2em] px-3 py-1 rounded-full" style="background: var(--amber); color: white;">Welcome back</div>
+              <h1 class="serif text-5xl font-semibold tracking-tight mt-5 leading-[1.05]" style="color: var(--ink);">
+                Sign in to keep<br/>
+                <span class="italic" style="color: var(--amber-dark);">planning.</span>
+              </h1>
+            </div>
+            <form class="space-y-4">
+              <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider mb-2" style="color: var(--muted);">Email</label>
+                <input type="email" placeholder="you@example.com" class="tc-input w-full px-4 py-3.5 rounded-lg text-[15px]" />
+              </div>
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <label class="block text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Password</label>
+                  <a href="#" class="text-xs hover:underline" style="color: var(--amber-dark);">Forgot?</a>
+                </div>
+                <input type="password" placeholder="••••••••" class="tc-input w-full px-4 py-3.5 rounded-lg text-[15px]" />
+              </div>
+              <button type="button" class="tc-btn w-full py-3.5 rounded-full font-semibold text-[15px] flex items-center justify-center gap-2 mt-3" style="background: var(--ink); color: white;">
+                Sign in <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+              </button>
+            </form>
+            <p class="mt-5 text-sm" style="color: var(--muted);">New here? <a href="#" class="font-semibold hover:underline" style="color: var(--amber-dark);">Create an account</a></p>
+          </div>
+
+          <!-- BIG FOOD IMAGE (col 6-12, row 1-3) -->
+          <div class="lg:col-span-7 lg:row-span-3 rounded-3xl overflow-hidden relative fade-up" style="animation-delay:80ms;">
+            <img src="/catering-bg-2.jpg" class="w-full h-full object-cover" />
+            <div class="absolute inset-0" style="background: linear-gradient(180deg, transparent 60%, rgba(31,26,20,0.6));"></div>
+            <div class="absolute bottom-6 left-6 right-6">
+              <div class="serif italic text-3xl text-white drop-shadow leading-tight">Flavors that bring</div>
+              <div class="script text-5xl text-amber-200 drop-shadow leading-tight">people together.</div>
+            </div>
+            <div class="absolute top-5 right-5 px-3 py-1.5 rounded-full text-xs glass" style="background: rgba(252,250,245,0.25); color: white; border: 1px solid rgba(252,250,245,0.3);">✦ 200+ events served</div>
+          </div>
+
+          <!-- FEATURE STRIP (col 6-9, row 4) -->
+          <div class="lg:col-span-4 rounded-3xl p-5 flex items-center gap-4 fade-up" style="background: var(--ink); color: var(--cream); animation-delay:120ms;">
+            <div class="w-12 h-12 rounded-full border-2 flex items-center justify-center flex-shrink-0" style="border-color: var(--amber);">
+              <svg class="w-6 h-6" style="color: var(--amber);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 2a7 7 0 017 7c0 4-3 7-7 9-4-2-7-5-7-9a7 7 0 017-7z"/></svg>
+            </div>
+            <div>
+              <div class="text-sm font-semibold">Fresh Ingredients</div>
+              <div class="text-xs" style="color: var(--sage);">Locally sourced</div>
+            </div>
+          </div>
+
+          <!-- FEATURE STRIP 2 (col 10-12, row 4) -->
+          <div class="lg:col-span-3 rounded-3xl p-5 flex items-center gap-4 fade-up" style="background: var(--amber); color: white; animation-delay:160ms;">
+            <div class="w-12 h-12 rounded-full bg-white/25 flex items-center justify-center flex-shrink-0">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 13l4 4L19 7"/></svg>
+            </div>
+            <div>
+              <div class="text-sm font-semibold">Signed</div>
+              <div class="text-xs opacity-90">in minutes</div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Bottom micro-footer -->
+        <div class="mt-6 flex justify-between items-center fade-up" style="animation-delay:200ms;">
+          <div class="flex items-center gap-2 text-xs" style="color: var(--muted);">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> All systems operational
+          </div>
+          <div class="serif italic text-sm" style="color: var(--muted);">You celebrate — <span class="script text-lg" style="color: var(--amber-dark);">we'll handle the rest.</span></div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+
+  <!-- ==================== DESIGN C: EDITORIAL HORIZONTAL ==================== -->
+  <div id="view-C" class="view">
+    <section class="min-h-screen flex flex-col" style="background: var(--cream);">
+
+      <!-- Top strip: logo + tagline -->
+      <div class="flex justify-between items-center px-10 lg:px-16 py-6 border-b fade-up" style="border-color: var(--border);">
+        <div class="flex items-center gap-2.5">
+          <div class="flex h-9 w-9 items-center justify-center rounded-lg" style="background: var(--ink);">
+            <span class="text-xs font-bold" style="color: var(--cream);">TC</span>
+          </div>
+          <span class="text-sm font-semibold tracking-tight" style="color: var(--ink);">TheCateringCompany</span>
+        </div>
+        <div class="serif italic text-sm" style="color: var(--muted);">est. 2025 · Crafted dining for every occasion</div>
+        <div class="text-xs uppercase tracking-[0.2em]" style="color: var(--amber-dark);">Member sign in</div>
+      </div>
+
+      <!-- Three-column editorial layout -->
+      <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-0">
+
+        <!-- LEFT: form in generous whitespace -->
+        <div class="lg:col-span-4 p-10 lg:p-16 flex flex-col justify-center fade-up">
+          <div class="max-w-sm">
+            <div class="text-xs uppercase tracking-[0.25em] mb-3" style="color: var(--amber-dark);">— 01 / Sign in</div>
+            <h1 class="serif text-4xl lg:text-5xl font-semibold tracking-tight mb-3 leading-[1.05]" style="color: var(--ink);">
+              Welcome <span class="italic" style="color: var(--amber-dark);">back.</span>
+            </h1>
+            <p class="text-sm mb-8 leading-relaxed" style="color: var(--muted);">
+              Your menus, contracts, and conversations are exactly where you left them.
+            </p>
+
+            <form class="space-y-4">
+              <div>
+                <label class="block text-[11px] font-semibold uppercase tracking-[0.15em] mb-2" style="color: var(--muted);">Email</label>
+                <input type="email" placeholder="you@example.com" class="tc-input w-full px-4 py-3 rounded-lg text-[15px]" />
+              </div>
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <label class="block text-[11px] font-semibold uppercase tracking-[0.15em]" style="color: var(--muted);">Password</label>
+                  <a href="#" class="text-[11px] hover:underline" style="color: var(--amber-dark);">Forgot?</a>
+                </div>
+                <input type="password" placeholder="••••••••" class="tc-input w-full px-4 py-3 rounded-lg text-[15px]" />
+              </div>
+              <button type="button" class="tc-btn w-full py-3 rounded-full font-semibold text-sm flex items-center justify-center gap-2 mt-2" style="background: var(--amber-dark); color: white;">
+                Sign in <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+              </button>
+            </form>
+
+            <p class="mt-6 text-xs" style="color: var(--muted);">
+              Don't have an account? <a href="#" class="font-semibold hover:underline" style="color: var(--amber-dark);">Create one →</a>
+            </p>
+          </div>
+        </div>
+
+        <!-- CENTER: dominant food image -->
+        <div class="lg:col-span-5 relative overflow-hidden fade-up" style="animation-delay:80ms;">
+          <img src="/catering-bg-2.jpg" class="w-full h-full object-cover" />
+          <!-- Editorial pull-quote overlay -->
+          <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center px-6">
+            <div class="serif italic text-2xl lg:text-3xl text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.6)] leading-snug">
+              "Every meal is a memory<br/>waiting to happen."
+            </div>
+          </div>
+          <div class="absolute bottom-6 right-6 text-xs text-white/80 uppercase tracking-[0.2em]">— Our kitchen</div>
+        </div>
+
+        <!-- RIGHT: vertical typography + feature stack -->
+        <div class="lg:col-span-3 p-10 lg:p-12 flex flex-col justify-between relative overflow-hidden fade-up" style="background: var(--ink); color: var(--cream); animation-delay:120ms;">
+          <!-- Decorative vertical typography -->
+          <div class="absolute top-10 right-6 serif italic text-7xl opacity-10 writing-mode-vertical" style="color: var(--amber); transform: rotate(180deg); writing-mode: vertical-rl;">
+            Dining
+          </div>
+
+          <div class="relative">
+            <div class="text-[11px] uppercase tracking-[0.25em] mb-2" style="color: var(--amber);">What you get</div>
+            <div class="serif text-3xl leading-tight" style="color: var(--cream-2);">
+              Three promises,<br/>zero shortcuts.
+            </div>
+          </div>
+
+          <div class="relative space-y-5">
+            <div class="flex items-start gap-3 pb-4 border-b" style="border-color: rgba(247,242,233,0.15);">
+              <div class="w-8 h-8 rounded-full border flex items-center justify-center flex-shrink-0 mt-0.5" style="border-color: var(--amber);">
+                <svg class="w-4 h-4" style="color: var(--amber);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 2a7 7 0 017 7c0 4-3 7-7 9-4-2-7-5-7-9a7 7 0 017-7z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold">Fresh Ingredients</div>
+                <div class="text-xs" style="color: var(--sage);">Sourced locally, always in season.</div>
+              </div>
+            </div>
+            <div class="flex items-start gap-3 pb-4 border-b" style="border-color: rgba(247,242,233,0.15);">
+              <div class="w-8 h-8 rounded-full border flex items-center justify-center flex-shrink-0 mt-0.5" style="border-color: var(--amber);">
+                <svg class="w-4 h-4" style="color: var(--amber);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 8a5 5 0 0110 0v2H7V8zm0 2h10v10H7V10z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold">Skilled Chefs</div>
+                <div class="text-xs" style="color: var(--sage);">Classically trained, relentlessly creative.</div>
+              </div>
+            </div>
+            <div class="flex items-start gap-3">
+              <div class="w-8 h-8 rounded-full border flex items-center justify-center flex-shrink-0 mt-0.5" style="border-color: var(--amber);">
+                <svg class="w-4 h-4" style="color: var(--amber);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 8h13l2 3h3v5h-2a2 2 0 11-4 0H8a2 2 0 11-4 0H3V8z"/></svg>
+              </div>
+              <div>
+                <div class="text-sm font-semibold">On-time Delivery</div>
+                <div class="text-xs" style="color: var(--sage);">To the minute. Every time.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="relative">
+            <div class="serif italic text-base" style="color: var(--sage);">You celebrate.</div>
+            <div class="script text-2xl" style="color: var(--amber);">We'll take care of the rest.</div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+
+  <script>
+    function showView(id) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.getElementById('view-' + id).classList.add('active');
+      ['A','B','C'].forEach(k => {
+        const btn = document.getElementById('tab-' + k);
+        if (k === id) { btn.classList.add('active'); }
+        else { btn.classList.remove('active'); }
+      });
+    }
+  </script>
+</body>
+</html>

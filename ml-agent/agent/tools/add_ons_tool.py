@@ -13,6 +13,8 @@ Enforced rules:
 """
 
 from __future__ import annotations
+import hashlib
+import re
 from typing import Any
 
 from langchain_core.messages import BaseMessage
@@ -235,6 +237,34 @@ class AddOnsTool:
         # Deterministic handling for structured UI answers. Keep this target-aware
         # so bare "yes"/"no" can never bleed into the wrong add-on slot.
         _msg_lower = message.strip().lower()
+
+        # Vague drink redirect: if the user mentions water, lemonade, juice, soda,
+        # etc. during the drinks interest/setup question, remind them those are
+        # already included and re-ask specifically about coffee & bar service.
+        _BASIC_DRINKS = re.compile(
+            r"\b(?:water|lemonade|lemonades|juice|soda|sodas|soft\s+drink|"
+            r"sparkling|still\s+water|flat\s+water|iced\s+tea|sweet\s+tea|"
+            r"non[\s-]alcoholic|non[\s-]alc|mocktail|mocktails)\b",
+            re.IGNORECASE,
+        )
+        _has_clear_yn = _msg_lower in _YES or _msg_lower in _NO or re.match(r"^(yes|no|yeah|nope|yep|sure|neither)\b", _msg_lower)
+        if current_target in {"ask_drinks_interest", "ask_drinks_setup"} and _BASIC_DRINKS.search(message) and not _has_clear_yn:
+            _vague_replies = [
+                "Water, lemonades, and soft drinks are already included at no extra charge! The question is about extras — would you like to add coffee service or bar service? (yes or no)",
+                "Those are on us! Water and lemonades come with every package. Would you like to add coffee service, bar service, both, or neither?",
+                "Great news — water, lemonade, and non-alcoholic drinks are covered. Would you like to add coffee service or bar service on top of that?",
+            ]
+            _idx = int(hashlib.md5(message.encode()).hexdigest(), 16) % len(_vague_replies)
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "filled_this_turn": [],
+                    "next_phase": state.get("conversation_phase"),
+                    "next_question_target": current_target,
+                },
+                direct_response=_vague_replies[_idx],
+            )
         skip_extraction = _apply_structured_answer(
             target=current_target,
             message_lower=_msg_lower,
@@ -576,6 +606,10 @@ def _normalize_labor_services(values: list[str]) -> set[str] | None:
     joined = ", ".join(tokens)
     if joined in {"none", "no", "skip", "no labor", "no staffing", "no labor needed", "no staffing needed"}:
         return set()
+
+    # "all", "everything", "all of the above" → select all labor services
+    if joined in {"all", "everything", "all of them", "all of the above", "all services", "all labor", "all staffing", "every", "both"}:
+        return {slot for slot, _label, _aliases in _LABOR_SERVICE_OPTIONS}
 
     selected: set[str] = set()
     recognized = False

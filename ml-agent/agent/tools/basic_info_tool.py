@@ -65,8 +65,11 @@ _SYSTEM_PROMPT = (
     "- Return None for anything not mentioned.\n"
     "- Never invent data.\n"
     "- name: first+last if both given, else whatever is given.\n"
-    "- event_type: map 'wedding'->Wedding, 'birthday/bday'->Birthday, "
-    "'corporate/company/office'->Corporate. Do NOT invent 'Other'.\n"
+    "- event_type: ONLY extract if the user clearly names an event type. "
+    "Map 'wedding'->Wedding, 'birthday/bday'->Birthday, "
+    "'corporate/company/office'->Corporate. "
+    "CRITICAL: if the user says 'no', 'yes', 'ok', 'sure', 'maybe', or anything that "
+    "does not name an event type, return None for event_type. Do NOT invent 'Other'.\n"
     "- event_type_other: only extract if explicitly requested.\n"
     "- event_date: accept any format ('may 5', '05/19/27'), parse to YYYY-MM-DD. "
     "MUST be a future date. Reject past dates by returning None for this field.\n"
@@ -176,6 +179,11 @@ def _normalize_tbd_venue(message_lower: str) -> str | None:
         "skip for now",
         "venue tbd - will confirm later",
         "venue tbd - confirm later",
+        # Short "I don't know yet" replies that are never a real venue name
+        "no", "nope", "nah", "not sure", "unsure", "idk", "i don't know",
+        "i dont know", "not confirmed", "not confirmed yet", "call",
+        "confirm", "later", "tbd confirm", "dont know", "unknown", "n/a",
+        "no venue", "no venue yet", "none", "none yet",
     }
     if msg in exact_matches:
         return "TBD - Confirm on call"
@@ -353,17 +361,46 @@ class BasicInfoTool:
             "onsite - staff present at your event": "Onsite",
             "onsite (staff present)": "Onsite",
         }
-        if not is_filled(slots, "service_type") and _msg_lower in _SERVICE_TYPE_MAP:
+        _SERVICE_TYPE_INVALID = {
+            "no", "nope", "nah", "skip", "tbd", "confirm later", "both", "neither",
+            "none", "not sure", "i'll confirm later", "not sure yet", "fix it", "fix",
+        }
+        if not is_filled(slots, "service_type") and state.get("conversation_phase") == PHASE_SERVICE_TYPE:
+            if _msg_lower in _SERVICE_TYPE_INVALID:
+                # Service type is required — must be onsite or dropoff, no TBD allowed.
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "filled_this_turn": [],
+                        "cascade_effects": [],
+                        "next_phase": PHASE_SERVICE_TYPE,
+                        "next_question_target": "ask_service_type",
+                    },
+                    input_hint={
+                        "type": "options",
+                        "options": [
+                            {"value": "Onsite", "label": "Onsite (staff present)"},
+                            {"value": "Dropoff", "label": "Drop-off (delivery only)"},
+                        ],
+                    },
+                    direct_response=(
+                        "Service type is required — please choose one:\n"
+                        "• **Onsite** — our staff will be present at your event\n"
+                        "• **Drop-off** — we deliver the food, no staff onsite"
+                    ),
+                )
+            elif _msg_lower in _SERVICE_TYPE_MAP:
+                _svc = _SERVICE_TYPE_MAP[_msg_lower]
+                fill_slot(slots, "service_type", _svc)
+                filled_this_turn.append(("service_type", _svc))
+                cascade_effects.extend(apply_cascade("service_type", None, _svc, slots))
+                _skip_extraction = True
+        elif not is_filled(slots, "service_type") and _msg_lower in _SERVICE_TYPE_MAP:
             _svc = _SERVICE_TYPE_MAP[_msg_lower]
             fill_slot(slots, "service_type", _svc)
             filled_this_turn.append(("service_type", _svc))
             cascade_effects.extend(apply_cascade("service_type", None, _svc, slots))
-            _skip_extraction = True
-        elif not is_filled(slots, "service_type") and _msg_lower in {
-            "skip", "confirm later", "tbd", "i'll confirm later", "not sure yet",
-        }:
-            fill_slot(slots, "service_type", "TBD")
-            filled_this_turn.append(("service_type", "TBD"))
             _skip_extraction = True
 
         if state.get("conversation_phase") == PHASE_EVENT_DATE and not is_filled(slots, "event_date"):
@@ -397,6 +434,39 @@ class BasicInfoTool:
                 _skip_extraction = True
 
         if state.get("conversation_phase") == PHASE_CONDITIONAL_FOLLOWUP:
+            # Self-reference guard: user says "me/my/mine/myself/i/our" for a
+            # slot that requires a *different* person's name.
+            _SELF_REF_TOKENS = {"me", "my", "mine", "myself", "i", "our", "my only"}
+            _event_type_val = str(get_slot_value(slots, "event_type") or "").lower()
+            if _msg_lower.strip() in _SELF_REF_TOKENS:
+                if "birthday" in _event_type_val:
+                    _user_name = str(get_slot_value(slots, "name") or "").strip()
+                    if _user_name:
+                        fill_slot(slots, "honoree_name", _user_name)
+                        filled_this_turn.append(("honoree_name", _user_name))
+                        _skip_extraction = True
+                elif "wedding" in _event_type_val:
+                    return ToolResult(
+                        state=state,
+                        response_context={
+                            "tool": self.name,
+                            "filled_this_turn": [],
+                            "next_phase": state.get("conversation_phase"),
+                            "next_question_target": "ask_partner_name",
+                        },
+                        direct_response="Ha, that's you! Who's your partner? What's their name?",
+                    )
+                elif "corporate" in _event_type_val:
+                    return ToolResult(
+                        state=state,
+                        response_context={
+                            "tool": self.name,
+                            "filled_this_turn": [],
+                            "next_phase": state.get("conversation_phase"),
+                            "next_question_target": "ask_company_name",
+                        },
+                        direct_response="What's the name of the company hosting the event?",
+                    )
             if _msg_lower in _BASIC_FOLLOWUP_FILLER:
                 _skip_extraction = True
             # LLM extraction runs normally — _PHASE_ALLOWED_FIELDS filters the
@@ -493,8 +563,15 @@ class BasicInfoTool:
                 _skip_extraction = True
             else:
                 # Free-text event type: store verbatim instead of forcing "Other".
+                # Explicitly reject ambiguous non-answers so they are never stored.
+                _EVENT_TYPE_JUNK = {
+                    "no", "nope", "nah", "n", "yes", "yeah", "yep", "yup",
+                    "ok", "okay", "sure", "maybe", "idk", "i don't know",
+                    "i dont know", "not sure", "hmm", "hm", "uh", "um",
+                    "none", "nothing", "skip", "fix", "fix it",
+                }
                 val = (message or "").strip()
-                if val and _msg_lower not in _BASIC_FOLLOWUP_FILLER:
+                if val and _msg_lower not in _BASIC_FOLLOWUP_FILLER and _msg_lower not in _EVENT_TYPE_JUNK:
                     fill_slot(slots, "event_type", val)
                     filled_this_turn.append(("event_type", val))
                     cascade_effects.extend(apply_cascade("event_type", None, val, slots))
@@ -523,9 +600,36 @@ class BasicInfoTool:
                 filled_this_turn.append(("__awaiting_custom_event_type", None))
                 _skip_extraction = True
             else:
-                # Ignore unhelpful repeats like "Other"
-                if _msg_lower in {"other", "others"} or not (message or "").strip():
-                    _skip_extraction = True
+                # Ignore unhelpful/ambiguous replies — re-ask rather than save garbage.
+                # "No", "yes", "ok", "sure", etc. are NOT valid event type names.
+                _INVALID_EVENT_TYPE_REPLIES = {
+                    "no", "nope", "nah", "n", "yes", "yeah", "yep", "yup",
+                    "ok", "okay", "sure", "maybe", "idk", "i don't know",
+                    "i dont know", "not sure", "hmm", "hm", "uh", "um",
+                }
+                if _msg_lower in {"other", "others"} or not (message or "").strip() or _msg_lower in _INVALID_EVENT_TYPE_REPLIES:
+                    # Explain the two valid options instead of silently re-asking.
+                    return ToolResult(
+                        state=state,
+                        response_context={
+                            "tool": self.name,
+                            "filled_this_turn": [],
+                            "cascade_effects": [],
+                            "next_phase": PHASE_EVENT_TYPE,
+                            "next_question_target": "ask_other_event_type",
+                        },
+                        input_hint={
+                            "type": "options",
+                            "options": [
+                                {"value": "confirm on call", "label": "Confirm on call"},
+                            ],
+                        },
+                        direct_response=(
+                            "No worries! You can either tell me what kind of event it is "
+                            "(e.g., graduation, anniversary, quinceañera) so I can note it down, "
+                            "or reply \"confirm on call\" and we'll sort out the details before the event."
+                        ),
+                    )
                 else:
                     val = (message or "").strip()
                     fill_slot(slots, "event_type", val)
@@ -566,6 +670,21 @@ class BasicInfoTool:
                 old_value = get_slot_value(slots, field_name)
                 if field_name == "event_date":
                     value = value.isoformat() if hasattr(value, "isoformat") else str(value)
+                # Name must contain at least one letter — reject purely numeric/symbol strings
+                if field_name == "name":
+                    name_str = str(value or "").strip()
+                    if not any(c.isalpha() for c in name_str):
+                        return ToolResult(
+                            state=state,
+                            response_context={
+                                "tool": self.name,
+                                "filled_this_turn": [],
+                                "cascade_effects": [],
+                                "next_phase": state.get("conversation_phase"),
+                                "next_question_target": "ask_name",
+                            },
+                            direct_response="That doesn't look like a name. Could you please share your first and last name?",
+                        )
                 fill_slot(slots, field_name, value)
                 filled_this_turn.append((field_name, value))
                 cascade_effects.extend(apply_cascade(field_name, old_value, value, slots))

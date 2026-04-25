@@ -215,10 +215,16 @@ def _normalize_bool_value(message: str, *, truthy_markers: tuple[str, ...] = (),
         return True
     if yn == "no":
         return False
-    if truthy_markers and any(m in msg for m in truthy_markers):
-        return True
-    if falsy_markers and any(m in msg for m in falsy_markers):
+    # Normalize markers the same way the message was normalized so that
+    # apostrophes/punctuation don't cause mismatches (e.g. "don't" → "don t").
+    # Check falsy BEFORE truthy — "I don't want coffee" contains "want" (truthy)
+    # but the negation ("don t want") must take precedence.
+    norm_falsy = tuple(normalize_choice_text(m) for m in falsy_markers)
+    norm_truthy = tuple(normalize_choice_text(m) for m in truthy_markers)
+    if norm_falsy and any(m and m in msg for m in norm_falsy):
         return False
+    if norm_truthy and any(m and m in msg for m in norm_truthy):
+        return True
     return None
 
 
@@ -298,19 +304,62 @@ def _extract_multi_scalar_updates(message: str) -> dict[str, Any]:
     elif "no drinks" in low or ("drinks" in low and _normalize_yes_no(low) == "no"):
         updates["drinks"] = False
 
-    # Coffee / bar booleans
-    if "coffee" in low:
-        yn = _normalize_yes_no(low)
-        if yn == "yes":
-            updates["coffee_service"] = True
-        elif yn == "no":
+    # Coffee / bar booleans — use negation-aware check so "i dont want coffee"
+    # correctly returns False instead of falling through to the LLM.
+    #
+    # Combined check first: "dont want coffee bar" / "dont want coffee and bar"
+    # must set BOTH to False; otherwise the individual bar check misses it because
+    # "dont want bar" isn't a contiguous substring when "coffee" sits in between.
+    _has_coffee = "coffee" in low
+    _has_bar = "bar service" in low or (("bar" in low) and ("package" not in low) and ("open bar" not in low))
+    if _has_coffee and _has_bar:
+        combined_neg = bool(re.search(
+            r"\b(?:dont|don[\s']?t|do\s+not|no|not|remove|cancel)\b.{0,50}"
+            r"\b(?:coffee|bar(?:\s+service)?)\b",
+            low,
+        ))
+        if combined_neg:
             updates["coffee_service"] = False
-    if "bar service" in low or (("bar" in low) and ("package" not in low) and ("open bar" not in low)):
-        yn = _normalize_yes_no(low)
-        if yn == "yes":
+            updates["bar_service"] = False
+            _has_coffee = False  # skip individual checks — already handled
+            _has_bar = False
+        else:
+            # Positive affirmation: "I want coffee & bar setup", "add coffee and bar", etc.
+            combined_pos = bool(re.search(
+                r"\b(?:want|need|add|include|setup|set\s+up|have|get)\b.{0,60}"
+                r"\b(?:coffee|bar(?:\s+service)?)\b",
+                low,
+            ))
+            if combined_pos:
+                updates["coffee_service"] = True
+                updates["bar_service"] = True
+                updates.setdefault("drinks", True)
+                _has_coffee = False
+                _has_bar = False
+    if _has_coffee:
+        yn = _normalize_bool_value(
+            text,
+            truthy_markers=("want coffee", "add coffee", "include coffee", "with coffee"),
+            falsy_markers=("dont want coffee", "no coffee", "remove coffee", "without coffee", "cancel coffee"),
+        )
+        if yn is None:
+            yn = True if _normalize_yes_no(low) == "yes" else (False if _normalize_yes_no(low) == "no" else None)
+        if yn is True:
+            updates["coffee_service"] = True
+        elif yn is False:
+            updates["coffee_service"] = False
+    if _has_bar:
+        yn = _normalize_bool_value(
+            text,
+            truthy_markers=("want bar", "add bar", "include bar", "with bar"),
+            falsy_markers=("dont want bar", "no bar service", "remove bar", "without bar", "cancel bar"),
+        )
+        if yn is None:
+            yn = True if _normalize_yes_no(low) == "yes" else (False if _normalize_yes_no(low) == "no" else None)
+        if yn is True:
             updates["bar_service"] = True
             updates.setdefault("drinks", True)
-        elif yn == "no":
+        elif yn is False:
             updates["bar_service"] = False
 
     # Guest count
@@ -745,6 +794,83 @@ class ModificationTool:
                 },
                 input_hint=input_hint,
                 direct_response=direct,
+            )
+
+        # --- Cancel-event confirmation flow ---
+        # Must run BEFORE the modification LLM extraction so "cancel the party"
+        # never accidentally removes event_type or other slots.
+        _CANCEL_EVENT_RE = re.compile(
+            r"\b(?:cancel|end|stop|terminate|quit|abort)\b.{0,30}"
+            r"\b(?:event|party|booking|order|reservation|session|everything)\b",
+            re.IGNORECASE,
+        )
+        pending_cancel = get_slot_value(slots, "__pending_cancel_event_confirm")
+        if pending_cancel is True:
+            decision = _normalize_yes_no(message)
+            if decision == "yes":
+                clear_slot(slots, "__pending_cancel_event_confirm")
+                state["conversation_phase"] = PHASE_REVIEW
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "next_phase": PHASE_REVIEW,
+                        "next_question_target": "show_review",
+                    },
+                    direct_response="Got it — let me pull up your full recap now.",
+                )
+            elif decision == "no":
+                clear_slot(slots, "__pending_cancel_event_confirm")
+                next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                    slots=slots, state=state,
+                )
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "next_phase": next_phase,
+                        "next_question_target": next_target,
+                        "next_question_prompt": resume_prompt,
+                    },
+                    input_hint=input_hint,
+                    direct_response=resume_prompt or "No problem — let's keep going.",
+                )
+            else:
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "next_question_target": "confirm_cancel_event",
+                    },
+                    input_hint={
+                        "type": "options",
+                        "options": [
+                            {"value": "yes", "label": "Yes, go to recap"},
+                            {"value": "no", "label": "No, continue booking"},
+                        ],
+                    },
+                    direct_response="Please reply yes to go straight to the recap, or no to keep filling in the details.",
+                )
+
+        if _CANCEL_EVENT_RE.search(message):
+            fill_slot(slots, "__pending_cancel_event_confirm", True)
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "next_question_target": "confirm_cancel_event",
+                },
+                input_hint={
+                    "type": "options",
+                    "options": [
+                        {"value": "yes", "label": "Yes, go to recap"},
+                        {"value": "no", "label": "No, continue booking"},
+                    ],
+                },
+                direct_response=(
+                    "Heads up — if you cancel now, this booking session will end and your details won't be submitted.\n\n"
+                    "Would you like to skip ahead to the recap and submit what you have so far? (yes/no)"
+                ),
             )
 
         pending_confirmation = get_slot_value(slots, "__pending_confirmation")
@@ -1292,6 +1418,18 @@ class ModificationTool:
                     if group:
                         break
                 if group:
+                    # Guard: if the verb-stripped phrase exactly matches a
+                    # current item name, the user named a specific dish that
+                    # happens to contain a tag word (e.g. "Pork & Chicken").
+                    # Don't treat it as a tag-group selector.
+                    _stripped = re.sub(
+                        r"^\s*(?:remove|delete|drop|take\s+off)\s+",
+                        "",
+                        (message or "").lower(),
+                    ).strip()
+                    if any(_stripped == ci.lower() for ci in current_items):
+                        group = None
+                if group:
                     include, exclude = group
                     tags_by_name: dict[str, set[str]] = {}
                     for cat, items in (menu or {}).items():
@@ -1431,6 +1569,27 @@ class ModificationTool:
                 item for item in current_items
                 if any(rt.lower() in item.lower() for rt in remove_texts)
             ]
+            # Pre-check: if the query is a partial word that matches multiple items
+            # and none of those items IS the query exactly, skip grounding and
+            # immediately show disambiguation. This prevents the grounding LLM from
+            # silently picking one (e.g. "remove adobo" → always ask which Adobo item).
+            if len(name_matched) > 1 and not any(
+                rt.strip().lower() == item.lower()
+                for rt in remove_texts
+                for item in name_matched
+            ):
+                ambiguous_query = remove_texts[0]
+                return self._ambiguous_list_choice_result(
+                    target_slot=target_slot,
+                    action=mod.action,
+                    choice_kind="remove",
+                    query=ambiguous_query,
+                    matches=name_matched,
+                    items_to_remove=remove_texts,
+                    items_to_add=add_texts,
+                    slots=slots,
+                    state=state,
+                )
             grounded = await self._ground_selected_removals(
                 target_slot=target_slot,
                 message=message,
@@ -1719,7 +1878,9 @@ class ModificationTool:
                 slots=slots, state=state,
             )
             ack_text: str | None = None
-            if add_texts and mod.action in {"add", "replace"}:
+            if remove_texts and mod.action in {"remove", "replace"}:
+                ack_text = f"'{remove_texts[0]}' isn't in your current selection."
+            elif add_texts and mod.action in {"add", "replace"}:
                 # Distinguish "already selected" from "not on the menu".
                 # `resolve_menu_items(..., existing_names=...)` filters out items
                 # already selected, which would otherwise look like "no match"
@@ -1743,8 +1904,34 @@ class ModificationTool:
                         suffix = "…" if len(unique) > 6 else ""
                         ack_text = f"Already selected: {preview}{suffix}."
                 else:
-                    missing = ", ".join(add_texts)
-                    ack_text = f"'{missing}' isn't on the menu."
+                    # Item not on our menu — offer to add it as a special request
+                    missing_items = add_texts
+                    items_str = ", ".join(missing_items)
+                    fill_slot(slots, "__pending_modification_request", {
+                        "stage": "offer_special_request_for_unavailable",
+                        "items": missing_items,
+                        "resume_phase": next_phase,
+                        "resume_target": next_target,
+                        "resume_prompt": resume_prompt,
+                    })
+                    return ToolResult(
+                        state=state,
+                        response_context={
+                            "tool": self.name,
+                            "next_question_target": "offer_special_request_for_unavailable",
+                        },
+                        input_hint={
+                            "type": "options",
+                            "options": [
+                                {"value": "yes", "label": "Yes, add as special request"},
+                                {"value": "no", "label": "No, continue"},
+                            ],
+                        },
+                        direct_response=(
+                            f"We don't currently offer \"{items_str}\" in our menu. "
+                            f"Would you like to add it as a special request? (yes/no)"
+                        ),
+                    )
             return ToolResult(
                 state=state,
                 response_context={
@@ -1923,6 +2110,7 @@ class ModificationTool:
                 "next_question_prompt": resume_prompt,
             },
             input_hint=input_hint,
+            direct_response=_compose_direct_response(direct, resume_prompt),
         )
 
     async def _resume_pending_choice(
@@ -1994,13 +2182,28 @@ class ModificationTool:
         selects_all = bool(multi and len(multi) == len(matches))
         selected = None if selects_all or len(multi) != 1 else multi[0]
         if not multi:
-            return self._repeat_ambiguous_choice_result(
+            # Tell user exactly how to answer instead of silently repeating the list
+            _msg_norm = normalize_choice_text(message)
+            _NOT_A_SELECTION = {"ok", "okay", "sure", "yes", "no", "nope", "continue", "next", "proceed", "fine", "got it", "alright"}
+            _hint_prefix = ""
+            if _msg_norm in _NOT_A_SELECTION:
+                _hint_prefix = f"'{message.strip()}' isn't one of the options. Reply with a number (1, 2, …), the exact name, or 'all'.\n\n"
+            target_slot_disp = str(pending_choice.get("target_slot") or "")
+            _dr = self._repeat_ambiguous_choice_result(
                 state=state,
-                target_slot=str(pending_choice.get("target_slot") or ""),
+                target_slot=target_slot_disp,
                 choice_kind=str(pending_choice.get("choice_kind") or "remove"),
                 query=str(pending_choice.get("query") or ""),
                 matches=matches,
             )
+            if _hint_prefix and _dr.direct_response:
+                _dr = ToolResult(
+                    state=_dr.state,
+                    response_context=_dr.response_context,
+                    input_hint=_dr.input_hint,
+                    direct_response=_hint_prefix + _dr.direct_response,
+                )
+            return _dr
 
         clear_slot(slots, "__pending_modification_choice")
         query = str(pending_choice.get("query") or "")
@@ -2116,6 +2319,66 @@ class ModificationTool:
             if msg in cancel_exact:
                 return True
             return any(msg.startswith(p) for p in cancel_prefixes)
+        if stage == "offer_special_request_for_unavailable":
+            items = [str(v) for v in (pending_request.get("items") or []) if str(v).strip()]
+            resume_prompt = str(pending_request.get("resume_prompt") or "")
+            next_phase = pending_request.get("resume_phase")
+            next_target = pending_request.get("resume_target")
+            yn = _normalize_yes_no(msg_lower)
+            if yn == "yes":
+                clear_slot(slots, "__pending_modification_request")
+                existing_sr = str(get_slot_value(slots, "special_requests") or "").strip()
+                new_items_str = ", ".join(items)
+                new_sr = f"{existing_sr}; {new_items_str}".strip("; ") if existing_sr else new_items_str
+                fill_slot(slots, "special_requests", new_sr)
+                state["conversation_phase"] = next_phase or state.get("conversation_phase")
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "next_phase": next_phase,
+                        "next_question_target": next_target,
+                        "next_question_prompt": resume_prompt,
+                    },
+                    direct_response=_compose_direct_response(
+                        f"Got it — added \"{new_items_str}\" to your special requests.",
+                        resume_prompt,
+                    ),
+                )
+            elif yn == "no":
+                clear_slot(slots, "__pending_modification_request")
+                state["conversation_phase"] = next_phase or state.get("conversation_phase")
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "next_phase": next_phase,
+                        "next_question_target": next_target,
+                        "next_question_prompt": resume_prompt,
+                    },
+                    direct_response=_compose_direct_response("No worries — let's continue!", resume_prompt),
+                )
+            else:
+                items_str = ", ".join(items)
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "next_question_target": "offer_special_request_for_unavailable",
+                    },
+                    input_hint={
+                        "type": "options",
+                        "options": [
+                            {"value": "yes", "label": "Yes, add as special request"},
+                            {"value": "no", "label": "No, continue"},
+                        ],
+                    },
+                    direct_response=(
+                        f"We don't offer \"{items_str}\" in our menu. "
+                        f"Want to add it as a special request? (yes/no)"
+                    ),
+                )
+
         if stage == "confirm_add_instead":
             add_slot = str(pending_request.get("add_slot") or "")
             items_to_add = [str(v) for v in (pending_request.get("items_to_add") or []) if str(v).strip()]
@@ -2670,21 +2933,26 @@ class ModificationTool:
         old_value = get_slot_value(slots, target_slot)
 
         if target_slot in {"bar_service", "coffee_service", "linens", "followup_call_requested", "cocktail_hour"}:
-            wants = _normalize_bool_value(
-                str(new_value or message or ""),
-                truthy_markers=(
-                    "yes",
-                    "include",
-                    "add",
-                    "want",
-                    "need",
-                    "coffee" if target_slot == "coffee_service" else "",
-                    "bar" if target_slot == "bar_service" else "",
-                    "linen" if target_slot == "linens" else "",
-                    "cocktail" if target_slot == "cocktail_hour" else "",
-                ),
-                falsy_markers=("no", "skip", "none", "not needed", "don't", "do not"),
-            )
+            if mod.action == "remove":
+                # "remove" action always means False — don't rely on normalize which
+                # breaks for "dont" (no apostrophe) vs falsy_marker "don't" (apostrophe)
+                wants = False
+            else:
+                wants = _normalize_bool_value(
+                    str(new_value or message or ""),
+                    truthy_markers=(
+                        "yes",
+                        "include",
+                        "add",
+                        "want",
+                        "need",
+                        "coffee" if target_slot == "coffee_service" else "",
+                        "bar" if target_slot == "bar_service" else "",
+                        "linen" if target_slot == "linens" else "",
+                        "cocktail" if target_slot == "cocktail_hour" else "",
+                    ),
+                    falsy_markers=("no", "skip", "none", "not needed", "don't", "do not"),
+                )
             if wants is None:
                 label = _SLOT_LABELS.get(target_slot, target_slot.replace("_", " "))
                 return ToolResult(
@@ -2874,7 +3142,22 @@ class ModificationTool:
                         normalized_tbd = _normalize_tbd_venue(venue_text.lower())
                         value = normalized_tbd or venue_text
                     if field == "guest_count":
-                        value = int(value)
+                        try:
+                            gc = int(value)
+                        except (TypeError, ValueError):
+                            gc = -1
+                        if gc <= 0:
+                            return ToolResult(
+                                state=state,
+                                response_context={
+                                    "tool": self.name,
+                                    "error": "invalid_guest_count",
+                                    "next_phase": state.get("conversation_phase"),
+                                    "next_question_target": "ask_guest_count",
+                                },
+                                direct_response="Guest count must be a whole number greater than zero. How many guests are you expecting?",
+                            )
+                        value = gc
                     old = get_slot_value(slots, field)
                     fill_slot(slots, field, value)
                     apply_cascade(field, old, value, slots)
@@ -2911,6 +3194,7 @@ class ModificationTool:
                         "next_question_prompt": resume_prompt,
                     },
                     input_hint=input_hint,
+                    direct_response=_compose_direct_response(ack_text, resume_prompt),
                 )
 
         if target_slot == "event_type":
@@ -3053,6 +3337,7 @@ class ModificationTool:
             next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
                 slots=slots,
                 state=state,
+                modified_slot="event_type",
             )
             return ToolResult(
                 state=state,
@@ -3070,6 +3355,7 @@ class ModificationTool:
                     "next_question_prompt": resume_prompt,
                 },
                 input_hint=input_hint,
+                direct_response=_compose_direct_response(ack_text, resume_prompt),
             )
 
         if target_slot == "meal_style":

@@ -317,6 +317,47 @@ class MenuSelectionTool:
             "passed around": "passed", "passed": "passed", "pass": "passed",
             "station": "station", "stations": "station",
         }
+        _APP_STYLE_INVALID = {"both", "none", "no", "either", "all", "both passed and station", "passed and station"}
+        if expecting_appetizer_style and not is_filled(slots, "appetizer_style") and _msg_lower in _APP_STYLE_INVALID:
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "filled_this_turn": [],
+                    "next_phase": phase,
+                    "next_question_target": "ask_appetizer_style",
+                },
+                input_hint={
+                    "type": "options",
+                    "options": [
+                        {"value": "passed", "label": "Passed"},
+                        {"value": "station", "label": "Station"},
+                    ],
+                },
+                direct_response="Appetizers can only be served one way — passed around by staff, or set up as a self-serve station. Which do you prefer?",
+            )
+
+        # "none"/"no"/"both"/"neither" for meal_style → reject clearly instead of
+        # falling through to FAQ which gives an irrelevant educational answer.
+        _MEAL_STYLE_INVALID = {"none", "no", "nope", "both", "neither", "n/a", "na", "skip", "fix it", "fix"}
+        if expecting_meal_style and not is_filled(slots, "meal_style") and _msg_lower in _MEAL_STYLE_INVALID:
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "filled_this_turn": [],
+                    "next_phase": phase,
+                    "next_question_target": "ask_meal_style",
+                },
+                input_hint={
+                    "type": "options",
+                    "options": [
+                        {"value": "plated", "label": "Plated"},
+                        {"value": "buffet", "label": "Buffet"},
+                    ],
+                },
+                direct_response="For the main meal, do you want it plated or buffet-style? (Reply plated or buffet.)",
+            )
 
         if _msg_lower in _MEAL_STYLE_MAP and expecting_meal_style and not is_filled(slots, "meal_style"):
             val = _MEAL_STYLE_MAP[_msg_lower]
@@ -782,6 +823,11 @@ class MenuSelectionTool:
         )
         if progress_response:
             response_context["menu_progress"] = progress_response
+            # When the next step is a style question (passed/station), promote to
+            # direct_response so the question text is always rendered verbatim on
+            # first selection — not just after a modification.
+            if response_context.get("next_question_target") == "ask_appetizer_style":
+                direct_response = progress_response
         elif no_items_selected and input_hint and not asking_style:
             # Show DB-driven numbered menu list — LLM can't generate real item names.
             # Style question turns and acks are handled by the LLM naturally.

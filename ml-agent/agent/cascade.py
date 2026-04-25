@@ -86,11 +86,11 @@ def apply_cascade(
                 fill_slot(slots, "bartender", False)
                 effects.append(("bartender", "set False (Dropoff)"))
 
-    # --- requesting onsite labor implies Onsite service ---
+    # --- labor slots: no cascade onto service_type ---
+    # The user explicitly answered the service_type question; silently overriding
+    # their Dropoff choice when they later add labor services caused confusion.
     elif slot_name in _LABOR_SLOTS:
-        if bool(new_value) and get_slot_value(slots, "service_type") == "Dropoff":
-            fill_slot(slots, "service_type", "Onsite")
-            effects.append(("service_type", "auto-set Onsite (onsite labor requested)"))
+        pass  # intentional no-op — service_type is owned by the user's answer
 
     # --- bar_service drives bartender + clears bar_package on False ---
     elif slot_name == "bar_service":

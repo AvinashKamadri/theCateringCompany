@@ -365,9 +365,9 @@ _BASIC_INFO_PROMPTS = {
     # BasicInfoTool uses this target name when it has finished collecting the
     # required basics and is handing off to add-ons.
     "transition_to_addons": (
-        "Do you want to add drinks or bar service? (Reply yes or no.)",
-        "Want to include drinks or bar service? (Reply yes or no.)",
-        "Should I add drinks/bar service, or skip it? (Reply yes or no.)",
+        "Water and lemonades are on us! Would you like to add coffee or bar service? (yes or no)",
+        "Heads up — water and lemonades are already included. Should I add coffee or bar service on top? (yes or no)",
+        "Just so you know, water and lemonades are covered. Want to add coffee or bar service? (yes or no)",
     ),
 }
 
@@ -416,9 +416,9 @@ _MENU_SELECTION_PROMPTS = {
 
 _ADD_ONS_PROMPTS = {
     "ask_drinks_interest": (
-        "Do you want to add drinks/bar service? (Reply yes or no.)",
-        "Should I include drinks or bar service? (Reply yes or no.)",
-        "Do you want drinks/bar service, or skip both? (Reply yes or no.)",
+        "Water and lemonades are on us! Would you like to add coffee service or bar service? (yes or no)",
+        "Heads up — water and lemonades are already included. Would you like to add coffee or bar service on top of that? (yes or no)",
+        "Just so you know, water and lemonades are covered! Should I add coffee or bar service as well? (yes or no)",
     ),
     "ask_drinks_setup": (
         "For drinks, do you want coffee service, bar service, both, or neither?",

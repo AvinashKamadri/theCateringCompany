@@ -164,6 +164,9 @@ class AgentOrchestrator:
                         "error": "could_not_route",
                         "clarifying_question": decision.clarifying_question,
                     },
+                    # When the router already has a formed response (e.g. out-of-scope
+                    # redirect), render it verbatim and skip the LLM generator call.
+                    direct_response=decision.clarifying_question if decision.clarifying_question else None,
                 )
                 with trace_scope(
                     thread_id=thread_id,

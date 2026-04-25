@@ -85,20 +85,6 @@ function buildPlacements(pathname: string): Placement[] {
     }});
   }
 
-  // ── BOTTOM edge — 4 images spread horizontally ──
-  const botPositions = [10, 32, 65, 85];
-  for (const leftPct of botPositions) {
-    const size = w();
-    placements.push({ src: src(idx++), style: {
-      position: 'absolute',
-      bottom: -(size * 0.35),
-      left: `${leftPct}%`,
-      width: size,
-      transform: `translateX(-50%) rotate(${rot()}deg)`,
-      opacity: op(),
-    }});
-  }
-
   // ── LEFT edge — 3 images spread vertically ──
   const leftPositions = [18, 45, 75];
   for (const topPct of leftPositions) {

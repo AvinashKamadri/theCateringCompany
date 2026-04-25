@@ -1510,7 +1510,9 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
 
     const userMessage: ChatMessage = {
       role: 'user',
-      content,
+      content: multiSelectCount > 0
+        ? `Selected ${multiSelectCount} item${multiSelectCount !== 1 ? 's' : ''}`
+        : content,
       timestamp: new Date(),
     };
 
@@ -1532,9 +1534,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
 
       const aiMessage: ChatMessage = {
         role: 'ai',
-        content: multiSelectCount > 0
-          ? `Selected ${multiSelectCount} item${multiSelectCount !== 1 ? 's' : ''}`
-          : response.message,
+        content: response.message,
         timestamp: new Date(),
         inputHint: response.input_hint ?? null,
       };

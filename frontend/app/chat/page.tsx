@@ -65,7 +65,6 @@ function removeSession(threadId: string) {
   } catch {}
 }
 
-  const [itemsOpen, setItemsOpen] = useState(false);
 function AiIntakeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();

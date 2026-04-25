@@ -1581,6 +1581,13 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
         }, 600);
       }
 
+      // Auto-answer the menu transition prompt so users skip the confirmation step
+      const isMenuTransition = /let['']s move (on )?to the menu|on to the menu|now for the menu|we('ll| will) (now |)start with (the |)appetizers/i.test(response.message);
+      if (isMenuTransition) {
+        setTimeout(() => handleSendMessage('yes'), 400);
+        return;
+      }
+
       // Detect completion from ML flag or summary message pattern
       const isScheduleCallMsg = /schedule.*(call|phone)|set up.*(call|phone)|10.?15 minute call/i.test(response.message);
       const isSummaryMsg = /summary.*(being prepared|ready)|we('ve| have) got everything|event summary/i.test(response.message);

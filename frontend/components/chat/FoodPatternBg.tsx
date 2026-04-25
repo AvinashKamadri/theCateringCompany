@@ -322,23 +322,30 @@ function seededRand(seed: number) {
   };
 }
 
-export default function FoodPatternBg({ className = '' }: { className?: string }) {
+export default function FoodPatternBg({
+  className = '',
+  cols = 9,
+  rows = 14,
+  opacity = 0.13,
+}: {
+  className?: string;
+  cols?: number;
+  rows?: number;
+  opacity?: number;
+}) {
   const rand = seededRand(137);
-  const cols = 9;
-  const rows = 14;
   const cellW = 100 / cols;
   const cellH = 100 / rows;
 
   const items = Array.from({ length: cols * rows }, (_, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    // Pick icon — shuffle so adjacent cells differ
     const iconIdx = (i * 7 + row * 3) % ICONS.length;
     const icon = ICONS[iconIdx];
     const jx = (rand() - 0.5) * cellW * 0.7;
     const jy = (rand() - 0.5) * cellH * 0.7;
     const rotate = (rand() - 0.5) * 80;
-    const scale = 0.044 + rand() * 0.016; // slight size variation
+    const scale = 0.044 + rand() * 0.016;
     const cx = cellW * col + cellW / 2 + jx;
     const cy = cellH * row + cellH / 2 + jy;
     return { icon, cx, cy, rotate, scale };
@@ -355,7 +362,7 @@ export default function FoodPatternBg({ className = '' }: { className?: string }
         style={{ position: 'absolute', inset: 0 }}
       >
         <defs>
-          <style>{`.food-icon{stroke:#111;fill:none;opacity:0.13;stroke-linecap:round;stroke-linejoin:round}`}</style>
+          <style>{`.food-icon{stroke:#111;fill:none;opacity:${opacity};stroke-linecap:round;stroke-linejoin:round}`}</style>
         </defs>
         {items.map(({ icon, cx, cy, rotate, scale }, i) => (
           <g

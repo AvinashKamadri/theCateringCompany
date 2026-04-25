@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AppNav } from '@/components/layout/app-nav';
 import FoodPatternBg from '@/components/chat/FoodPatternBg';
+import CornerDecorations from '@/components/ui/CornerDecorations';
 
 
 const STAFF_DOMAINS = ['@catering-company.com'];
@@ -216,9 +217,9 @@ function AiIntakeContent() {
   if (!isAuthenticated || isStaff) return null;
 
   return (
-    <div className={`h-screen flex flex-col relative ${view === 'chat' || view === 'picker' ? 'bg-[#f8f6f2]' : 'bg-neutral-50'}`}
-    >
-      <FoodPatternBg />
+    <div className="h-screen flex flex-col relative bg-[#f8f6f2]">
+      <CornerDecorations />
+      {view !== 'picker' && <FoodPatternBg />}
       <AppNav />
 
       {/* Full-width chat header spanning across both the chat column and the
@@ -245,154 +246,143 @@ function AiIntakeContent() {
 
           {/* Session Picker */}
           {view === 'picker' && !loadingSessions && (
-            <div className="flex-1 overflow-y-auto p-3 sm:p-6 relative">
-              <div className="max-w-5xl mx-auto space-y-6">
-              {/* Hero banner */}
-              <div className="relative overflow-hidden rounded-2xl bg-linear-to-br from-neutral-900 via-neutral-800 to-neutral-900 px-6 sm:px-8 py-8 sm:py-10 text-white">
-                <div className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '24px 24px' }} />
-                <div className="relative z-10">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-8 h-8 rounded-lg bg-white/10 backdrop-blur flex items-center justify-center">
-                      <Sparkles className="w-4 h-4 text-white" />
-                    </div>
-                    <span className="text-xs font-medium tracking-wider uppercase text-white/60">AI-Powered</span>
-                  </div>
-                  <h1 className="text-2xl sm:text-3xl font-bold leading-tight mb-2">
-                    Plan any event,<br />effortlessly.
-                  </h1>
-                  <p className="text-sm sm:text-base text-white/60 max-w-sm leading-relaxed">
-                    Tell us what you&apos;re dreaming of — our AI handles the menu, the details, and the paperwork.
+            <div className="flex-1 relative overflow-hidden bg-[#f8f6f2]">
+              <FoodPatternBg cols={14} rows={20} opacity={0.22} />
+
+              <div className="relative z-10 h-full overflow-y-auto">
+                <div className="max-w-7xl mx-auto px-3 sm:px-6">
+                {/* Headline */}
+                <div className="pt-10 pb-6">
+                  <p className="text-[11px] font-semibold tracking-widest uppercase text-neutral-400 mb-2">
+                    Catering Co · AI Planner
                   </p>
-                  <button
-                    onClick={() => { setActiveThreadId(undefined); setView('chat'); }}
-                    className="mt-5 inline-flex items-center gap-2 bg-white text-black px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-neutral-100 transition-colors"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Start planning
-                  </button>
+                  <h1 className="text-3xl sm:text-4xl font-bold text-neutral-900 leading-tight">
+                    Crafted gatherings,<br />
+                    <span className="italic font-light text-neutral-500">to the last detail.</span>
+                  </h1>
+                  <p className="mt-2.5 text-sm text-neutral-400 max-w-sm leading-relaxed">
+                    Tell us what you&apos;re envisioning — we handle the menu, logistics, and everything in between.
+                  </p>
                 </div>
-              </div>
 
-              {/* Session list */}
-              <div className="tc-glossy rounded-2xl overflow-hidden">
-                <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-neutral-100 flex items-end justify-between">
-                  <div>
-                    <h2 className="font-semibold text-neutral-900 text-base">Your event chats</h2>
-                    <p className="text-xs text-neutral-500 mt-0.5">Pick up where you left off</p>
-                  </div>
-                  {sessions.length > 0 && (
-                    <span className="text-[11px] font-medium text-neutral-400 tabular-nums">
-                      {sessions.length} {sessions.length === 1 ? 'session' : 'sessions'}
-                    </span>
-                  )}
-                </div>
-                <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {/* New event — primary CTA row, spans full width */}
-                  <button
-                    onClick={() => { setActiveThreadId(undefined); setView('chat'); }}
-                    className="sm:col-span-2 group w-full flex items-center gap-4 px-4 py-4 rounded-xl bg-white hover:bg-neutral-50 border border-neutral-200 hover:border-neutral-300 transition-colors text-left"
-                  >
-                    <div className="tc-glossy-dark w-11 h-11 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-[1.04] transition-transform">
-                      <Plus className="w-5 h-5 text-white" strokeWidth={2.5} />
+                {/* Session list */}
+                <div className="pb-8">
+                    {/* Section label */}
+                    <div className="flex items-center justify-between mb-4 px-1">
+                      <h2 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Your event chats</h2>
+                      {sessions.length > 0 && (
+                        <span className="text-[11px] font-medium text-neutral-400 bg-neutral-200 px-2 py-0.5 rounded-full tabular-nums">
+                          {sessions.length}
+                        </span>
+                      )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-neutral-900">Plan a new event</p>
-                      <p className="text-xs text-neutral-500 mt-0.5">Start a fresh chat with the assistant</p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-neutral-300 group-hover:text-neutral-600 group-hover:translate-x-0.5 transition-all" />
-                  </button>
 
-                  {sessions.map((s) => {
-                    const pct = s.totalSlots > 0 ? Math.round((s.slotsFilled / s.totalSlots) * 100) : 0;
-                    const initial = s.clientName?.trim().charAt(0).toUpperCase() || '';
-                    const title = s.loading
-                      ? 'Loading…'
-                      : s.clientName
-                        ? s.clientName
-                        : 'Untitled draft';
-                    const subtitle = s.loading
-                      ? ' '
-                      : s.error
-                        ? 'Unavailable'
-                        : [
-                            s.eventType,
-                            s.eventDate && new Date(s.eventDate).toLocaleDateString([], { month: 'short', day: 'numeric' }),
-                          ].filter(Boolean).join(' · ') || 'No details yet';
-                    const relTime = formatRelativeTime(new Date(s.lastActiveAt));
-                    return (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {/* New event CTA */}
                       <button
-                        key={s.threadId}
-                        onClick={() => { setActiveThreadId(s.threadId); setView('chat'); }}
-                        disabled={s.error}
-                        className="group w-full flex items-center gap-4 px-4 py-4 rounded-xl bg-white hover:bg-neutral-50 border border-neutral-200 hover:border-neutral-300 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={() => { setActiveThreadId(undefined); setView('chat'); }}
+                        className="group flex items-center gap-4 px-5 py-5 rounded-2xl bg-neutral-900 hover:bg-neutral-800 transition-colors text-left shadow-sm"
                       >
-                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-sm font-semibold ${
-                          s.isCompleted
-                            ? 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]'
-                            : initial
-                              ? 'bg-gradient-to-br from-neutral-700 to-neutral-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]'
-                              : 'bg-neutral-100 text-neutral-400'
-                        }`}>
-                          {s.loading
-                            ? <Loader2 className="w-4 h-4 animate-spin" />
-                            : initial || <MessageSquare className="w-4 h-4" />}
+                        <div className="w-11 h-11 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
+                          <Plus className="w-5 h-5 text-white" strokeWidth={2.5} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-neutral-900 truncate text-sm">{title}</p>
-                            {s.isCompleted && !s.loading && (
-                              <span className="shrink-0 text-[10px] font-medium bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-full border border-emerald-200">
-                                Complete
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-neutral-500 truncate mt-0.5">{subtitle}</p>
-                          {!s.loading && !s.error && (
-                            <div className="flex items-center gap-2 mt-2">
-                              <div className="flex-1 max-w-[140px] h-1 bg-neutral-100 rounded-full overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full transition-all ${s.isCompleted ? 'bg-emerald-600' : 'bg-neutral-900'}`}
-                                  style={{ width: `${Math.max(pct, s.isCompleted ? 100 : 4)}%` }}
-                                />
-                              </div>
-                              <span className="text-[10px] text-neutral-400 tabular-nums font-medium">
-                                {pct}%
-                              </span>
-                            </div>
-                          )}
+                          <p className="font-semibold text-white text-base">Plan a new event</p>
+                          <p className="text-sm text-white/40 mt-0.5">Start a fresh chat with the assistant</p>
                         </div>
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <span className="text-[11px] text-neutral-400 whitespace-nowrap">{relTime}</span>
-                          <ChevronRight className="w-4 h-4 text-neutral-300 group-hover:text-neutral-600 group-hover:translate-x-0.5 transition-all" />
-                        </div>
+                        <ChevronRight className="w-5 h-5 text-white/30 group-hover:text-white/70 group-hover:translate-x-0.5 transition-all shrink-0" />
                       </button>
-                    );
-                  })}
+
+                      {sessions.map((s) => {
+                        const rawPct = s.totalSlots > 0 ? Math.round((s.slotsFilled / s.totalSlots) * 100) : 0;
+                        const pct = Math.min(rawPct, 100);
+                        const displayPct = s.isCompleted ? 100 : pct;
+                        const initial = s.clientName?.trim().charAt(0).toUpperCase() || '';
+                        const title = s.loading ? 'Loading…' : s.clientName || 'Untitled draft';
+                        const subtitle = s.loading
+                          ? ' '
+                          : s.error
+                            ? 'Unavailable'
+                            : [
+                                s.eventType,
+                                s.eventDate && new Date(s.eventDate).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+                              ].filter(Boolean).join(' · ') || 'No details yet';
+                        const relTime = formatRelativeTime(new Date(s.lastActiveAt));
+                        return (
+                          <button
+                            key={s.threadId}
+                            onClick={() => { setActiveThreadId(s.threadId); setView('chat'); }}
+                            disabled={s.error}
+                            className="group flex flex-col gap-3 px-5 py-5 rounded-2xl bg-white hover:bg-neutral-50 border border-neutral-200 hover:border-neutral-300 transition-all text-left shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {/* Top row: avatar + meta */}
+                            <div className="flex items-start gap-3.5">
+                              <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-base font-bold ${
+                                s.isCompleted
+                                  ? 'bg-emerald-500 text-white'
+                                  : initial
+                                    ? 'bg-neutral-900 text-white'
+                                    : 'bg-neutral-100 text-neutral-400'
+                              }`}>
+                                {s.loading
+                                  ? <Loader2 className="w-5 h-5 animate-spin text-neutral-400" />
+                                  : initial || <MessageSquare className="w-5 h-5" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <p className="font-semibold text-neutral-900 truncate text-base">{title}</p>
+                                  {s.isCompleted && !s.loading && (
+                                    <span className="shrink-0 text-[10px] font-semibold bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-full border border-emerald-200">Done</span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-neutral-400 truncate mt-0.5">{subtitle}</p>
+                              </div>
+                              <span className="text-xs text-neutral-400 whitespace-nowrap shrink-0">{relTime}</span>
+                            </div>
+
+                            {/* Progress bar */}
+                            {!s.loading && !s.error && (
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 h-1 bg-neutral-100 rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full transition-all ${s.isCompleted ? 'bg-emerald-500' : 'bg-neutral-400'}`}
+                                    style={{ width: `${Math.max(displayPct, 3)}%` }}
+                                  />
+                                </div>
+                                <span className="text-xs text-neutral-400 tabular-nums font-medium w-8 text-right">{displayPct}%</span>
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                 </div>
+                </div>{/* /max-w-7xl */}
               </div>
-              </div>{/* /grid */}
             </div>
           )}
 
           {/* Chat */}
           {view === 'chat' && (
-            <div className="flex-1 overflow-hidden">
-              <AiChat
-                hideHeader
-                onComplete={handleComplete}
-                onSlotsUpdate={handleSlotsUpdate}
-                authorId={user?.id}
-                userId={user?.id}
-                userName={user?.email || 'You'}
-                initialThreadId={activeThreadId}
-                onThreadStart={async (threadId) => {
-                  setActiveThreadId(threadId);
-                  try {
-                    const res = await apiClient.post('/projects/ai-intake', { thread_id: threadId }) as any;
-                    setDraftProjectId(res.project?.id);
-                  } catch { /* non-fatal */ }
-                }}
-              />
+            <div className="flex-1 overflow-hidden flex justify-center">
+              <div className="w-full max-w-7xl px-3 sm:px-6 flex flex-col overflow-hidden">
+                <AiChat
+                  hideHeader
+                  onComplete={handleComplete}
+                  onSlotsUpdate={handleSlotsUpdate}
+                  authorId={user?.id}
+                  userId={user?.id}
+                  userName={user?.email || 'You'}
+                  initialThreadId={activeThreadId}
+                  onThreadStart={async (threadId) => {
+                    setActiveThreadId(threadId);
+                    try {
+                      const res = await apiClient.post('/projects/ai-intake', { thread_id: threadId }) as any;
+                      setDraftProjectId(res.project?.id);
+                    } catch { /* non-fatal */ }
+                  }}
+                />
+              </div>
             </div>
           )}
         </div>

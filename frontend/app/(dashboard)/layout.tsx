@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { AppNav } from '@/components/layout/app-nav';
+import CornerDecorations from '@/components/ui/CornerDecorations';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -26,7 +27,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!hydrated || !isAuthenticated) return null;
 
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <div className="min-h-screen bg-neutral-50 relative">
+      <CornerDecorations />
       <AppNav />
       <main className="pt-20">
         <div key={pathname} className="tc-page-enter">{children}</div>

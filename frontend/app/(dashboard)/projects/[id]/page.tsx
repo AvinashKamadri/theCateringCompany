@@ -82,6 +82,60 @@ const relativeTime = (dateStr: string) => {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
+const MENU_IMAGES = [
+  "2-tier-6-and-8-serves-25","2-tier-wedding-cake-6-and-8","7-layer-bars","adobo-lime-chicken-bites",
+  "adobo-steak-skewers","ahi-tuna-bites","antipasto-platter","artichoke-tapenade-w-crostini",
+  "asian-roast-beef-crostini-w-wasabi-aioli","asian-roast-beef-crostini","assorted-finger-sandwiches",
+  "bacon-bourbon-meatballs","bacon-shrimp","bbq-chicken-slider","beef-brisket-and-chicken","bite-bites",
+  "blondies","brie-and-cranberry-puff-cheese","brie-bites","brownies","bruschetta","burger-bar",
+  "caprese-skewers","caviar-and-cream-crisp","caviar-egg","charcuterie-boards","charred-tomato-and-pesto",
+  "cheese-platter","chicken-and-ham","chicken-banh-mi-slider-w-jalapeno-slaw","chicken-banh-mi-slider",
+  "chicken-piccata-and-braised-beef","chicken-piccata-and-red-wine-braised-beef","chicken-piccata",
+  "chicken-satay","chicken-tikka-skewers","chips-and-guacamole","chips-and-salsa",
+  "chocolate-chip-cookie-bar","chocolate-chip-cookie-bars","chorizo-stuffed-baby-peppers",
+  "crab-cakes","crab-dip","crab-stuffed-cucumbers","cup-cakes","cupcakes","deviled-egg",
+  "double-stuffed-mushrooms","fiesta-taco-bar","filet-tip-crostini","firecracker-shrimp",
+  "flavored-mousse-cup","fruit-platter","fruit-tarts","gazpacho-shooters","grilled-chicken-and-ham",
+  "grilled-pasta-menu","grilled-shrimp-cocktail","hummus-and-pita","lemon-bars",
+  "mac-and-cheese-shooters","maple-bacon-chicken-pops","marsala-menu",
+  "meatballs-bbq-swedish-sweet-and-sour","meatballs-bbq-swedish-sweet-sour","mediterranean-bar",
+  "mexican-char-grilled","mexican-stuffed-peppers-w-cojito-cheese","mexican-stuffed-peppers",
+  "mini-assorted-cheesecakes","par-pardon","parmesan-artichoke-dip","pork-and-chicken",
+  "prime-rib-and-salmon","pulled-pork-sliders","ravioli-menu","shrimp-and-mango-bites",
+  "smoked-pork-belly-dippers","smoked-salmon-phyllo-cups","soft-pretzel-bites-w-beer-cheese",
+  "soup-salad-sandwich-menu","south-west-shrimp-crostini","southern-comfort","souvlaki-bar",
+  "spanakopita","tomato-and-guacamole","tomatoes-and-feta","tropical-cucumber-cups",
+  "twice-baked-potato-bites","vegetable-platter","wedding-tiered-cakes","white-bean-tapenade-w-crostini",
+];
+
+const getMenuImage = (item: string): string | null => {
+  const slug = item
+    .toLowerCase()
+    .replace(/\(\$[\d.,]+\/pp\)/g, '')
+    .replace(/\(select \d+\)/gi, '')
+    .replace(/[()]/g, ' ')
+    .replace(/&/g, 'and')
+    .replace(/[/\\]+/g, ' ')
+    .replace(/[^a-z0-9\s]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
+
+  if (MENU_IMAGES.includes(slug)) return `/menu-images/${slug}.jpg`;
+
+  const exact = MENU_IMAGES.find(img => img === slug || img.startsWith(slug + '-') || slug.startsWith(img + '-'));
+  if (exact) return `/menu-images/${exact}.jpg`;
+
+  const words = slug.split('-').filter(w => w.length > 3);
+  if (words.length > 0) {
+    const scored = MENU_IMAGES
+      .map(img => ({ img, score: words.filter(w => img.includes(w)).length }))
+      .filter(x => x.score >= Math.min(2, words.length))
+      .sort((a, b) => b.score - a.score);
+    if (scored.length > 0) return `/menu-images/${scored[0].img}.jpg`;
+  }
+  return null;
+};
+
 const getFoodEmoji = (item: string): string => {
   const l = item.toLowerCase();
   if (l.includes('chicken')) return '🍗';
@@ -526,51 +580,74 @@ export default function ProjectDetailPage() {
           <div className="flex-1 min-w-0 space-y-4">
 
             {/* Menu Selection */}
-            {(summary.appetizers?.length > 0 || summary.main_dishes?.length > 0 || summary.desserts?.length > 0) ? (
+            {(Array.isArray(summary.appetizers) && summary.appetizers.length > 0 || Array.isArray(summary.main_dishes) && summary.main_dishes.length > 0 || Array.isArray(summary.desserts) && summary.desserts.length > 0) ? (
               <div className="bg-white rounded-2xl border border-neutral-100 p-6">
                 <div className="flex items-baseline justify-between mb-5">
                   <h2 className="text-base font-bold text-neutral-900">Menu Selection</h2>
                   <p className="text-xs text-neutral-400">{menuItems.length} item{menuItems.length !== 1 ? 's' : ''}</p>
                 </div>
 
-                {summary.appetizers?.length > 0 && (
+                {Array.isArray(summary.appetizers) && summary.appetizers.length > 0 && (
                   <div className="mb-6">
                     <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 mb-3">Appetizers</p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
-                      {summary.appetizers.map((item: string, i: number) => (
-                        <div key={i} className="rounded-xl border border-neutral-100 p-3 hover:border-neutral-200 transition-colors">
-                          <span className="text-xl mb-2 block">{getFoodEmoji(item)}</span>
-                          <p className="text-xs font-medium text-neutral-800 leading-snug">{item}</p>
-                        </div>
-                      ))}
+                      {summary.appetizers.map((item: string, i: number) => {
+                        const img = getMenuImage(item);
+                        return (
+                          <div key={i} className="rounded-xl border border-neutral-100 overflow-hidden hover:border-neutral-200 hover:shadow-sm transition-all">
+                            {img ? (
+                              <img src={img} alt={item} className="w-full h-24 object-cover" />
+                            ) : (
+                              <div className="w-full h-24 bg-neutral-100 flex items-center justify-center text-2xl">{getFoodEmoji(item)}</div>
+                            )}
+                            <p className="text-xs font-medium text-neutral-800 leading-snug p-2.5">{item}</p>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
 
-                {summary.main_dishes?.length > 0 && (
+                {Array.isArray(summary.main_dishes) && summary.main_dishes.length > 0 && (
                   <div className="mb-6">
                     <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 mb-3">Main Dishes</p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
-                      {summary.main_dishes.map((item: string, i: number) => (
-                        <div key={i} className="rounded-xl bg-neutral-900 p-3">
-                          <span className="text-xl mb-2 block">{getFoodEmoji(item)}</span>
-                          <p className="text-xs font-medium text-white leading-snug">{item}</p>
-                        </div>
-                      ))}
+                      {summary.main_dishes.map((item: string, i: number) => {
+                        const img = getMenuImage(item);
+                        return (
+                          <div key={i} className="rounded-xl overflow-hidden hover:shadow-sm transition-all">
+                            {img ? (
+                              <img src={img} alt={item} className="w-full h-24 object-cover" />
+                            ) : (
+                              <div className="w-full h-24 bg-neutral-800 flex items-center justify-center text-2xl">{getFoodEmoji(item)}</div>
+                            )}
+                            <div className="bg-neutral-900 p-2.5">
+                              <p className="text-xs font-medium text-white leading-snug">{item}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
 
-                {summary.desserts?.length > 0 && (
+                {Array.isArray(summary.desserts) && summary.desserts.length > 0 && (
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 mb-3">Desserts</p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
-                      {summary.desserts.map((item: string, i: number) => (
-                        <div key={i} className="rounded-xl border border-neutral-100 p-3 hover:border-neutral-200 transition-colors">
-                          <span className="text-xl mb-2 block">{getFoodEmoji(item)}</span>
-                          <p className="text-xs font-medium text-neutral-800 leading-snug">{item}</p>
-                        </div>
-                      ))}
+                      {summary.desserts.map((item: string, i: number) => {
+                        const img = getMenuImage(item);
+                        return (
+                          <div key={i} className="rounded-xl border border-neutral-100 overflow-hidden hover:border-neutral-200 hover:shadow-sm transition-all">
+                            {img ? (
+                              <img src={img} alt={item} className="w-full h-24 object-cover" />
+                            ) : (
+                              <div className="w-full h-24 bg-neutral-100 flex items-center justify-center text-2xl">{getFoodEmoji(item)}</div>
+                            )}
+                            <p className="text-xs font-medium text-neutral-800 leading-snug p-2.5">{item}</p>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

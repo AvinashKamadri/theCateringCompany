@@ -9,9 +9,9 @@ import { useAuthStore } from "@/lib/store/auth-store";
 
 // Background images that rotate every 3 seconds.
 const HERO_IMAGES = [
-  "/cat-bg2.jpg",
-  "/catering-bg1.jpg",
-  "/catering-bg3.jpg",
+  "/catering-food1.jpg.jpg",
+  "/catering-food2.png",
+  "/catering-food3.png",
 ];
 
 export default function SignUpPage() {
@@ -99,7 +99,7 @@ export default function SignUpPage() {
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(180deg, rgba(14,14,14,0.45) 0%, rgba(14,14,14,0.25) 30%, rgba(14,14,14,0.55) 70%, rgba(14,14,14,0.85) 100%)",
+              "linear-gradient(180deg, rgba(14,14,14,0.35) 0%, rgba(14,14,14,0.15) 30%, rgba(14,14,14,0.35) 70%, rgba(14,14,14,0.65) 100%)",
           }}
         />
       </div>
@@ -137,7 +137,7 @@ export default function SignUpPage() {
         </div>
 
         {/* Form card */}
-        <div className="w-full max-w-lg">
+        <div className="w-full max-w-xl">
           <div
             className="rounded-2xl p-9 lg:p-11"
             style={{

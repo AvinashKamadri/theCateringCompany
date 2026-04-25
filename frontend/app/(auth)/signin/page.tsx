@@ -10,9 +10,9 @@ import { useAuthStore } from "@/lib/store/auth-store";
 // Background images that rotate every 3 seconds.
 // Replace these with your final 3 catering images when ready.
 const HERO_IMAGES = [
-  "/cat-bg2.jpg",
-  "/catering-bg1.jpg",
-  "/catering-bg3.jpg",
+  "/catering-food1.jpg.jpg",
+  "/catering-food2.png",
+  "/catering-food3.png",
 ];
 
 function SignInForm() {
@@ -80,7 +80,7 @@ function SignInForm() {
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(180deg, rgba(14,14,14,0.45) 0%, rgba(14,14,14,0.25) 30%, rgba(14,14,14,0.55) 70%, rgba(14,14,14,0.85) 100%)",
+              "linear-gradient(180deg, rgba(14,14,14,0.35) 0%, rgba(14,14,14,0.15) 30%, rgba(14,14,14,0.35) 70%, rgba(14,14,14,0.65) 100%)",
           }}
         />
       </div>
@@ -121,7 +121,7 @@ function SignInForm() {
         </div>
 
         {/* Form card */}
-        <div className="w-full max-w-lg">
+        <div className="w-full max-w-xl">
           <div
             className="rounded-2xl p-10 lg:p-12"
             style={{
@@ -157,7 +157,7 @@ function SignInForm() {
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   disabled={isLoading}
                   placeholder="you@example.com"
-                  className="w-full bg-white border border-neutral-200 rounded-xl py-3 px-4 text-[15px] text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 transition-colors"
+                  className="w-full bg-neutral-50 border border-neutral-200 rounded-xl py-3 px-4 text-[15px] text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 transition-colors"
                 />
               </div>
 
@@ -182,13 +182,13 @@ function SignInForm() {
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     disabled={isLoading}
                     placeholder="••••••••"
-                    className="w-full bg-white border border-neutral-200 rounded-xl py-3 pl-4 pr-12 text-[15px] text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 transition-colors"
+                    className="w-full bg-neutral-50 border border-neutral-200 rounded-xl py-3 pl-4 pr-12 text-[15px] text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 transition-colors"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     disabled={isLoading}
-                    className="absolute right-0 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-900 transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-900 transition-colors"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>

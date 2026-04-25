@@ -17,15 +17,25 @@
   box-shadow: none !important;
 }
 
-/* Kill browser autofill background on dark chat inputs */
+/* Light autofill — global default for all inputs */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #f5f5f4 inset !important;
+  -webkit-text-fill-color: #171717 !important;
+  caret-color: #171717;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Dark autofill — scoped to dark chat container only */
+.bg-\[\#141414\] input:-webkit-autofill,
+.bg-\[\#141414\] input:-webkit-autofill:hover,
+.bg-\[\#141414\] input:-webkit-autofill:focus,
+.bg-\[\#141414\] input:-webkit-autofill:active {
   -webkit-box-shadow: 0 0 0 1000px #141414 inset !important;
   -webkit-text-fill-color: #ffffff !important;
   caret-color: #ffffff;
-  transition: background-color 5000s ease-in-out 0s;
 }
 
 :root {

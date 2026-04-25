@@ -253,14 +253,14 @@ function AiIntakeContent() {
                 <div className="max-w-7xl mx-auto px-3 sm:px-6">
                 {/* Headline */}
                 <div className="pt-10 pb-6">
-                  <p className="text-[11px] font-semibold tracking-widest uppercase text-neutral-400 mb-2">
-                    Catering Co · AI Planner
+                  <p className="text-[11px] font-semibold tracking-widest uppercase text-neutral-600 mb-2">
+                    Build Menu with A.I.
                   </p>
-                  <h1 className="text-3xl sm:text-4xl font-bold text-neutral-900 leading-tight">
+                  <h1 className="text-3xl sm:text-4xl font-bold text-neutral-950 leading-tight">
                     Crafted gatherings,<br />
-                    <span className="italic font-light text-neutral-500">to the last detail.</span>
+                    <span className="italic font-light text-neutral-700">to the last detail.</span>
                   </h1>
-                  <p className="mt-2.5 text-sm text-neutral-400 max-w-sm leading-relaxed">
+                  <p className="mt-2.5 text-sm text-neutral-600 max-w-sm leading-relaxed">
                     Tell us what you&apos;re envisioning — we handle the menu, logistics, and everything in between.
                   </p>
                 </div>

@@ -351,7 +351,8 @@ async function seedMenu() {
                 description: itemData.description || null,
                 unit_price: itemData.unit_price,
                 price_type: itemData.price_type,
-                allergens: itemData.allergens || [],
+                // allergens are derived from the ingredient graph by
+                // MenuAllergenDerivationService — see deriveAllergens() below.
                 tags: itemData.tags || [],
                 is_upsell: itemData.is_upsell || false,
                 active: true,
@@ -365,7 +366,7 @@ async function seedMenu() {
                 description: itemData.description || null,
                 unit_price: itemData.unit_price,
                 price_type: itemData.price_type,
-                allergens: itemData.allergens || [],
+                // allergens populated by deriveAllergens() at the end of seed.
                 tags: itemData.tags || [],
                 is_upsell: itemData.is_upsell || false,
                 active: true,
@@ -493,6 +494,68 @@ async function seedDishes() {
   console.log('='.repeat(50));
 }
 
+/**
+ * After dishes + links are seeded, derive `menu_items.allergens` from the
+ * ingredient graph (menu_item → dishes → ingredients.allergens). Mirrors
+ * MenuAllergenDerivationService — kept inline here so the seed script has
+ * no Nest dependency. Items with no graph end up with [] (surfaced via
+ * the health check; staff fix by linking ingredients in the inventory UI).
+ */
+async function deriveAllergens() {
+  console.log('\nDeriving menu_items.allergens from ingredient graph...\n');
+
+  const items = await prisma.menu_items.findMany({
+    select: {
+      id: true,
+      name: true,
+      allergens: true,
+      menu_item_dishes: {
+        select: {
+          dishes: {
+            select: {
+              dish_ingredients: {
+                select: { ingredients: { select: { allergens: true } } },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  let changed = 0;
+  let withoutGraph = 0;
+
+  for (const item of items) {
+    const set = new Set<string>();
+    let hasDish = false;
+    for (const link of item.menu_item_dishes) {
+      hasDish = true;
+      for (const di of link.dishes?.dish_ingredients ?? []) {
+        for (const a of di.ingredients?.allergens ?? []) {
+          if (a) set.add(a.toLowerCase().trim());
+        }
+      }
+    }
+    if (!hasDish) withoutGraph++;
+
+    const next = [...set].sort();
+    const prev = [...(item.allergens ?? [])].map((a) => a.toLowerCase().trim()).sort();
+    const equal = next.length === prev.length && next.every((v, i) => v === prev[i]);
+    if (equal) continue;
+
+    await prisma.menu_items.update({ where: { id: item.id }, data: { allergens: next } });
+    changed++;
+  }
+
+  console.log(`  Updated allergens on ${changed} menu_items.`);
+  if (withoutGraph > 0) {
+    console.log(`  ⚠ ${withoutGraph} menu_items have no dish links — allergens left as [].`);
+    console.log(`    Run the inventory UI to link dishes/ingredients, or:`);
+    console.log(`      npx ts-node backend/src/scripts/recompute-menu-allergens.ts --health`);
+  }
+}
+
 async function main() {
   try {
     console.log('FlashBack Catering - Menu & Pricing Seeder\n');
@@ -500,6 +563,7 @@ async function main() {
     await seedMenu();
     await seedPricingPackages();
     await seedDishes();
+    await deriveAllergens();
 
     console.log('='.repeat(50));
     console.log('Seeding completed successfully!');

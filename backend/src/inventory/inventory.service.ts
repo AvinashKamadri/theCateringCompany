@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { MenuAllergenDerivationService } from './menu-allergen-derivation.service';
 
 const STAFF_DOMAIN = '@catering-company.com';
 
@@ -38,7 +39,10 @@ export interface StockLogDto {
 
 @Injectable()
 export class InventoryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly allergens: MenuAllergenDerivationService,
+  ) {}
 
   private assertStaff(email: string) {
     if (!email?.endsWith(STAFF_DOMAIN)) {
@@ -85,7 +89,7 @@ export class InventoryService {
 
   async updateIngredient(callerEmail: string, id: string, dto: Partial<UpsertIngredientDto>) {
     this.assertStaff(callerEmail);
-    return this.prisma.ingredients.update({
+    const updated = await this.prisma.ingredients.update({
       where: { id },
       data: {
         ...(dto.name !== undefined && { name: dto.name.trim() }),
@@ -99,11 +103,18 @@ export class InventoryService {
         updated_at: new Date(),
       },
     });
+    if (dto.allergens !== undefined) {
+      await this.allergens.recomputeForIngredient(id);
+    }
+    return updated;
   }
 
   async deleteIngredient(callerEmail: string, id: string) {
     this.assertStaff(callerEmail);
+    // Snapshot affected menu_items BEFORE delete — FK cascade wipes the join rows.
+    const affected = await this.allergens.findMenuItemsAffectedByIngredient(id);
     await this.prisma.ingredients.delete({ where: { id } });
+    if (affected.length) await this.allergens.recomputeMany(affected);
     return { ok: true };
   }
 
@@ -154,7 +165,7 @@ export class InventoryService {
 
   async setDishIngredient(callerEmail: string, dishId: string, dto: DishIngredientDto) {
     this.assertStaff(callerEmail);
-    return this.prisma.dish_ingredients.upsert({
+    const result = await this.prisma.dish_ingredients.upsert({
       where: {
         dish_id_ingredient_id: { dish_id: dishId, ingredient_id: dto.ingredient_id },
       },
@@ -171,6 +182,8 @@ export class InventoryService {
         notes: dto.notes ?? null,
       },
     });
+    await this.allergens.recomputeForDish(dishId);
+    return result;
   }
 
   async removeDishIngredient(callerEmail: string, dishId: string, ingredientId: string) {
@@ -178,6 +191,7 @@ export class InventoryService {
     await this.prisma.dish_ingredients.delete({
       where: { dish_id_ingredient_id: { dish_id: dishId, ingredient_id: ingredientId } },
     });
+    await this.allergens.recomputeForDish(dishId);
     return { ok: true };
   }
 

@@ -81,21 +81,83 @@ def is_dessert_category(cat_name: str) -> bool:
     return "dessert" in cat_name.lower()
 
 
-async def load_main_dish_menu() -> dict[str, list[dict]]:
-    menu = await _load_cached_menu()
+def _normalize_excluded(excluded_allergens: Optional[Iterable[str]]) -> set[str]:
+    if not excluded_allergens:
+        return set()
+    return {a.lower().strip() for a in excluded_allergens if a and str(a).strip()}
+
+
+def _item_unsafe_allergens(item: dict, excluded: set[str]) -> list[str]:
+    """Return the subset of `item['allergens']` that overlap with `excluded`."""
+    if not excluded:
+        return []
+    item_allergens = {
+        str(a).lower().strip()
+        for a in (item.get("allergens") or [])
+        if a and str(a).strip()
+    }
+    return sorted(item_allergens & excluded)
+
+
+def filter_excluded_allergens(
+    menu: dict[str, list[dict]],
+    excluded_allergens: Optional[Iterable[str]],
+) -> dict[str, list[dict]]:
+    """Hard-filter: drop any item whose allergens intersect with `excluded_allergens`.
+
+    Pure post-fetch transform — preserves the cached menu for other callers.
+    Item dicts are kept as-is (not mutated).
+    """
+    excluded = _normalize_excluded(excluded_allergens)
+    if not excluded:
+        return menu
     return {
+        cat: [it for it in items if not _item_unsafe_allergens(it, excluded)]
+        for cat, items in menu.items()
+    }
+
+
+def annotate_allergen_safety(
+    items: Iterable[dict],
+    excluded_allergens: Optional[Iterable[str]],
+) -> list[dict]:
+    """Soft annotate: attach `is_safe` + `unsafe_allergens` per item.
+
+    Use for review/conflict-detection paths (e.g. S19 recap) where the AI
+    must NOT decide safety from arrays — it reads a boolean.
+    """
+    excluded = _normalize_excluded(excluded_allergens)
+    out: list[dict] = []
+    for it in items or []:
+        unsafe = _item_unsafe_allergens(it, excluded)
+        out.append({**it, "is_safe": not unsafe, "unsafe_allergens": unsafe})
+    return out
+
+
+async def load_main_dish_menu(
+    excluded_allergens: Optional[Iterable[str]] = None,
+) -> dict[str, list[dict]]:
+    menu = await _load_cached_menu()
+    scoped = {
         cat: items
         for cat, items in menu.items()
         if not is_non_dish_category(cat) and not is_appetizer_category(cat)
     }
+    return filter_excluded_allergens(scoped, excluded_allergens)
 
 
-async def load_appetizer_menu() -> dict[str, list[dict]]:
+async def load_appetizer_menu(
+    excluded_allergens: Optional[Iterable[str]] = None,
+) -> dict[str, list[dict]]:
     menu = await _load_cached_menu()
-    return {cat: items for cat, items in menu.items() if is_appetizer_category(cat)}
+    scoped = {cat: items for cat, items in menu.items() if is_appetizer_category(cat)}
+    return filter_excluded_allergens(scoped, excluded_allergens)
 
 
-async def load_dessert_menu_expanded(is_wedding: bool = False) -> list[dict]:
+async def load_dessert_menu_expanded(
+    is_wedding: bool = False,
+    excluded_allergens: Optional[Iterable[str]] = None,
+) -> list[dict]:
     """Flat list of desserts with mini-dessert bundle expanded into sub-items."""
     menu = await _load_cached_menu()
     out: list[dict] = []
@@ -110,15 +172,24 @@ async def load_dessert_menu_expanded(is_wedding: bool = False) -> list[dict]:
                 for sub in _re.split(r",(?![^(]*\))", item["description"]):
                     sub = sub.strip()
                     if sub:
+                        # Mini-dessert sub-items inherit parent allergens (best
+                        # available signal until the sub-items are seeded as
+                        # their own menu_items with derived allergens). Copy
+                        # the list — mutating a shared reference would leak
+                        # across cache reads.
                         out.append(
                             {
                                 "name": sub,
                                 "unit_price": item.get("unit_price"),
                                 "price_type": item.get("price_type", "per_person"),
+                                "allergens": list(item.get("allergens") or []),
                             }
                         )
             else:
                 out.append(item)
+    excluded = _normalize_excluded(excluded_allergens)
+    if excluded:
+        out = [it for it in out if not _item_unsafe_allergens(it, excluded)]
     return out
 
 
@@ -523,6 +594,8 @@ async def resolve_desserts(
 __all__ = [
     "AmbiguousMenuChoice",
     "MenuResolution",
+    "annotate_allergen_safety",
+    "filter_excluded_allergens",
     "filter_menu_items_by_tags",
     "format_items",
     "is_appetizer_category",

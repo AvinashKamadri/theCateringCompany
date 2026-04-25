@@ -29,6 +29,7 @@ from agent.ambiguous_choice import (
 from agent.cascade import apply_cascade
 from agent.instructor_client import extract
 from agent.menu_resolver import (
+    annotate_allergen_safety,
     filter_menu_items_by_tags,
     format_items,
     load_appetizer_menu,
@@ -37,6 +38,30 @@ from agent.menu_resolver import (
     parse_slot_items,
     resolve_menu_items,
 )
+
+
+def _user_excluded_allergens(slots: dict) -> tuple[str, ...]:
+    """Read the user's allergen exclusions from the `dietary_concerns` slot.
+
+    Accepts both list[str] (post-Slice 3 schema) and str (legacy free-text)
+    forms. Lifestyle restrictions (vegan/halal/etc.) and freeform notes are
+    ignored here — they don't map to FALCPA categories. Returns a normalized,
+    lowercase, deduplicated, sorted tuple so set-overlap checks are stable
+    and silent mismatches (e.g. "Nuts" vs "nuts") cannot happen.
+    """
+    val = get_slot_value(slots, "dietary_concerns")
+    if not val:
+        return ()
+    if isinstance(val, (list, tuple, set)):
+        raw: list[str] = [str(v).lower().strip() for v in val]
+    else:
+        s = str(val).strip().lower()
+        if s in ("none", "no", "n/a", ""):
+            return ()
+        # Legacy free-text path: split on common separators. Once Slice 3
+        # lands this path won't fire — checklist values flow in as a list.
+        raw = [p.strip() for p in re.split(r"[,;]", s)]
+    return tuple(sorted({p for p in raw if p}))
 from agent.models import MenuSelectionExtraction
 from agent.state import (
     PHASE_COCKTAIL,
@@ -855,11 +880,13 @@ class MenuSelectionTool:
 
         target_slot = _slot_for_category(category)
 
-        # Load the correct scoped menu
+        # Load the correct scoped menu, hard-filtered against the user's
+        # allergen exclusions. Items the user must not see never enter scope.
+        excluded = _user_excluded_allergens(slots)
         if target_slot == "appetizers":
-            scoped_menu = await load_appetizer_menu()
+            scoped_menu = await load_appetizer_menu(excluded_allergens=excluded)
         elif target_slot == "selected_dishes":
-            scoped_menu = await load_main_dish_menu()
+            scoped_menu = await load_main_dish_menu(excluded_allergens=excluded)
         elif target_slot == "desserts":
             return await self._resolve_desserts(raw_items, slots, replace_existing=replace_existing)
         else:
@@ -962,7 +989,10 @@ class MenuSelectionTool:
         event_type = (get_slot_value(slots, "event_type") or "").lower()
         is_wedding = "wedding" in event_type
         existing_names = parse_slot_items(get_slot_value(slots, "desserts") or "")
-        expanded = await load_dessert_menu_expanded(is_wedding=is_wedding)
+        expanded = await load_dessert_menu_expanded(
+            is_wedding=is_wedding,
+            excluded_allergens=_user_excluded_allergens(slots),
+        )
 
         numbered_names = [
             str(i.get("name") or "").strip()
@@ -1356,7 +1386,8 @@ async def _input_hint_for_menu_phase(phase: str, slots: dict) -> dict | None:
                     {"value": "station", "label": "At a station"},
                 ],
             }
-        menu = await load_appetizer_menu()
+        excluded = _user_excluded_allergens(slots)
+        menu = await load_appetizer_menu(excluded_allergens=excluded)
         return {"type": "menu_picker", "category": "appetizers", "menu": _serialize_menu(menu)}
     if phase == PHASE_MAIN_MENU:
         if is_filled(slots, "selected_dishes") and not is_filled(slots, "meal_style"):
@@ -1367,11 +1398,13 @@ async def _input_hint_for_menu_phase(phase: str, slots: dict) -> dict | None:
                     {"value": "buffet", "label": "Buffet-style"},
                 ],
             }
-        menu = await load_main_dish_menu()
+        excluded = _user_excluded_allergens(slots)
+        menu = await load_main_dish_menu(excluded_allergens=excluded)
         return {"type": "menu_picker", "category": "dishes", "menu": _serialize_menu(menu)}
     if phase == PHASE_DESSERT:
         items = await load_dessert_menu_expanded(
-            is_wedding="wedding" in (get_slot_value(slots, "event_type") or "").lower()
+            is_wedding="wedding" in (get_slot_value(slots, "event_type") or "").lower(),
+            excluded_allergens=_user_excluded_allergens(slots),
         )
         return {"type": "menu_picker", "category": "desserts", "items": items, "max_select": 4}
     # Post-menu basic info input hints — mirrors basic_info_tool._input_hint_for_phase

@@ -1343,7 +1343,7 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const startedRef = useRef(false);
-  const lastSlotsFilled = useRef(0);
+
 
   useEffect(() => {
     // Scroll immediately, then again after the card grid and any lazy images
@@ -1440,24 +1440,6 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
     return () => window.removeEventListener('chat:help', handleHelp);
   }, []);
 
-  // Short-poll slots every 5s to keep EventPlanPanel in sync
-  const onSlotsUpdateRef = useRef(onSlotsUpdate);
-  onSlotsUpdateRef.current = onSlotsUpdate;
-  const threadIdRef = useRef(state.threadId);
-  threadIdRef.current = state.threadId;
-
-  useEffect(() => {
-    if (!state.threadId || state.isComplete) return;
-    const interval = setInterval(async () => {
-      const tid = threadIdRef.current;
-      if (!tid) return;
-      try {
-        const conv = await chatAiApi.getConversation(tid);
-        if (conv.slots) onSlotsUpdateRef.current?.(conv.slots);
-      } catch { /* silent */ }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [state.threadId, state.isComplete]);
 
   async function loadConversationHistory(threadId: string) {
     setState((prev) => ({ ...prev, isLoading: true }));
@@ -1569,17 +1551,6 @@ export function AiChat({ projectId, authorId, userId, userName = 'You', initialT
       onProgressUpdate?.({ filled: response.slots_filled, total: response.total_slots });
       saveSessionToStorage(response.thread_id);
       if (!state.threadId) onThreadStart?.(response.thread_id);
-
-      // Always fetch latest slots after every AI response to catch additions AND removals.
-      // Small delay so the agent's save_conversation_state has time to commit before we read.
-      if (onSlotsUpdate) {
-        lastSlotsFilled.current = response.slots_filled;
-        setTimeout(() => {
-          chatAiApi.getConversation(response.thread_id)
-            .then((conv) => { if (conv.slots) onSlotsUpdate(conv.slots); })
-            .catch(() => {});
-        }, 600);
-      }
 
       // Auto-answer the menu transition prompt so users skip the confirmation step
       const isMenuTransition = /let['']s move (on )?to the menu|on to the menu|now for the menu|we('ll| will) (now |)start with (the |)appetizers/i.test(response.message);

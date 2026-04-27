@@ -15,6 +15,7 @@ On final confirmation it:
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from langchain_core.messages import BaseMessage
@@ -22,7 +23,13 @@ from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
 from agent.instructor_client import extract
-from agent.menu_resolver import parse_slot_items
+from agent.menu_resolver import (
+    annotate_allergen_safety,
+    load_appetizer_menu,
+    load_dessert_menu_expanded,
+    load_main_dish_menu,
+    parse_slot_items,
+)
 from agent.models import FinalizationExtraction
 from agent.state import (
     PHASE_COMPLETE,
@@ -293,6 +300,7 @@ class FinalizationTool:
         if confirm_final and _phase_of(slots) == PHASE_REVIEW:
             pricing = await self._safe_pricing(slots)
             client_summary = _client_facing_summary(slots)
+            client_summary["dietary_review"] = await _collect_dietary_review(slots)
             fill_slot(slots, "conversation_status", "pending_staff_review")
             state["conversation_phase"] = PHASE_COMPLETE
 
@@ -353,6 +361,7 @@ class FinalizationTool:
         direct_response: str | None = None
         if next_phase == PHASE_REVIEW:
             summary = _client_facing_summary(slots)
+            summary["dietary_review"] = await _collect_dietary_review(slots)
             response_context["client_summary"] = summary
             response_context["awaiting_confirm"] = True
             # Deterministic recap — avoids the LLM echoing tableware/service
@@ -387,6 +396,85 @@ class FinalizationTool:
             utensils=get_slot_value(slots, "utensils"),
             rentals=get_slot_value(slots, "rentals"),
         )
+
+
+def _normalize_dietary_concerns(slots: dict) -> tuple[str, ...]:
+    """Read `dietary_concerns` slot and normalize to a sorted, deduped tuple of
+    lowercase allergen strings. Mirrors menu_selection_tool._user_excluded_allergens
+    but kept local to avoid a circular import."""
+    val = get_slot_value(slots, "dietary_concerns")
+    if not val:
+        return ()
+    if isinstance(val, (list, tuple, set)):
+        raw = [str(v).lower().strip() for v in val]
+    else:
+        s = str(val).strip().lower()
+        if s in ("none", "no", "n/a", ""):
+            return ()
+        import re as _re
+        raw = [p.strip() for p in _re.split(r"[,;]", s)]
+    return tuple(sorted({p for p in raw if p}))
+
+
+async def _collect_dietary_review(slots: dict) -> dict | None:
+    """For S19: load the canonical menu, look up each picked item, and run it
+    through `annotate_allergen_safety` to surface unsafe / incomplete items.
+
+    Returns None when no dietary concern is set (nothing to review). Otherwise:
+        { "concerns": ['nuts', ...],
+          "unsafe":     [{name, unsafe_allergens, allergen_confidence}, ...],
+          "incomplete": [{name, allergen_confidence}, ...] }
+
+    The picker fail-closes by construction, so under normal flow these lists
+    are empty. They become non-empty when the user set an item BEFORE setting
+    a concern (cross-target capture path) or after a modification."""
+    excluded = _normalize_dietary_concerns(slots)
+    if not excluded:
+        return None
+
+    is_wedding = "wedding" in (str(get_slot_value(slots, "event_type") or "")).lower()
+    main_menu, app_menu, desserts = await asyncio.gather(
+        load_main_dish_menu(),
+        load_appetizer_menu(),
+        load_dessert_menu_expanded(is_wedding=is_wedding),
+    )
+
+    by_name: dict[str, dict] = {}
+    for cat_items in main_menu.values():
+        for it in cat_items:
+            by_name[str(it.get("name") or "").lower()] = it
+    for cat_items in app_menu.values():
+        for it in cat_items:
+            by_name[str(it.get("name") or "").lower()] = it
+    for it in desserts:
+        by_name[str(it.get("name") or "").lower()] = it
+
+    picked: list[dict] = []
+    for slot in ("appetizers", "selected_dishes", "desserts"):
+        for name in parse_slot_items(str(get_slot_value(slots, slot) or "")):
+            item = by_name.get(name.lower())
+            if item is not None:
+                picked.append(item)
+
+    if not picked:
+        return {"concerns": list(excluded), "unsafe": [], "incomplete": []}
+
+    annotated = annotate_allergen_safety(picked, excluded)
+    unsafe = [
+        {
+            "name": a.get("name"),
+            "unsafe_allergens": a.get("unsafe_allergens") or [],
+            "allergen_confidence": a.get("allergen_confidence"),
+        }
+        for a in annotated
+        if not a.get("is_safe") and a.get("allergen_confidence") == "derived"
+    ]
+    incomplete = [
+        {"name": a.get("name"), "allergen_confidence": a.get("allergen_confidence")}
+        for a in annotated
+        if a.get("allergen_confidence") != "derived"
+    ]
+    return {"concerns": list(excluded), "unsafe": unsafe, "incomplete": incomplete}
 
 
 def _client_facing_summary(slots: dict) -> dict:
@@ -704,6 +792,28 @@ def _render_review_recap(s: dict) -> str:
         lines.append("• Desserts: none")
     if s.get("wedding_cake"):
         lines.append(f"• Wedding cake: {s['wedding_cake']}")
+
+    # Dietary review (S19): surface annotation flags so the LLM/coordinator
+    # reads booleans rather than interpreting allergen arrays. Picker is
+    # fail-closed by construction, so these lists are normally empty — they
+    # only show when items were locked in BEFORE a dietary concern was set.
+    review = s.get("dietary_review") or {}
+    concerns = review.get("concerns") or []
+    if concerns:
+        lines.append(f"• Dietary concerns: {', '.join(concerns)}")
+        unsafe = review.get("unsafe") or []
+        incomplete = review.get("incomplete") or []
+        if unsafe:
+            for u in unsafe:
+                tags = ", ".join(u.get("unsafe_allergens") or [])
+                lines.append(f"  ⚠ {u.get('name')} contains {tags} — please review")
+        if incomplete:
+            names = ", ".join(str(i.get("name")) for i in incomplete)
+            lines.append(
+                f"  ⚠ Allergen data incomplete for: {names} — please review"
+            )
+        if not unsafe and not incomplete:
+            lines.append("  ✓ All selections are safe given these concerns")
 
     tw_label = _TABLEWARE_PRETTY.get(str(s.get("tableware") or "").lower())
     if tw_label:

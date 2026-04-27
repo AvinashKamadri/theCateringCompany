@@ -103,7 +103,7 @@ async def test_menu_select_all_non_veg_except_pork_and_chicken(monkeypatch) -> N
     async def fail_extract(**_kwargs):
         raise AssertionError("LLM extraction should not be called for tag-select")
 
-    async def fake_load_appetizer_menu():
+    async def fake_load_appetizer_menu(**_kwargs):
         return {
             "Chicken": [{"name": "Chicken Satay", "unit_price": 3.50, "price_type": "per_person"}],
             "Pork": [{"name": "Bacon Bourbon Meatballs", "unit_price": 3.50, "price_type": "per_person"}],

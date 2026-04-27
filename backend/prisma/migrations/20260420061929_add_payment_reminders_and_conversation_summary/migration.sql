@@ -1,15 +1,7 @@
-/*
-  Warnings:
-
-  - You are about to drop the column `section` on the `menu_categories` table. All the data in the column will be lost.
-  - A unique constraint covering the columns `[name]` on the table `menu_categories` will be added. If there are existing duplicate values, this will fail.
-
-*/
--- DropIndex
-DROP INDEX "menu_categories_section_name_key";
-
--- AlterTable
-ALTER TABLE "menu_categories" DROP COLUMN "section";
+-- NOTE: this migration was originally generated with the section column being
+-- dropped from menu_categories (it pre-dated the section migration in the
+-- working schema). Those drops were removed manually so resets do not undo
+-- the earlier 20260415000000_add_section_to_menu_categories migration.
 
 -- AlterTable
 ALTER TABLE "payment_schedule_items" ADD COLUMN     "last_reminder_sent_at" TIMESTAMPTZ(6),
@@ -118,8 +110,8 @@ CREATE INDEX "ix_ingredient_stock_log_project" ON "ingredient_stock_log"("projec
 -- CreateIndex
 CREATE INDEX "ix_project_summaries_project" ON "project_summaries"("project_id", "generated_at" DESC);
 
--- CreateIndex
-CREATE UNIQUE INDEX "menu_categories_name_key" ON "menu_categories"("name");
+-- (Removed: re-creating menu_categories_name_key here would conflict with
+-- the (section, name) unique index from 20260415000000_add_section_to_menu_categories.)
 
 -- AddForeignKey
 ALTER TABLE "menu_item_dishes" ADD CONSTRAINT "menu_item_dishes_menu_item_id_fkey" FOREIGN KEY ("menu_item_id") REFERENCES "menu_items"("id") ON DELETE CASCADE ON UPDATE NO ACTION;

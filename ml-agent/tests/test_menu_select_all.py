@@ -21,7 +21,7 @@ async def test_menu_select_all_does_not_require_llm(monkeypatch) -> None:
     async def fail_extract(**_kwargs):
         raise AssertionError("LLM extraction should not be called for select-all")
 
-    async def fake_load_main_dish_menu():
+    async def fake_load_main_dish_menu(**_kwargs):
         return {
             "Signature Combinations": [
                 {"name": "Chicken Piccata", "unit_price": 29.49, "price_type": "per_person"},

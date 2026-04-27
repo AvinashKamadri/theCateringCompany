@@ -20,6 +20,7 @@ WORKDIR /app
 RUN apk add --no-cache chromium
 
 ENV NODE_ENV=production
+ENV ML_ENV=development
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 COPY --from=builder /app/dist ./dist

@@ -28,6 +28,7 @@ export class MenuAllergenDerivationService {
         id: true,
         name: true,
         allergens: true,
+        allergen_confidence: true,
         menu_item_dishes: {
           select: {
             dishes: {
@@ -67,28 +68,37 @@ export class MenuAllergenDerivationService {
       }
     }
 
+    // Confidence rule (Slice 3): the graph must be complete enough to trust.
+    //   - no dishes linked        → incomplete
+    //   - dishes but no ingredients → incomplete
+    //   - dish + ingredient path   → derived
+    // Allergens are written only when derived; incomplete rows keep allergens
+    // as [] so the ml-agent fail-closed filter can reject them on confidence.
+    const confidence: 'derived' | 'incomplete' =
+      sawAnyDish && sawAnyIngredient ? 'derived' : 'incomplete';
+
     if (!sawAnyDish) {
       this.logger.warn(
-        `derivation: menu_item="${item.name}" id=${item.id} has no dish links — cache left as-is`,
+        `derivation: menu_item="${item.name}" id=${item.id} has no dish links — marking incomplete`,
       );
-      return false;
-    }
-    if (sawAnyDish && !sawAnyIngredient) {
+    } else if (!sawAnyIngredient) {
       this.logger.warn(
-        `derivation: menu_item="${item.name}" id=${item.id} has dishes but none have ingredients`,
+        `derivation: menu_item="${item.name}" id=${item.id} has dishes but none have ingredients — marking incomplete`,
       );
     }
 
-    const next = [...derived].sort();
+    const next = confidence === 'derived' ? [...derived].sort() : [];
     const prev = [...(item.allergens ?? [])].map((a) => a.toLowerCase().trim()).sort();
-    if (arraysEqual(next, prev)) return false;
+    const confidenceChanged = item.allergen_confidence !== confidence;
+    const allergensChanged = !arraysEqual(next, prev);
+    if (!confidenceChanged && !allergensChanged) return false;
 
     await this.prisma.menu_items.update({
       where: { id: item.id },
-      data: { allergens: next },
+      data: { allergens: next, allergen_confidence: confidence },
     });
     this.logger.log(
-      `derivation: menu_item="${item.name}" allergens [${prev.join(',')}] → [${next.join(',')}]`,
+      `derivation: menu_item="${item.name}" confidence=${item.allergen_confidence}→${confidence} allergens=[${prev.join(',')}]→[${next.join(',')}]`,
     );
     return true;
   }

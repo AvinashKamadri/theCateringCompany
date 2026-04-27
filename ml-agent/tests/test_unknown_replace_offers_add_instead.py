@@ -22,7 +22,7 @@ from agent.tools.modification_tool import (  # noqa: E402
 async def test_replace_unknown_menu_item_offers_add_instead(monkeypatch) -> None:
     import agent.tools.modification_tool as mod_tool_module
 
-    async def fake_load_main_dish_menu():
+    async def fake_load_main_dish_menu(**_kwargs):
         return {
             "Global Inspirations": [
                 {"name": "Ravioli Menu", "unit_price": 31.99, "price_type": "per_person"},

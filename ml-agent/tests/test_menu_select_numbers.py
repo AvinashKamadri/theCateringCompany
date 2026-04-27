@@ -22,7 +22,7 @@ async def test_menu_numeric_selection_maps_to_item_name(monkeypatch) -> None:
     async def fake_extract(**_kwargs):
         return MenuSelectionExtraction(raw_items=["2"], category_hint="dishes")
 
-    async def fake_load_main_dish_menu():
+    async def fake_load_main_dish_menu(**_kwargs):
         return {
             "Signature Combinations": [
                 {"name": "Chicken Piccata", "unit_price": 29.49, "price_type": "per_person"},

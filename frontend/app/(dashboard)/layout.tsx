@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { AppNav } from '@/components/layout/app-nav';
 import CornerDecorations from '@/components/ui/CornerDecorations';
+import PageTransition from '@/components/ui/PageTransition';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
   const { isAuthenticated } = useAuthStore();
   const [hydrated, setHydrated] = useState(false);
 
@@ -31,7 +31,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <CornerDecorations />
       <AppNav />
       <main className="pt-20">
-        <div key={pathname} className="tc-page-enter">{children}</div>
+        <PageTransition>{children}</PageTransition>
       </main>
     </div>
   );

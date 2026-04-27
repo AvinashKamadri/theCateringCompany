@@ -21,7 +21,7 @@ async def test_non_wedding_auto_sets_cocktail_hour_without_messaging(monkeypatch
     async def fake_extract(**_kwargs):
         return None
 
-    async def fake_load_appetizer_menu():
+    async def fake_load_appetizer_menu(**_kwargs):
         return {"Appetizers": [{"name": "Brie Bites", "unit_price": 3.0, "price_type": "per_person"}]}
 
     monkeypatch.setattr(menu_tool_module, "extract", fake_extract)
@@ -52,7 +52,7 @@ async def test_non_wedding_ignores_cocktail_hour_keyword_as_service_style(monkey
         # Even if the extractor emits cocktail_hour, the tool should ignore it for non-weddings.
         return menu_tool_module.MenuSelectionExtraction(cocktail_hour=True)
 
-    async def fake_load_appetizer_menu():
+    async def fake_load_appetizer_menu(**_kwargs):
         return {"Appetizers": [{"name": "Brie Bites", "unit_price": 3.0, "price_type": "per_person"}]}
 
     monkeypatch.setattr(menu_tool_module, "extract", fake_extract)
@@ -78,7 +78,7 @@ async def test_wedding_accepts_cocktail_hour_service_style(monkeypatch) -> None:
     async def fake_extract(**_kwargs):
         return menu_tool_module.MenuSelectionExtraction(cocktail_hour=True)
 
-    async def fake_load_appetizer_menu():
+    async def fake_load_appetizer_menu(**_kwargs):
         return {"Appetizers": [{"name": "Brie Bites", "unit_price": 3.0, "price_type": "per_person"}]}
 
     monkeypatch.setattr(menu_tool_module, "extract", fake_extract)

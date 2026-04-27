@@ -22,7 +22,7 @@ async def test_menu_all_except_numeric_does_not_call_llm(monkeypatch) -> None:
     async def fail_extract(**_kwargs):
         raise AssertionError("LLM extraction should not be called for all-except")
 
-    async def fake_load_main_dish_menu():
+    async def fake_load_main_dish_menu(**_kwargs):
         return {
             "Signature Combinations": [
                 {"name": "Chicken Piccata", "unit_price": 29.49, "price_type": "per_person"},
@@ -60,7 +60,7 @@ async def test_menu_remove_all_except_replaces_existing_list(monkeypatch) -> Non
     async def fail_extract(**_kwargs):
         raise AssertionError("LLM extraction should not be called for remove-all-except")
 
-    async def fake_load_main_dish_menu():
+    async def fake_load_main_dish_menu(**_kwargs):
         return {
             "Signature Combinations": [
                 {"name": "Chicken Piccata", "unit_price": 29.49, "price_type": "per_person"},
@@ -104,7 +104,7 @@ async def test_dessert_overflow_message_is_appetite_line(monkeypatch) -> None:
     async def fail_extract(**_kwargs):
         raise AssertionError("LLM extraction should not be called for select-all")
 
-    async def fake_load_dessert_menu_expanded(*, is_wedding: bool = False):
+    async def fake_load_dessert_menu_expanded(*, is_wedding: bool = False, **_kwargs):
         return [
             {"name": "Chocolate Cake", "unit_price": 3.00, "price_type": "per_person"},
             {"name": "Cheesecake", "unit_price": 3.00, "price_type": "per_person"},
@@ -144,7 +144,7 @@ async def test_remove_all_except_with_category_override_targets_appetizers(monke
     async def fail_extract(**_kwargs):
         raise AssertionError("LLM extraction should not be called for remove-all-except")
 
-    async def fake_load_appetizer_menu():
+    async def fake_load_appetizer_menu(**_kwargs):
         return {
             "Appetizers": [
                 {"name": "Brie Bites", "unit_price": 3.00, "price_type": "per_person"},
@@ -152,7 +152,7 @@ async def test_remove_all_except_with_category_override_targets_appetizers(monke
             ]
         }
 
-    async def fake_load_main_dish_menu():
+    async def fake_load_main_dish_menu(**_kwargs):
         # Still needed because the user is mid-flow in PHASE_MAIN_MENU.
         return {
             "Signature Combinations": [

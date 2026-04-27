@@ -400,6 +400,11 @@ class MenuSelectionTool:
         _all_except = _parse_all_except(message)
         _remove_all_except = _parse_remove_all_except(message)
         _handled_menu_sentinel = False
+        # Set only when a deterministic parser (tag-select / all-except /
+        # remove-all-except) resolved a literal "in <category>" override from
+        # the user's message. This wins over the phase-derived default, since
+        # the user explicitly named the slot they meant — see line 591.
+        _explicit_category_override: str | None = None
         _show_menu_targets = {"show_appetizer_menu", "show_main_menu", "show_dessert_menu"}
         if (
             forced_extracted is None
@@ -423,6 +428,8 @@ class MenuSelectionTool:
                 category_hint=category_override or forced_category,
             )
             _handled_menu_sentinel = True
+            if category_override:
+                _explicit_category_override = category_override
         elif (
             forced_extracted is None
             and _all_except
@@ -434,6 +441,8 @@ class MenuSelectionTool:
                 category_hint=category_override or forced_category,
             )
             _handled_menu_sentinel = True
+            if category_override:
+                _explicit_category_override = category_override
         elif (
             forced_extracted is None
             and _remove_all_except
@@ -447,6 +456,8 @@ class MenuSelectionTool:
                 category_hint=category_override or forced_category,
             )
             _handled_menu_sentinel = True
+            if category_override:
+                _explicit_category_override = category_override
 
         # Skip LLM extraction when the entire message was a style-only sentinel;
         # avoids the LLM re-interpreting an already-resolved click.
@@ -585,10 +596,18 @@ class MenuSelectionTool:
                 # non-wedding customers "we will plan for cocktail hour".
 
         if extracted is not None:
-            # Trust the conversation phase over the extractor's inferred category.
-            # Prevents cases where a main-menu item list is mis-labeled as "appetizers"
-            # and then fails to resolve, causing the menu to be re-shown.
-            category = forced_category or extracted.category_hint
+            # Default rule: trust the conversation phase over the extractor's
+            # inferred category. Prevents cases where a main-menu item list is
+            # mis-labeled as "appetizers" by the LLM and then fails to resolve.
+            #
+            # Exception: when the user *literally typed* "in <category>" (parsed
+            # deterministically into _explicit_category_override), respect it.
+            # The phase-trumps-LLM rule guards against LLM mis-tagging — it
+            # should not also override an unambiguous user intent.
+            if _explicit_category_override:
+                category = _explicit_category_override
+            else:
+                category = forced_category or extracted.category_hint
 
             # ---- cocktail_hour declared explicitly ----
             if extracted.cocktail_hour is not None:

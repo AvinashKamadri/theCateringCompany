@@ -2,12 +2,72 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import re as _re
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional
 
 from database.db_manager import load_menu_by_category
+
+_logger = logging.getLogger(__name__)
+
+# Sentinel so we can tell "caller forgot to pass" (default) apart from
+# "caller explicitly passed None/[] meaning no exclusions".
+_UNSET: object = object()
+
+# FALCPA-aligned set used as a fail-closed exclusion in prod when a caller
+# forgets to thread `excluded_allergens` through. Treating "unknown intent"
+# as "exclude everything" guarantees the filter cannot silently bypass —
+# items with `incomplete` confidence drop, and `derived` items drop on any
+# overlap. Worst case the user sees an empty menu and we surface a bug,
+# rather than serving an unsafe item.
+ALL_ALLERGENS: tuple[str, ...] = (
+    "dairy", "egg", "fish", "shellfish", "tree_nuts",
+    "peanuts", "wheat", "gluten", "soy", "sesame",
+)
+
+
+def _guard_excluded(arg, fn_name: str):
+    """Hybrid fail-loud-in-dev / fail-CLOSED-in-prod guard.
+
+    Allergen-aware load_* must receive `_user_excluded_allergens(slots)`
+    explicitly. A missing kwarg is a bypass risk — crash in dev so it's
+    caught immediately, log + force-exclude every FALCPA allergen in prod
+    so a forgotten plumbing site can't serve unsafe items. Default env is
+    'production' because a missing env var in prod is the realistic
+    failure mode; dev must opt in via ML_ENV=development.
+    """
+    if arg is _UNSET:
+        env = os.getenv("ML_ENV", os.getenv("NODE_ENV", "production")).lower()
+        if env != "production":
+            raise ValueError(
+                f"{fn_name}: excluded_allergens is required for safety. "
+                "Pass _user_excluded_allergens(slots) (use [] if none)."
+            )
+        # Walk one frame up so the log points at the actual offender, not
+        # the load_* function. Keeps the alert actionable in prod.
+        caller = "<unknown>"
+        try:
+            frame = sys._getframe(2)
+            caller = f"{frame.f_code.co_filename}:{frame.f_lineno} in {frame.f_code.co_name}"
+        except Exception:
+            pass
+        _logger.critical(
+            "ALLERGEN_GUARD_TRIGGERED fn=%s caller=%s — FAIL-CLOSED, excluding all FALCPA allergens",
+            fn_name,
+            caller,
+            extra={
+                "event": "ALLERGEN_GUARD_TRIGGERED",
+                "fn": fn_name,
+                "caller": caller,
+                "action": "fail_closed_all_falcpa",
+            },
+        )
+        return ALL_ALLERGENS
+    return arg
 
 # ---------------------------------------------------------------------------
 # Process-level menu cache — menu data is static within a deployment so we
@@ -99,44 +159,147 @@ def _item_unsafe_allergens(item: dict, excluded: set[str]) -> list[str]:
     return sorted(item_allergens & excluded)
 
 
+def _item_confidence(item: dict) -> str:
+    """Return normalized allergen_confidence; missing/unknown values are
+    treated as 'incomplete' so the filter fails closed."""
+    raw = item.get("allergen_confidence")
+    if not raw:
+        return "incomplete"
+    s = str(raw).lower().strip()
+    return "derived" if s == "derived" else "incomplete"
+
+
 def filter_excluded_allergens(
     menu: dict[str, list[dict]],
     excluded_allergens: Optional[Iterable[str]],
 ) -> dict[str, list[dict]]:
-    """Hard-filter: drop any item whose allergens intersect with `excluded_allergens`.
+    """Hard-filter: when the user has any dietary concern, only items with
+    `allergen_confidence == 'derived'` AND no overlap with `excluded` survive.
+
+    Fail-closed: items whose graph is incomplete (we can't trust their
+    allergen list) are dropped whenever an exclusion is set. Without
+    exclusions the menu is returned untouched.
 
     Pure post-fetch transform — preserves the cached menu for other callers.
-    Item dicts are kept as-is (not mutated).
     """
     excluded = _normalize_excluded(excluded_allergens)
     if not excluded:
         return menu
     return {
-        cat: [it for it in items if not _item_unsafe_allergens(it, excluded)]
+        cat: [
+            it for it in items
+            if _item_confidence(it) == "derived"
+            and not _item_unsafe_allergens(it, excluded)
+        ]
         for cat, items in menu.items()
     }
+
+
+# Maps a user's excluded allergen → display phrase used in fallback copy.
+# Order matters: most-specific first so "tree_nuts, peanuts" → "nut-free"
+# rather than "tree-nut-free + peanut-free".
+_ALLERGEN_PHRASE: dict[str, str] = {
+    "tree_nuts": "nut-free",
+    "peanuts": "nut-free",
+    "dairy": "dairy-free",
+    "egg": "egg-free",
+    "fish": "fish-free",
+    "shellfish": "shellfish-free",
+    "wheat": "wheat-free",
+    "gluten": "gluten-free",
+    "soy": "soy-free",
+    "sesame": "sesame-free",
+}
+
+
+def friendly_allergen_phrase(excluded_allergens: Optional[Iterable[str]]) -> str:
+    """Render an exclusion set as user-facing copy.
+
+    Examples:
+      ['tree_nuts'] → 'nut-free'
+      ['dairy', 'tree_nuts'] → 'dairy-free, nut-free'
+      [] → '' (caller decides what to show)
+    """
+    excluded = _normalize_excluded(excluded_allergens)
+    if not excluded:
+        return ""
+    seen: list[str] = []
+    for a in sorted(excluded):
+        phrase = _ALLERGEN_PHRASE.get(a, f"{a}-free")
+        if phrase not in seen:
+            seen.append(phrase)
+    return ", ".join(seen)
+
+
+def safe_alternatives_from_items(
+    items: Iterable[dict],
+    excluded_allergens: Optional[Iterable[str]],
+    *,
+    exclude_names: Optional[Iterable[str]] = None,
+    limit: int = 3,
+) -> list[dict]:
+    """Pick up to `limit` items that pass the strict allergen filter.
+
+    Used to build "here are safe alternatives" copy when a user picks an
+    unsafe item or when a slot's filtered menu is sparse. Intentionally
+    re-applies `filter_excluded_allergens` instead of trusting the caller —
+    so a fallback path can never relax the safety contract by accident.
+    `exclude_names` drops items the user already saw or already chose
+    (case-insensitive), so we don't suggest the same blocked item back.
+    """
+    drop = {(n or "").lower().strip() for n in (exclude_names or []) if n}
+    safe = filter_excluded_allergens({"_alts": list(items or [])}, excluded_allergens)
+    out: list[dict] = []
+    for it in safe.get("_alts", []):
+        name = str(it.get("name") or "").strip()
+        if not name or name.lower() in drop:
+            continue
+        out.append(it)
+        if len(out) >= max(0, int(limit)):
+            break
+    return out
 
 
 def annotate_allergen_safety(
     items: Iterable[dict],
     excluded_allergens: Optional[Iterable[str]],
 ) -> list[dict]:
-    """Soft annotate: attach `is_safe` + `unsafe_allergens` per item.
+    """Soft annotate: attach `is_safe`, `unsafe_allergens`, `allergen_confidence`.
 
-    Use for review/conflict-detection paths (e.g. S19 recap) where the AI
-    must NOT decide safety from arrays — it reads a boolean.
+    Use for review/conflict-detection paths (S19 recap) where the AI must
+    read a boolean, not interpret the allergen array. Three-state semantics:
+
+      - confidence='incomplete' (any concern set) → is_safe=false,
+        unsafe_allergens=['unknown'] — caller can surface "data incomplete"
+      - confidence='derived' + overlap → is_safe=false, unsafe_allergens=[…]
+      - confidence='derived' + no overlap → is_safe=true, unsafe_allergens=[]
     """
     excluded = _normalize_excluded(excluded_allergens)
     out: list[dict] = []
     for it in items or []:
+        confidence = _item_confidence(it)
+        if excluded and confidence != "derived":
+            out.append({
+                **it,
+                "is_safe": False,
+                "unsafe_allergens": ["unknown"],
+                "allergen_confidence": confidence,
+            })
+            continue
         unsafe = _item_unsafe_allergens(it, excluded)
-        out.append({**it, "is_safe": not unsafe, "unsafe_allergens": unsafe})
+        out.append({
+            **it,
+            "is_safe": not unsafe,
+            "unsafe_allergens": unsafe,
+            "allergen_confidence": confidence,
+        })
     return out
 
 
 async def load_main_dish_menu(
-    excluded_allergens: Optional[Iterable[str]] = None,
+    excluded_allergens=_UNSET,
 ) -> dict[str, list[dict]]:
+    excluded_allergens = _guard_excluded(excluded_allergens, "load_main_dish_menu")
     menu = await _load_cached_menu()
     scoped = {
         cat: items
@@ -147,8 +310,9 @@ async def load_main_dish_menu(
 
 
 async def load_appetizer_menu(
-    excluded_allergens: Optional[Iterable[str]] = None,
+    excluded_allergens=_UNSET,
 ) -> dict[str, list[dict]]:
+    excluded_allergens = _guard_excluded(excluded_allergens, "load_appetizer_menu")
     menu = await _load_cached_menu()
     scoped = {cat: items for cat, items in menu.items() if is_appetizer_category(cat)}
     return filter_excluded_allergens(scoped, excluded_allergens)
@@ -156,9 +320,10 @@ async def load_appetizer_menu(
 
 async def load_dessert_menu_expanded(
     is_wedding: bool = False,
-    excluded_allergens: Optional[Iterable[str]] = None,
+    excluded_allergens=_UNSET,
 ) -> list[dict]:
     """Flat list of desserts with mini-dessert bundle expanded into sub-items."""
+    excluded_allergens = _guard_excluded(excluded_allergens, "load_dessert_menu_expanded")
     menu = await _load_cached_menu()
     out: list[dict] = []
     for cat_name, cat_items in menu.items():
@@ -183,13 +348,18 @@ async def load_dessert_menu_expanded(
                                 "unit_price": item.get("unit_price"),
                                 "price_type": item.get("price_type", "per_person"),
                                 "allergens": list(item.get("allergens") or []),
+                                "allergen_confidence": _item_confidence(item),
                             }
                         )
             else:
                 out.append(item)
     excluded = _normalize_excluded(excluded_allergens)
     if excluded:
-        out = [it for it in out if not _item_unsafe_allergens(it, excluded)]
+        out = [
+            it for it in out
+            if _item_confidence(it) == "derived"
+            and not _item_unsafe_allergens(it, excluded)
+        ]
     return out
 
 
@@ -568,8 +738,13 @@ async def resolve_dessert_choices(
     *,
     is_wedding: bool = False,
     existing_names: Optional[Iterable[str]] = None,
+    excluded_allergens=_UNSET,
 ) -> MenuResolution:
-    expanded = await load_dessert_menu_expanded(is_wedding=is_wedding)
+    excluded_allergens = _guard_excluded(excluded_allergens, "resolve_dessert_choices")
+    expanded = await load_dessert_menu_expanded(
+        is_wedding=is_wedding,
+        excluded_allergens=excluded_allergens,
+    )
     return await resolve_menu_items(
         list(raw_names),
         menu={"Desserts": expanded},
@@ -582,11 +757,14 @@ async def resolve_desserts(
     *,
     is_wedding: bool = False,
     existing_names: Optional[Iterable[str]] = None,
+    excluded_allergens=_UNSET,
 ) -> list[dict]:
+    excluded_allergens = _guard_excluded(excluded_allergens, "resolve_desserts")
     resolution = await resolve_dessert_choices(
         raw_names,
         is_wedding=is_wedding,
         existing_names=existing_names,
+        excluded_allergens=excluded_allergens,
     )
     return resolution.matched_items
 
@@ -598,6 +776,8 @@ __all__ = [
     "filter_excluded_allergens",
     "filter_menu_items_by_tags",
     "format_items",
+    "friendly_allergen_phrase",
+    "safe_alternatives_from_items",
     "is_appetizer_category",
     "is_dessert_category",
     "is_non_dish_category",

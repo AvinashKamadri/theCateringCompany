@@ -107,6 +107,41 @@ body {
   to   { opacity: 1; }
 }
 
+/* ── Corner decoration enter (per edge) ─────────────────── */
+@keyframes cd-enter-top {
+  from { opacity: 0; translate: 0 -18px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+@keyframes cd-enter-left {
+  from { opacity: 0; translate: -18px 0; }
+  to   { opacity: 1; translate: 0 0; }
+}
+@keyframes cd-enter-right {
+  from { opacity: 0; translate: 18px 0; }
+  to   { opacity: 1; translate: 0 0; }
+}
+
+/* ── Page transition (enter / exit) ─────────────────────── */
+@keyframes tc-page-in {
+  from { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.992); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0)    scale(1); }
+}
+@keyframes tc-page-out {
+  from { opacity: 1; transform: translate3d(0, 0, 0)    scale(1); }
+  to   { opacity: 0; transform: translate3d(0, -8px, 0) scale(0.996); }
+}
+
+.tc-transition-root { }
+
+.tc-transition-root[data-phase="entering"] {
+  animation: tc-page-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.tc-transition-root[data-phase="exiting"] {
+  animation: tc-page-out 180ms cubic-bezier(0.55, 0, 1, 0.45) both;
+  pointer-events: none;
+}
+
+/* Legacy per-element enter (still used by chat/other one-off screens) */
 .tc-msg-user    { animation: tc-slide-in-right 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .tc-msg-ai      { animation: tc-slide-in-left 280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .tc-page-enter  { animation: tc-fade-in-up 340ms cubic-bezier(0.22, 1, 0.36, 1) both; }
@@ -114,7 +149,13 @@ body {
 .tc-fade-in     { animation: tc-fade-in 260ms ease-out both; }
 
 @media (prefers-reduced-motion: reduce) {
-  .tc-msg-user, .tc-msg-ai, .tc-page-enter, .tc-pop-in, .tc-fade-in { animation: none !important; }
+  .tc-transition-root,
+  .tc-msg-user, .tc-msg-ai, .tc-page-enter, .tc-pop-in, .tc-fade-in {
+    animation: none !important;
+  }
+  /* Corner decorations use inline animationName — override via a class or
+     the global * rule so reduced-motion users don't see them fly in. */
+  * { animation-duration: 0.01ms !important; animation-delay: 0ms !important; }
 }
 
 /* ── Confetti ────────────────────────────────────────────── */

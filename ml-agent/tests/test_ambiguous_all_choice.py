@@ -19,7 +19,7 @@ from agent.state import (  # noqa: E402
 async def test_pending_menu_choice_all_selects_all_options(monkeypatch) -> None:
     import agent.tools.menu_selection_tool as menu_tool_module
 
-    async def fake_load_appetizer_menu():
+    async def fake_load_appetizer_menu(**_kwargs):
         return {
             "Seafood": [
                 {"name": "Firecracker Shrimp", "unit_price": 4.75, "price_type": "per_person"},
@@ -28,7 +28,7 @@ async def test_pending_menu_choice_all_selects_all_options(monkeypatch) -> None:
             ]
         }
 
-    async def fake_load_main_dish_menu():
+    async def fake_load_main_dish_menu(**_kwargs):
         return {
             "Signature Combinations": [
                 {"name": "Chicken Piccata", "unit_price": 29.49, "price_type": "per_person"},

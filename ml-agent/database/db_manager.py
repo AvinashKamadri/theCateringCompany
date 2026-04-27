@@ -402,6 +402,7 @@ async def load_menu_items(active_only: bool = True) -> list[dict]:
             "price_type": str(row.price_type) if row.price_type else None,
             "minimum_quantity": row.minimum_quantity,
             "allergens": row.allergens,
+            "allergen_confidence": str(row.allergen_confidence) if getattr(row, "allergen_confidence", None) else "incomplete",
             "tags": row.tags,
             "is_upsell": row.is_upsell,
         }
@@ -440,6 +441,7 @@ async def load_menu_by_category(active_only: bool = True) -> dict[str, list[dict
                 "unit_price": float(item.unit_price) if item.unit_price else None,
                 "price_type": str(item.price_type) if item.price_type else None,
                 "allergens": item.allergens,
+                "allergen_confidence": str(item.allergen_confidence) if getattr(item, "allergen_confidence", None) else "incomplete",
                 "tags": item.tags,
                 "is_upsell": item.is_upsell,
             }

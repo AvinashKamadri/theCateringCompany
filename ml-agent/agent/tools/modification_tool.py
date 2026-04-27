@@ -17,9 +17,12 @@ Rules this tool enforces:
 from __future__ import annotations
 
 import json
+import logging
 import re
 import datetime
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 from langchain_core.messages import BaseMessage
 
@@ -43,6 +46,7 @@ from agent.list_slot_reopen import (
 from agent.menu_resolver import (
     filter_menu_items_by_tags,
     format_items,
+    friendly_allergen_phrase,
     load_appetizer_menu,
     load_dessert_menu_expanded,
     load_main_dish_menu,
@@ -51,7 +55,9 @@ from agent.menu_resolver import (
     resolve_dessert_choices,
     resolve_menu_items,
     resolve_to_db_items,
+    safe_alternatives_from_items,
 )
+from agent.tools.menu_selection_tool import _user_excluded_allergens
 from agent.models import (
     EventDetailsExtraction,
     ModificationExtraction,
@@ -1500,6 +1506,7 @@ class ModificationTool:
         added_items_resolved: list[dict] = []
         already_selected: list[str] = []
         unavailable: list[str] = []
+        blocked_for_safety: list[dict] = []  # [{name, unsafe_allergens, alternatives}]
         if add_texts:
             # Track items the user requested that are already in their selection.
             for t in add_texts:
@@ -1511,6 +1518,7 @@ class ModificationTool:
                     add_texts,
                     is_wedding="wedding" in event_type,
                     existing_names=remaining,
+                    excluded_allergens=_user_excluded_allergens(slots),
                 )
                 if dessert_resolution.ambiguous_choices:
                     ambiguous = dessert_resolution.ambiguous_choices[0]
@@ -1586,8 +1594,37 @@ class ModificationTool:
                             message=message,
                         )
                 # Nothing resolved anywhere and it isn't already selected: treat as unavailable.
+                # But first: distinguish "blocked by allergen filter" from "doesn't exist".
+                # If the user has dietary concerns AND the requested item exists in the
+                # unfiltered slot menu, it was filtered out for safety — surface that
+                # plus a few safe alternatives instead of a flat "not found".
+                excluded = _user_excluded_allergens(slots)
+                unfiltered_items = await self._unfiltered_slot_items(target_slot, slots) if excluded else []
                 for t in add_texts:
                     if _matching_names(current_items, t):
+                        continue
+                    blocked = _match_blocked_for_safety(t, unfiltered_items, excluded) if excluded else None
+                    if blocked is not None:
+                        alts = safe_alternatives_from_items(
+                            unfiltered_items,
+                            excluded,
+                            exclude_names=[blocked["name"]],
+                            limit=3,
+                        )
+                        blocked_for_safety.append({
+                            "name": blocked["name"],
+                            "unsafe_allergens": blocked["unsafe_allergens"],
+                            "alternatives": [a["name"] for a in alts],
+                        })
+                        _logger.info(
+                            "allergen_fallback_used kind=%s excluded=%s reason=%s requested=%r unsafe=%s n_alts=%d",
+                            target_slot,
+                            sorted(excluded),
+                            "blocked_add",
+                            blocked["name"],
+                            blocked["unsafe_allergens"],
+                            len(alts),
+                        )
                         continue
                     unavailable.append(t)
 
@@ -1832,7 +1869,8 @@ class ModificationTool:
         final_value: str
         if target_slot == "desserts":
             expanded = await load_dessert_menu_expanded(
-                is_wedding="wedding" in (get_slot_value(slots, "event_type") or "").lower()
+                is_wedding="wedding" in (get_slot_value(slots, "event_type") or "").lower(),
+                excluded_allergens=_user_excluded_allergens(slots),
             )
             by_name = {i["name"].lower(): i for i in expanded}
             final_items = [by_name[n.lower()] for n in combined_names if n.lower() in by_name]
@@ -1878,6 +1916,10 @@ class ModificationTool:
                 added=added_names,
                 new_value=final_value,
             )
+        if blocked_for_safety:
+            blocked_excluded = _user_excluded_allergens(slots)
+            blocked_msg = _format_blocked_for_safety(blocked_for_safety, blocked_excluded)
+            direct = f"{blocked_msg}\n\n{direct}".strip() if direct else blocked_msg
         next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
             slots=slots,
             state=state,
@@ -1894,6 +1936,7 @@ class ModificationTool:
                     "added": added_names,
                     "already_selected": sorted({n for n in already_selected if n}),
                     "unavailable": [t for t in unavailable if t],
+                    "blocked_for_safety": blocked_for_safety,
                     "additional_changes": (
                         [
                             {
@@ -2479,6 +2522,7 @@ class ModificationTool:
                 add_texts,
                 is_wedding="wedding" in event_type,
                 existing_names=existing_names,
+                excluded_allergens=_user_excluded_allergens(slots),
             )
             return dessert_resolution.matched_items
         menu = await self._menu_for_slot(slot, slots)
@@ -2498,7 +2542,8 @@ class ModificationTool:
     ) -> str:
         if slot == "desserts":
             expanded = await load_dessert_menu_expanded(
-                is_wedding="wedding" in (get_slot_value(slots, "event_type") or "").lower()
+                is_wedding="wedding" in (get_slot_value(slots, "event_type") or "").lower(),
+                excluded_allergens=_user_excluded_allergens(slots),
             )
             by_name = {i["name"].lower(): i for i in expanded}
             final_items = [by_name[n.lower()] for n in combined_names if n.lower() in by_name]
@@ -3672,24 +3717,34 @@ class ModificationTool:
     ) -> tuple[str | None, dict | None]:
         """Format the catalog for `target_slot` as a numbered list (so the
         frontend renders selectable cards) plus an input_hint."""
+        excluded = _user_excluded_allergens(slots)
         if target_slot == "appetizers":
-            menu = await load_appetizer_menu()
-            return _format_scoped_menu(menu, "appetizers"), {
+            menu = await load_appetizer_menu(excluded_allergens=excluded)
+            text = _format_scoped_menu(menu, "appetizers")
+            if not text:
+                text = _empty_slot_fallback("appetizers", excluded)
+            return text, {
                 "type": "menu_picker",
                 "category": "appetizers",
                 "menu": _serialize_menu(menu),
             }
         if target_slot == "selected_dishes":
-            menu = await load_main_dish_menu()
-            return _format_scoped_menu(menu, "dishes"), {
+            menu = await load_main_dish_menu(excluded_allergens=excluded)
+            text = _format_scoped_menu(menu, "dishes")
+            if not text:
+                text = _empty_slot_fallback("dishes", excluded)
+            return text, {
                 "type": "menu_picker",
                 "category": "dishes",
                 "menu": _serialize_menu(menu),
             }
         if target_slot == "desserts":
             is_wedding = "wedding" in (get_slot_value(slots, "event_type") or "").lower()
-            items = await load_dessert_menu_expanded(is_wedding=is_wedding)
-            return _format_flat_menu(items), {
+            items = await load_dessert_menu_expanded(is_wedding=is_wedding, excluded_allergens=excluded)
+            text = _format_flat_menu(items)
+            if not text:
+                text = _empty_slot_fallback("desserts", excluded)
+            return text, {
                 "type": "menu_picker",
                 "category": "desserts",
                 "items": items,
@@ -3697,11 +3752,31 @@ class ModificationTool:
             }
         return None, None
 
-    async def _menu_for_slot(self, slot: str, slots: dict) -> dict[str, list[dict]]:
+    async def _unfiltered_slot_items(self, slot: str, slots: dict) -> list[dict]:
+        """Return the slot's catalog with NO allergen filter applied.
+
+        Used only to distinguish "blocked by safety" from "doesn't exist" so
+        we can show alternatives instead of a flat "not found". Never used
+        for selection — the safety contract is preserved by re-filtering
+        when alternatives are picked.
+        """
         if slot == "appetizers":
-            return await load_appetizer_menu()
+            menu = await load_appetizer_menu(excluded_allergens=[])
+            return [it for items in menu.values() for it in items]
         if slot == "selected_dishes":
-            return await load_main_dish_menu()
+            menu = await load_main_dish_menu(excluded_allergens=[])
+            return [it for items in menu.values() for it in items]
+        if slot == "desserts":
+            is_wedding = "wedding" in (get_slot_value(slots, "event_type") or "").lower()
+            return await load_dessert_menu_expanded(is_wedding=is_wedding, excluded_allergens=[])
+        return []
+
+    async def _menu_for_slot(self, slot: str, slots: dict) -> dict[str, list[dict]]:
+        excluded = _user_excluded_allergens(slots)
+        if slot == "appetizers":
+            return await load_appetizer_menu(excluded_allergens=excluded)
+        if slot == "selected_dishes":
+            return await load_main_dish_menu(excluded_allergens=excluded)
         if slot == "desserts":
             # Desserts use the expanded list — return empty so callers use
             # `resolve_desserts` directly.
@@ -3771,6 +3846,100 @@ def _serialize_menu(menu: dict[str, list[dict]]) -> list[dict]:
         }
         for cat, items in menu.items()
     ]
+
+
+_SLOT_KIND_NOUN: dict[str, str] = {
+    "appetizers": "appetizer",
+    "dishes": "main dish",
+    "desserts": "dessert",
+}
+
+
+def _match_blocked_for_safety(
+    raw_text: str,
+    unfiltered_items: list[dict],
+    excluded,
+) -> dict | None:
+    """Return {name, unsafe_allergens} if `raw_text` matches an item that
+    exists in the unfiltered menu but would be blocked by the allergen
+    filter. Substring (case-insensitive) match is intentional — the user
+    typed "tiramisu", we want to recognise "Classic Tiramisu" too.
+    Returns None if the raw text doesn't correspond to a real menu item
+    (truly unknown) or matches a safe item (then resolver should have
+    handled it; not our problem)."""
+    from agent.menu_resolver import _normalize_excluded, _item_unsafe_allergens, _item_confidence
+    excluded_set = _normalize_excluded(excluded)
+    needle = (raw_text or "").lower().strip()
+    if not needle or not excluded_set:
+        return None
+    for it in unfiltered_items:
+        name = str(it.get("name") or "").strip()
+        if not name:
+            continue
+        nl = name.lower()
+        if needle != nl and needle not in nl and nl not in needle:
+            continue
+        confidence = _item_confidence(it)
+        unsafe = _item_unsafe_allergens(it, excluded_set)
+        if confidence != "derived":
+            return {"name": name, "unsafe_allergens": ["unknown"]}
+        if unsafe:
+            return {"name": name, "unsafe_allergens": unsafe}
+        # Matched a safe item — resolver should have caught it; don't mask.
+        return None
+    return None
+
+
+def _format_blocked_for_safety(
+    blocked: list[dict],
+    excluded,
+) -> str:
+    """Render the `blocked_for_safety` collection as a single user-facing
+    paragraph. Groups all blocked items into one block so we don't repeat
+    the exclusion phrase per item."""
+    if not blocked:
+        return ""
+    phrase = friendly_allergen_phrase(excluded)
+    qualifier = f" ({phrase})" if phrase else ""
+    lines: list[str] = []
+    for entry in blocked:
+        name = entry["name"]
+        alts = entry.get("alternatives") or []
+        line = f"⚠ {name} isn't safe for your dietary preferences{qualifier}."
+        if alts:
+            line += f" Safe alternatives: {', '.join(alts)}."
+        else:
+            line += " I couldn't find a close safe alternative — try skipping or asking for a custom option."
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _empty_slot_fallback(kind: str, excluded) -> str:
+    """User-facing copy when the strict allergen filter leaves a slot empty.
+
+    Strict filter exhausted the same slot (no item is both `derived` and
+    free of the user's excluded allergens) — broadening within the same
+    slot via tags would either return the same items or cross the safety
+    line, so we acknowledge and offer the safe escape hatches instead.
+    """
+    phrase = friendly_allergen_phrase(excluded)
+    noun = _SLOT_KIND_NOUN.get(kind, "item")
+    _logger.info(
+        "allergen_fallback_used kind=%s excluded=%s reason=%s",
+        kind,
+        sorted(excluded) if excluded else [],
+        "empty_slot",
+    )
+    if phrase:
+        return (
+            f"I couldn't find any {phrase} {noun}s on the current menu. "
+            f"You can skip this course, or reply with a custom request and "
+            f"we'll check with the kitchen."
+        )
+    return (
+        f"No {noun}s available right now. "
+        f"You can skip this course or reply with a custom request."
+    )
 
 
 def _format_scoped_menu(menu: dict[str, list[dict]], kind: str) -> str:

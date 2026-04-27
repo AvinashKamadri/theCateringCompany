@@ -26,10 +26,10 @@ async def test_main_menu_phase_ignores_wrong_category_hint(monkeypatch) -> None:
             category_hint="appetizers",
         )
 
-    async def fake_load_appetizer_menu():
+    async def fake_load_appetizer_menu(**_kwargs):
         raise AssertionError("Should not resolve mains against appetizer menu")
 
-    async def fake_load_main_dish_menu():
+    async def fake_load_main_dish_menu(**_kwargs):
         return {
             "Signature Combinations": [
                 {"name": "Chicken Piccata", "unit_price": 29.49, "price_type": "per_person"},

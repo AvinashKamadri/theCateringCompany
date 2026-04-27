@@ -515,6 +515,7 @@ model menu_items {
   price_type                price_type?
   minimum_quantity          Int                         @default(1)
   allergens                 String[]
+  allergen_confidence       allergen_confidence         @default(incomplete)
   tags                      String[]
   is_upsell                 Boolean                     @default(false)
   active                    Boolean                     @default(true)
@@ -1286,6 +1287,11 @@ enum webhook_status {
   processed
   failed
   duplicate
+}
+
+enum allergen_confidence {
+  derived
+  incomplete
 }
 
 model ingredients {

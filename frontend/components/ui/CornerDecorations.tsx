@@ -46,8 +46,12 @@ function strSeed(str: string) {
   return h;
 }
 
+type Edge = 'top' | 'left' | 'right';
+
 type Placement = {
   src: string;
+  edge: Edge;
+  delay: number; // ms
   style: React.CSSProperties;
 };
 
@@ -71,50 +75,81 @@ function buildPlacements(pathname: string): Placement[] {
   const placements: Placement[] = [];
   let idx = 0;
 
+  let delayBase = 0;
+
   // ── TOP edge — 4 images spread horizontally, partially cropped at top ──
   const topPositions = [8, 28, 68, 88]; // % from left
   for (const leftPct of topPositions) {
     const size = w();
-    placements.push({ src: src(idx++), style: {
-      position: 'absolute',
-      top: -(size * 0.35),
-      left: `${leftPct}%`,
-      width: size,
-      transform: `translateX(-50%) rotate(${rot()}deg)`,
-      opacity: op(),
-    }});
+    const rotation = rot();
+    placements.push({
+      src: src(idx++),
+      edge: 'top',
+      delay: delayBase,
+      style: {
+        position: 'absolute',
+        top: -(size * 0.35),
+        left: `${leftPct}%`,
+        width: size,
+        // base transform without opacity — animation handles those
+        transform: `translateX(-50%) rotate(${rotation}deg)`,
+        opacity: op(),
+      },
+    });
+    delayBase += 55 + Math.floor(rand() * 60);
   }
 
   // ── LEFT edge — 3 images spread vertically ──
   const leftPositions = [18, 45, 75];
   for (const topPct of leftPositions) {
     const size = w();
-    placements.push({ src: src(idx++), style: {
-      position: 'absolute',
-      left: -(size * 0.4),
-      top: `${topPct}%`,
-      width: size,
-      transform: `translateY(-50%) rotate(${rot()}deg)`,
-      opacity: op(),
-    }});
+    const rotation = rot();
+    placements.push({
+      src: src(idx++),
+      edge: 'left',
+      delay: delayBase,
+      style: {
+        position: 'absolute',
+        left: -(size * 0.4),
+        top: `${topPct}%`,
+        width: size,
+        transform: `translateY(-50%) rotate(${rotation}deg)`,
+        opacity: op(),
+      },
+    });
+    delayBase += 55 + Math.floor(rand() * 60);
   }
 
   // ── RIGHT edge — 3 images spread vertically ──
   const rightPositions = [22, 50, 78];
   for (const topPct of rightPositions) {
     const size = w();
-    placements.push({ src: src(idx++), style: {
-      position: 'absolute',
-      right: -(size * 0.4),
-      top: `${topPct}%`,
-      width: size,
-      transform: `translateY(-50%) rotate(${rot()}deg)`,
-      opacity: op(),
-    }});
+    const rotation = rot();
+    placements.push({
+      src: src(idx++),
+      edge: 'right',
+      delay: delayBase,
+      style: {
+        position: 'absolute',
+        right: -(size * 0.4),
+        top: `${topPct}%`,
+        width: size,
+        transform: `translateY(-50%) rotate(${rotation}deg)`,
+        opacity: op(),
+      },
+    });
+    delayBase += 55 + Math.floor(rand() * 60);
   }
 
   return placements;
 }
+
+// Per-edge keyframe names — each drifts in from its own screen edge.
+const ANIM: Record<Edge, string> = {
+  top:   'cd-enter-top',
+  left:  'cd-enter-left',
+  right: 'cd-enter-right',
+};
 
 export default function CornerDecorations() {
   const pathname = usePathname() ?? '/';
@@ -127,7 +162,20 @@ export default function CornerDecorations() {
       aria-hidden="true"
     >
       {items.map((img, i) => (
-        <img key={i} src={img.src} alt="" draggable={false} style={img.style} />
+        <img
+          key={`${pathname}-${i}`}
+          src={img.src}
+          alt=""
+          draggable={false}
+          style={{
+            ...img.style,
+            animationName: ANIM[img.edge],
+            animationDuration: '600ms',
+            animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            animationFillMode: 'both',
+            animationDelay: `${img.delay}ms`,
+          }}
+        />
       ))}
     </div>
   );

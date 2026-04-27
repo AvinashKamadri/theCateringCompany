@@ -23,7 +23,7 @@ async def test_appetizer_style_not_filled_from_acknowledgement(monkeypatch) -> N
         # Simulate an extractor hallucinating appetizer_style on a short "ok".
         return MenuSelectionExtraction(appetizer_style="passed")
 
-    async def fake_load_appetizer_menu():
+    async def fake_load_appetizer_menu(**_kwargs):
         return {
             "Appetizers": [
                 {"name": "Brie Bites", "unit_price": 3.00, "price_type": "per_person"},

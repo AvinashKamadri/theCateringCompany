@@ -22,7 +22,7 @@ async def test_add_all_desserts_reopen_warns_about_max_four(monkeypatch) -> None
     async def fake_extract(**_kwargs):
         return ModificationExtraction(target_slot="desserts", action="reopen")
 
-    async def fake_load_dessert_menu_expanded(*, is_wedding: bool = False):
+    async def fake_load_dessert_menu_expanded(*, is_wedding: bool = False, **_kwargs):
         return [
             {"name": "7-Layer Bars", "unit_price": 5.25, "price_type": "per_person"},
             {"name": "Blondies", "unit_price": 5.25, "price_type": "per_person"},

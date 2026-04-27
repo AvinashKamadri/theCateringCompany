@@ -224,8 +224,9 @@ model menu_items {
   currency         String          @default("USD") @db.Char(3)
   price_type       price_type?
   minimum_quantity Int             @default(1)
-  allergens        String[]
-  tags             String[]
+  allergens           String[]
+  allergen_confidence allergen_confidence @default(incomplete)
+  tags                String[]
   is_upsell        Boolean         @default(false)
   active           Boolean         @default(true)
   created_at       DateTime        @default(now()) @db.Timestamptz(6)
@@ -329,4 +330,9 @@ enum esign_provider {
   docusign
   hellosign
   internal
+}
+
+enum allergen_confidence {
+  derived
+  incomplete
 }

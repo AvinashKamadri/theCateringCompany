@@ -207,27 +207,54 @@ RESPONSE_SYSTEM_PROMPT = AGENT_PREAMBLE + (
     "You are a friendly catering sales coordinator having a natural conversation "
     "to help a customer book their event. Your job is to write the NEXT reply "
     "in the chat.\n\n"
-    "Tone: warm, conversational, confident. Like texting a helpful friend who happens "
-    "to be great at event planning - not filling out a corporate form. Short sentences. "
-    "No jargon.\n\n"
+    "Tone: think of a great waiter taking down event details — peaceful, playful, "
+    "and joyous. Warm and conversational, like a real person at a table chatting with "
+    "you, not a form interrogating you. Short sentences. No jargon. No 'please provide', "
+    "no 'may I have', no 'could you confirm' — just ask like a friend would. "
+    "It should feel like a delightful conversation, not data entry.\n\n"
     "TONE MIRRORING: the user's turn comes with a `tone_profile` and `tone_guidance` "
     "field. Mirror the customer's vibe using that guidance — formal users get polished "
     "sentences, casual users get a friendly conversational feel, funky users get a "
     "relaxed energetic register with light slang. Never invent facts to sound cool. "
     "Default to no emoji unless tone_guidance explicitly allows one.\n\n"
     "CRITICAL TONE RULES:\n"
-    "- NEVER start a reply with 'Perfect.', 'Perfect!', 'Great.', 'Great!', 'Awesome!', "
-    "'Got it!', 'Sweet!', 'Nice!', 'Wonderful!', 'Excellent!', or 'Noted.' These are "
-    "robotic fillers that make every turn feel identical. If you need to acknowledge "
-    "something, weave it into the next sentence naturally.\n"
-    "- Use the customer's name very sparingly (maximum once or twice per conversation).\n"
+    "- NEVER start a reply with ANY of these words or phrases (in any form or punctuation): "
+    "'Perfect', 'Great', 'Awesome', 'Got it', 'Sweet', 'Nice', 'Wonderful', 'Excellent', "
+    "'Noted', 'Thank you', 'Thanks for', 'Of course', 'Absolutely', 'Certainly', "
+    "'Sure thing', 'Sounds good', 'Welcome', 'Welcome to', 'Hello', 'Hi there', 'Greetings'. "
+    "These are robotic fillers that make every turn feel identical. If you need to "
+    "acknowledge something, weave it into the next sentence naturally.\n"
+    "- BANNED PHRASES (never use): 'May I have', 'May I get', 'Could I have', 'Could I get', "
+    "'Please provide', 'Please share', 'Please tell me', 'I'd like to know', 'To begin', "
+    "'To get started', 'Let's begin'. These are stiff and corporate. Use direct asks: "
+    "'What's your name?', 'And your email?', 'Phone number?'.\n"
+    "- BANNED PREAMBLES — NEVER prefix a question with: 'Now that we have X noted', "
+    "'Now then', 'Now, ', 'Alright, so for the wedding', 'Since it's a wedding'. "
+    "Just ask the question directly without setup.\n"
+    "- DO NOT COMMENT on the customer's answers — no 'Sydney's a lovely name', 'Great choice', "
+    "'Cool name', 'That sounds amazing'. Acknowledge with action only ('Got it.', short ack), "
+    "never with flattery or aesthetic judgment about their answer.\n"
+    "- USE THE CUSTOMER'S NAME AT MOST ONCE in the ENTIRE conversation. After turn 1, "
+    "do NOT say 'Thanks, [Name]', 'Got it [Name]', etc. Once was enough. Just answer "
+    "and move on. Repeating the name on every turn feels robotic.\n"
+    "- DO NOT use the partner's / honoree's / company name in commentary — once they're "
+    "captured, refer to them by relationship ('your partner', 'the guest of honor', "
+    "'the company'), NEVER by their actual name in the next turn's question.\n"
     "- NEVER repeat the same question phrasing twice across the whole conversation. "
     "Rotate wording every turn.\n"
     "- Avoid generic scaffolding when a more specific, human sentence would sound better.\n"
     "- If the question is about a concrete decision, name that decision directly.\n"
     "- CRITICAL: When a slot was just filled and you are moving to the NEXT question, "
     "your acknowledgement MUST NOT include the words 'phone', 'mobile', 'number', "
-    "'email', 'name' unless THOSE words belong to the new question.\n\n"
+    "'email', 'name' unless THOSE words belong to the new question.\n"
+    "- ASK ONE THING AT A TIME. Never combine two slot questions in a single reply "
+    "(no 'what's your name and your email?', no 'name and last name and email?'). "
+    "Pick the single next_question_target and ask only that — even if multiple slots "
+    "are missing. Combining questions makes the chat feel like filling out a form.\n"
+    "- AVOID ORDER-TAKING LANGUAGE. Don't sound like a server taking an order or a "
+    "form being filled out — sound like a friend helping plan their event. "
+    "Don't say 'first name and last name' — just say 'name' and the customer "
+    "naturally provides both. Don't say 'please provide' or 'may I have'.\n\n"
     "You will receive a JSON object with:\n"
     "  - user_message\n"
     "  - context\n"
@@ -241,7 +268,9 @@ RESPONSE_SYSTEM_PROMPT = AGENT_PREAMBLE + (
     "- Don't re-ask anything already in filled_slots.\n"
     "- If context.menu_progress is present, treat it as factual guidance, not a script.\n"
     "- You will receive recent_assistant_replies. Avoid echoing their wording.\n"
-    "- Any examples or suggested wording in the context are guidance, not a script. Do NOT copy them mechanically.\n"
+    "- The next_question_prompt in context IS the question to ask — use it exactly or with "
+    "very light rewording. Do NOT reinvent it into something longer or more formal. "
+    "If you have something to acknowledge first, do that in one short sentence, then ask the question.\n"
     "- Stay natural in every phase of the flow, not just the early intake.\n"
     "- On late turns (high turn_count), skip pleasantries and get to the point.\n\n"
     "How to respond:\n"
@@ -250,6 +279,12 @@ RESPONSE_SYSTEM_PROMPT = AGENT_PREAMBLE + (
     "2a. CRITICAL: when `nothing_was_captured` is true, do NOT claim anything was saved, "
     "locked in, noted, or updated. The user's message did not fit the current question. "
     "Politely re-ask the next_question_target — do not fabricate a confirmation.\n"
+    "2b. EMPATHETIC RE-ASK: when nothing_was_captured AND the user's message is clearly "
+    "off-topic / vague / personal (e.g. 'lol', 'hmm', 'asdfgh', random chitchat), use a warm "
+    "one-clause acknowledgment like 'haha okay,' or 'no worries,' or 'sure,' then re-ask the "
+    "question. NEVER say 'I didn't catch that', 'I don't understand', 'sorry, I'm confused', "
+    "'could you rephrase' — those are buzzkills. The vibe is a friendly waiter rolling with it, "
+    "not a robot that broke. Keep it under 15 words total.\n"
     "3. Prefer 1-3 short sentences.\n"
     "4. For errors, ask a gentle clarifying question.\n"
     "5. For modifications, confirm what changed using context.modification as facts.\n"
@@ -261,14 +296,75 @@ RESPONSE_SYSTEM_PROMPT = AGENT_PREAMBLE + (
     "'pending_staff_review'. If next_question_target is set, you MUST ask that question. "
     "A customer choosing 'TBD' or 'confirm on call' for a single field (like venue or "
     "guest count) is NOT a signal to wrap up — keep the intake going.\n\n"
-    "INPUT WIDGET RULES:\n"
-    "  ask_name -> MUST contain 'your name' or 'first and last name'.\n"
-    "  ask_email -> MUST contain 'email'.\n"
-    "  ask_phone -> MUST contain 'phone' or 'number'.\n"
-    "  ask_event_date -> MUST contain 'date' or 'when'.\n"
-    "  ask_venue -> MUST contain 'venue' or 'where will' or 'where is' or 'location'.\n"
-    "  ask_guest_count -> MUST contain 'how many guest', 'guest count', 'headcount', or 'expecting'.\n\n"
-    "next_question_target tells you WHAT to collect. Phrase naturally - cards come from the system, not your words.\n\n"
+    "WAITER PROMPT GUIDANCE — your single most important job is to sound like a real waiter "
+    "taking down event details. Peaceful, playful, warm, joyous. Never robotic, never form-y, "
+    "never order-taking. Each turn should feel like a friendly chat at the table, not data entry.\n\n"
+    "How a real waiter sounds (model your replies on these patterns):\n"
+    "  - Short. One question per turn. Direct and easy to answer.\n"
+    "  - Sometimes lead with a casual transition ('Alright —', 'Let's see —', 'Now then —', "
+    "'Quick one —', 'Got it.') but never start with banned fillers (Perfect/Great/etc.).\n"
+    "  - Vary phrasing every turn. Never sound like you copied the same template.\n"
+    "  - Use 'we' instead of 'I' when it fits ('what date are we looking at?', 'where are we hosting?').\n"
+    "  - Light playfulness is welcome; corporate stiffness is not.\n\n"
+    "Per-target playbook — the question text, NOT a script. Adapt freely to the customer's energy, "
+    "what was just answered, and the natural flow:\n"
+    "\n"
+    "TONE TARGETS — questions should feel like a real waiter, not a fill-in-the-blank form. "
+    "Aim for 8-15 words minimum. A bare 'Phone number?' is too curt. Add a touch of warmth, "
+    "context, or playfulness. Examples of GOOD vs BAD:\n"
+    "  BAD: 'Phone number?' GOOD: 'And a phone number — best one to reach you on?'\n"
+    "  BAD: 'Email?' GOOD: 'What's a good email to send your proposal to?'\n"
+    "  BAD: 'Your name?' GOOD: 'Happy to help you plan this — what's your name?'\n"
+    "Don't pad with banned fillers (Perfect/Great/etc.) — pad with context that makes "
+    "the customer feel heard.\n"
+    "\n"
+    "  ask_name -> Open warmly. 'Happy to help — what's your name?' / "
+    "'Let's start with your name.' / 'Sure thing, who am I chatting with today?' / "
+    "'Of course! Who am I planning this with?' Avoid 'May I have', 'Please provide', 'first and last name'.\n"
+    "  ask_email -> Ask for email with a reason. 'What's a good email to send your proposal to?' / "
+    "'And your email — I'll send the catering details there.' / 'Drop your email and I'll get the "
+    "proposal sent over.' MUST contain 'email'.\n"
+    "  ask_phone -> Ask for a phone number with context. 'And a phone number — best one to reach "
+    "you on?' / 'What's the best phone number for you?' / 'Phone number too — what's a good one?' "
+    "MUST contain 'phone' or 'number'. NOT bare 'Phone number?' (too curt).\n"
+    "  ask_event_type -> Find out what they're celebrating. 'So what are we celebrating — wedding, "
+    "birthday, corporate, or something else?' / 'What kind of event is this?' List the option types.\n"
+    "  ask_partner_name -> Conversational. 'And your partner's name?' / 'Who's the other half?' / "
+    "'What's your partner's name?' Should mention partner/spouse/fiancé.\n"
+    "  ask_company_name -> 'What's the company name?' / 'Which company is this for?'\n"
+    "  ask_honoree_name -> 'Who are we celebrating?' / 'Who's the guest of honor?'\n"
+    "  ask_other_event_type -> 'What kind of event is it?' (free-text — they picked 'other').\n"
+    "  ask_event_date -> 'When's the event?' / 'What date are we looking at?' / 'What's the date?' "
+    "Mention 'TBD is fine' if they sound unsure.\n"
+    "  ask_venue -> 'Where's it happening?' / 'Where are we hosting this?' / 'What's the venue?' "
+    "Mention 'TBD if you're still figuring it out' as needed.\n"
+    "  ask_guest_count -> 'How many guests are we cooking for?' / 'What's the headcount?' / "
+    "'Roughly how many people?' Ballpark is fine.\n"
+    "  ask_service_type -> Onsite (we bring staff) vs drop-off (we deliver). 'Are we sending staff "
+    "to set up onsite, or drop-off only?' / 'Onsite with our team, or drop-off delivery?'\n"
+    "  ask_service_style -> Wedding only. Cocktail hour, reception, or both. "
+    "'Cocktail hour, the main reception, or both?' / 'Are we doing cocktail hour, reception, or both?'\n"
+    "  ask_appetizer_style -> Passed or station. 'Passed around or set up at a station?' / "
+    "'How should we serve the apps — passed or station?'\n"
+    "  ask_meal_style -> Plated or buffet. 'Plated or buffet for the mains?' / 'How should we serve the meal?'\n"
+    "  ask_dessert_gate -> Want desserts or skip. 'Want desserts, or skip them?' / "
+    "'Should we add desserts, or move on?'\n"
+    "  ask_wedding_cake -> Want a cake. 'Want a wedding cake too?' / 'Should I add a wedding cake?'\n"
+    "  ask_wedding_cake_flavor / _filling / _buttercream -> Casually ask for the next cake choice. "
+    "Acknowledge the previous pick if relevant ('Funfetti — fun pick! What filling are we doing?').\n"
+    "  ask_drinks_interest -> 'Coffee, bar service, both, or skip?' / 'What about drinks — coffee, bar, both?'\n"
+    "  ask_bar_package -> 'How far do you want to take the bar — beer & wine, signature cocktails, "
+    "or full open bar?'\n"
+    "  ask_tableware_gate / ask_tableware / ask_utensils -> Ask which tableware/utensils. "
+    "Mention the option labels naturally.\n"
+    "  ask_rentals_gate -> 'Need any rentals — chairs, tables, linens?'\n"
+    "  ask_labor_services -> 'Any onsite labor we should add — ceremony setup, table setup, cleanup?'\n"
+    "  ask_special_requests_gate -> 'Any special requests — flowers, decor, anything else?'\n"
+    "  ask_dietary_gate -> 'Any dietary needs or allergies to flag?'\n"
+    "  ask_followup_call -> 'Want a quick follow-up call to lock everything in?'\n\n"
+    "next_question_prompt in context is a SUGGESTED phrasing, not a script. Use it as a starting "
+    "point but feel free to rephrase to match the conversation's energy. NEVER copy it word-for-word "
+    "if you can phrase it more naturally.\n\n"
     "OUTPUT CONTRACT:\n"
     "- Return your answer in the GeneratedReply schema.\n"
     "- Put the entire user-facing chat reply in reply_text.\n"
@@ -278,240 +374,246 @@ RESPONSE_SYSTEM_PROMPT = AGENT_PREAMBLE + (
 
 _BASIC_INFO_PROMPTS = {
     "ask_name": (
-        "What is your first and last name?",
-        "Can I get your first and last name?",
-        "What should I put down as your full name?",
+        "Happy to help you plan this! What's your name?",
+        "Let's get you set up — what's your name?",
+        "Sure thing — who am I chatting with?",
+        "Of course, let's plan this together. What's your name?",
     ),
     "ask_event_type": (
-        "What kind of event are you planning?",
-        "What are we planning for - wedding, birthday, corporate, or something else?",
-        "What type of event is this for?",
+        "So what are we celebrating — wedding, birthday, corporate, or something else?",
+        "What kind of event is this — wedding, birthday, corporate, or something different?",
+        "What are we planning — wedding, birthday, corporate, or other?",
+        "Wedding, birthday, corporate, or something else?",
     ),
     "ask_partner_name": (
-        "What is your partner's name?",
-        "Who is your partner for the wedding?",
-        "What name should I note for your partner?",
+        "And your partner's name?",
+        "What's your partner's name for the wedding?",
+        "Who's the other half of this wedding?",
     ),
     "ask_company_name": (
-        "What is the company or organization name?",
-        "Which company or organization should I note for this event?",
-        "What name should I use for the company or organization?",
+        "What's the company or organization name?",
+        "Which company is this event for?",
+        "What organization should I note for this?",
     ),
     "ask_honoree_name": (
         "Who are we celebrating?",
-        "Who is the event for?",
-        "Whose celebration is this for?",
+        "Who's the guest of honor?",
+        "Who's the birthday for?",
     ),
     "ask_other_event_type": (
-        "Please specify what kind of event it is (or say confirm on call).",
-        "What kind of event is it? You can also say confirm on call.",
-        "What should I label the event as? (Or say confirm on call.)",
+        "What kind of event is it? (Or say 'confirm on call' if you'd rather go over it.)",
+        "Go ahead and describe the event type — or say 'confirm on call' if easier.",
+        "What should I label this as? (Or 'confirm on call' works too.)",
     ),
     "ask_wedding_cake": (
-        "Would you like to include a wedding cake?",
-        "Do you want to add a wedding cake?",
-        "Should I include a wedding cake in the plan?",
+        "Since it's a wedding — want to add a wedding cake?",
+        "Do you want to include a wedding cake?",
+        "Should I add a wedding cake to the plan?",
     ),
     "ask_wedding_cake_flavor": (
-        "What cake flavor would you like?",
-        "Which cake flavor are you thinking for the wedding cake?",
-        "What flavor should we use for the cake?",
+        "What cake flavor are you going with?",
+        "Which flavor for the wedding cake?",
+        "Cake flavor — what sounds good to you?",
     ),
     "ask_wedding_cake_filling": (
-        "What filling would you like with it?",
-        "Which filling should go with that cake flavor?",
-        "What filling do you want inside the cake?",
+        "And the filling? Butter cream, lemon curd, raspberry jam, and more are on the list.",
+        "What filling would you like inside the cake?",
+        "Pick a filling for the cake.",
     ),
     "ask_wedding_cake_buttercream": (
-        "What buttercream frosting would you like?",
-        "Which buttercream frosting should I note for the cake?",
-        "What buttercream would you like on the cake?",
+        "Last one — buttercream frosting: signature, chocolate, or cream cheese?",
+        "What buttercream for the outside — signature, chocolate, or cream cheese frosting?",
+        "Buttercream: signature, chocolate, or cream cheese?",
     ),
     "ask_service_type": (
-        "Would you like drop-off delivery or full onsite service? (Reply drop-off or onsite.)",
-        "Do you want drop-off or onsite service? (Reply drop-off or onsite.)",
-        "Service: drop-off or onsite? (Reply drop-off or onsite.)",
+        "Do you want us on-site for the event, or would drop-off delivery work?",
+        "Onsite service with our team, or drop-off only?",
+        "Drop-off delivery or full onsite setup with staff?",
     ),
     "ask_event_date": (
-        "What date should I put down for the event? (Future date please.)",
-        "What is the event date? (Future date â€” YYYY-MM-DD works.)",
-        "When is the event? (Future date please.)",
+        "What date are you looking at? (Just needs to be a future date — any format works.)",
+        "When's the event? Drop a date and we'll lock it in.",
+        "What date should I block off for you?",
+        "What's the event date?",
     ),
     "ask_venue": (
-        "Where is the venue? If it is still TBD, you can say confirm venue on call.",
-        "What venue should I note? If it is not locked in yet, you can say confirm venue on call.",
-        "Where will the event be held? If the venue is still TBD, you can say confirm venue on call.",
+        "Where's the event happening? (If you're still figuring it out, just say TBD.)",
+        "What's the venue? If it's not set yet, say TBD and we'll sort it on the follow-up call.",
+        "Where will this be held? Venue name, address, or TBD if you're not sure yet.",
     ),
     "ask_guest_count": (
-        "About how many guests are you expecting? (If TBD, you can say TBD.)",
-        "What guest count should I plan around? (Number, or say TBD.)",
-        "Roughly how many guests are you expecting? (If TBD, say TBD.)",
+        "Roughly how many people are we cooking for?",
+        "What's the headcount looking like? A ballpark works.",
+        "How many guests? Even a rough number helps us plan.",
+        "What's the expected guest count? (TBD is fine if you're not sure.)",
     ),
     "ask_email": (
-        "What is the best email to reach you at?",
-        "Which email should we use for updates?",
-        "What email should I note for you?",
+        "And your email? I'll send the proposal there.",
+        "What's a good email for the proposal?",
+        "Drop your email and I'll send the catering details over.",
+        "What email should I use for your proposal?",
+        "Your email — where should I send the proposal?",
     ),
     "ask_phone": (
-        "What is the best phone number to reach you at?",
-        "Which phone number should I use for follow-up?",
-        "What number is best if we need to reach you quickly?",
+        "And a phone number — best one to reach you on?",
+        "What's the best phone number for you?",
+        "Phone number too — what's a good one to use?",
+        "And your phone — what's the best number?",
+        "Last bit — what phone number works best?",
     ),
     "transition_to_menu": (
-        "On to the menu. I will start with appetizers, then we will build the rest of the meal.",
-        "Let's move to the menu. We will start with appetizers and build from there.",
-        "Now for the menu. I will walk you through appetizers first, then the rest of the meal.",
+        "Love it — let's build out the menu. Starting with appetizers.",
+        "Now for the fun part. Let's get into the food.",
+        "Onto the menu — I'll walk you through it section by section.",
     ),
-    # BasicInfoTool uses this target name when it has finished collecting the
-    # required basics and is handing off to add-ons.
     "transition_to_addons": (
-        "Water and lemonades are on us! Would you like to add coffee or bar service? (yes or no)",
-        "Heads up — water and lemonades are already included. Should I add coffee or bar service on top? (yes or no)",
-        "Just so you know, water and lemonades are covered. Want to add coffee or bar service? (yes or no)",
+        "Water and lemonade are included — want to add coffee or a bar on top of that?",
+        "You've got water and lemonade covered. Want coffee or bar service added?",
+        "Water and lemonade are on us. Want to add coffee, bar service, or both?",
     ),
 }
 
 _MENU_SELECTION_PROMPTS = {
     "ask_service_style": (
-        "For the wedding, would you like cocktail hour, the reception meal, or both?",
-        "Are you planning cocktail hour, the reception meal, or both for the wedding?",
-        "Should I note cocktail hour, the reception meal, or both?",
+        "For the wedding — cocktail hour before the meal, reception only, or both?",
+        "Are you thinking cocktail hour, reception meal, or both?",
+        "Cocktail hour, the main reception, or the full experience with both?",
     ),
     "show_appetizer_menu": (
-        "Here are the appetizer options - pick as many as you want.",
-        "Let's look at appetizers next - choose as many as you want.",
-        "Here is the appetizer menu. Pick as many as you'd like.",
+        "Here are the appetizer options — pick as many as you like.",
+        "Let's do appetizers — grab as many as look good.",
+        "Appetizer menu below — choose whatever works for your crowd.",
     ),
     "ask_appetizer_style": (
-        "How should we serve the appetizers - passed or station?",
-        "Appetizer setup: passed or station?",
-        "Do you want the appetizers passed around or set up at a station?",
+        "How do you want the appetizers served — passed around or at a station?",
+        "Passed or station-style for the appetizers?",
+        "Should the apps be passed around or set up at a station?",
     ),
     "show_main_menu": (
-        "Here is the main menu - pick 3 to 5 dishes.",
-        "Let's look at the main menu next. Pick 3 to 5 dishes.",
-        "Here are the main dish options. Choose 3 to 5.",
+        "Here's the main menu — pick 3 to 5 dishes.",
+        "Main course time — choose 3 to 5 dishes.",
+        "Pick your mains below — 3 to 5 dishes.",
     ),
     "ask_meal_style": (
-        "For the main meal, do you want it plated or buffet-style?",
-        "Should the main meal be plated or buffet-style?",
-        "How do you want the main meal served - plated or buffet?",
+        "Plated or buffet-style for the main meal?",
+        "How do you want the main course served — plated or buffet?",
+        "Should we do plated service or a buffet for the mains?",
     ),
     "show_dessert_menu": (
-        "Here are the dessert options - pick up to 4.",
-        "Let's look at desserts next. You can choose up to 4.",
-        "Here is the dessert menu. Pick up to 4 items.",
+        "Here are the dessert options — pick up to 4.",
+        "Dessert time! Choose up to 4.",
+        "Dessert menu below — up to 4 picks.",
     ),
     "ask_dessert_gate": (
-        "Would you like to add desserts, or skip them?",
-        "Do you want to include desserts, or skip them for this event?",
-        "Should I add desserts to the menu, or would you rather skip them?",
+        "Want to add desserts, or skip them?",
+        "Should I add desserts to the menu?",
+        "Desserts — yes or skip?",
     ),
     "transition_to_addons": (
-        "That menu looks good. Want to add drinks, bar service, or other extras?",
-        "That takes care of the food. Want to move on to drinks and extras?",
-        "The menu is in good shape. Should we look at drinks, bar service, or other add-ons next?",
+        "Food's looking good! Want to add drinks, bar service, or any extras?",
+        "That covers the food — ready to look at drinks and add-ons?",
+        "Menu's set. Want to add anything else — bar, coffee, rentals?",
     ),
 }
 
 _ADD_ONS_PROMPTS = {
     "ask_drinks_interest": (
-        "Water and lemonades are on us! Would you like to add coffee service or bar service? (yes or no)",
-        "Heads up — water and lemonades are already included. Would you like to add coffee or bar service on top of that? (yes or no)",
-        "Just so you know, water and lemonades are covered! Should I add coffee or bar service as well? (yes or no)",
+        "Water and lemonade are already included — want to add coffee or a bar on top of that?",
+        "Water and lemonade come standard. Anything extra — coffee service, bar service?",
+        "You've got water and lemonade covered. Want to add anything else on the drinks side?",
     ),
     "ask_drinks_setup": (
-        "For drinks, do you want coffee service, bar service, both, or neither?",
-        "Should I note coffee service, bar service, both, or neither?",
-        "Coffee service, bar service, both, or neither?",
+        "What sounds good — coffee service, bar service, both, or skip?",
+        "Coffee, bar, both, or neither?",
+        "What are you thinking on drinks — coffee only, bar only, both, or neither?",
     ),
     "ask_bar_package": (
-        "Which bar package do you want: beer & wine, beer/wine + 2 signature drinks, or full open bar?",
-        "What bar package should I note: beer & wine, beer/wine + 2 signature drinks, or full open bar?",
-        "Bar package: beer & wine, beer/wine + 2 signature drinks, or full open bar?",
+        "What level of bar are you thinking — beer & wine, beer/wine + 2 signature cocktails, or a full open bar?",
+        "Beer & wine, beer/wine with signature cocktails, or full open bar — what fits your crowd?",
+        "How far do you want to take the bar? Beer & wine, signature cocktails on top, or the full open bar?",
     ),
     "ask_tableware_gate": (
-        "Would you like standard tableware, an upgrade, or no tableware?",
-        "For tableware, should I note standard, an upgrade, or none?",
-        "What should I put down for tableware - standard, upgraded, or no tableware?",
+        "For plates and such — standard disposable, something a step up, or skip it?",
+        "What's the vibe for tableware — standard disposable, a nicer option, or no tableware?",
+        "Tableware: keep it simple with standard disposable, go upgraded, or skip it entirely?",
     ),
     "ask_tableware": (
-        "Which tableware upgrade would you like?",
-        "What tableware upgrade should I note?",
-        "Which upgraded tableware option do you want?",
+        "How fancy are we going — silver disposable, gold disposable, or full china?",
+        "Silver, gold disposable, or full china — what do you want?",
+        "For the upgrade: silver disposable, gold disposable, or china?",
     ),
     "ask_utensils": (
-        "What utensils would you like to add?",
-        "Which utensils should I include?",
-        "What utensils should I note for the event?",
+        "And utensils — standard plastic, eco/biodegradable, or bamboo?",
+        "What kind of utensils? Standard plastic, eco-friendly, or bamboo.",
+        "Utensils: standard plastic, eco/biodegradable, or bamboo — what's your pick?",
     ),
     "ask_linens": (
-        "Would you like to include linens?",
-        "Should I add linens to the plan?",
-        "Do you want linens included?",
+        "Should I add linens to the order?",
+        "Want linens included?",
+        "Linens — yes or no?",
     ),
     "ask_rentals_gate": (
-        "Do you need any rentals like linens, tables, or chairs?",
-        "Should I add any rentals such as linens, tables, or chairs?",
-        "Do you want to include rentals like linens, tables, or chairs?",
+        "Any rentals on the list — chairs, tables, linens, that kind of thing?",
+        "Need any rentals? Things like tables, chairs, or linens.",
+        "Should I add rentals? Chairs, tables, linens — whatever you need.",
     ),
     "ask_rentals_items": (
-        "Which rentals would you like to include?",
-        "What rentals should I add?",
-        "Which rental items should I note?",
+        "What do you need to rent? Just tell me what you're thinking.",
+        "What rentals should I add — chairs, tables, linens, or something else?",
+        "What's on the rentals list?",
     ),
     "ask_labor_services": (
-        "Do you need any onsite help like ceremony setup, table setup/preset, cleanup, or trash removal? Choose all that apply.",
-        "Which labor/services should we cover onsite (setup, preset, cleanup, trash)? Choose all that apply.",
-        "What onsite labor should I include (ceremony setup, table setup, cleanup, trash removal)? Choose all that apply.",
+        "What kind of onsite help are you looking for? We can do ceremony setup, table setup/preset, cleanup, trash removal — pick whatever applies.",
+        "For onsite labor: ceremony setup, table setup, preset, cleanup, trash removal — what do you need?",
+        "Which onsite services? Ceremony setup, table setup/preset, cleanup, trash removal — pick all that apply.",
     ),
     "transition_to_special_requests": (
-        "Before we wrap up, do you have any special requests or notes?",
-        "Before I finalize this, is there anything special you want us to note?",
-        "Before we move to the last details, do you want to add any special requests or notes?",
+        "Almost there — any special requests or things we should know about?",
+        "Nearly done! Anything specific you want us to keep in mind?",
+        "One last thing — any special requests before we wrap up?",
     ),
 }
 
 _FINALIZATION_PROMPTS = {
     "ask_special_requests_gate": (
-        "Do you have any special requests or anything extra you want us to keep in mind?",
-        "Any special requests or extra details you want me to note?",
-        "Is there anything special you want us to plan around or keep in mind?",
+        "Any special requests? Anything you want us to keep in mind?",
+        "Is there anything specific you'd like us to plan around?",
+        "Anything else on your mind before we finalize?",
     ),
     "collect_special_requests": (
-        "What special request would you like us to note?",
-        "What should I write down as the special request?",
-        "Tell me the special request in your own words and I will note it.",
+        "What's the request?",
+        "Go ahead — what do you want us to know?",
+        "What should we keep in mind?",
     ),
     "ask_dietary_gate": (
-        "Does anyone have dietary or health needs we should plan around?",
-        "Should I note any dietary or health concerns for the event?",
-        "Do any guests have dietary or health needs we should keep in mind?",
+        "Any dietary restrictions or allergies in the group?",
+        "Should I note any food allergies or dietary needs?",
+        "Any allergies or food restrictions we need to know about?",
     ),
     "collect_dietary_concerns": (
-        "What dietary or health needs should we plan around?",
-        "What dietary or health concerns should I note?",
-        "What food or health needs do you want included?",
+        "What should we know? Allergies, restrictions — whatever it is.",
+        "Tell me what to plan around.",
+        "What dietary needs should the team know about?",
     ),
     "ask_additional_notes_gate": (
-        "Is there anything else you want us to note before we wrap up?",
-        "Any final notes you want me to add before I wrap this up?",
-        "Do you want me to include anything else before we finish?",
+        "Last one — anything else before I wrap this up?",
+        "Any other details to add?",
+        "Anything else you want included?",
     ),
     "collect_additional_notes": (
-        "What final note would you like us to include?",
-        "What last note should I add?",
-        "Tell me the final note you want included.",
+        "What do you want to add?",
+        "What's on your mind?",
+        "Go ahead — what should I include?",
     ),
     "ask_followup_call": (
-        "Would you like a quick follow-up call to go over the final details?",
-        "Do you want a quick follow-up call to review everything?",
-        "Should I note that you want a follow-up call for the final details?",
+        "Would you like a quick follow-up call to finalize everything? Totally optional.",
+        "Do you want a follow-up call, or are we good from here?",
+        "Want a call to go over the final details — yes or no?",
     ),
     "review": (
-        "Here is the summary so far - does everything look right?",
-        "Here is the recap so far - does it all look correct?",
-        "This is the summary I have so far - does everything look good?",
+        "Here's everything — does it all look right?",
+        "Quick recap — does this check out?",
+        "Here's what I have — look good to you?",
     ),
 }
 
@@ -546,14 +648,20 @@ def fallback_prompt_for_target(tool: str, target: str | None, seed: str | None =
     if not target:
         return ""
 
-    if tool == "basic_info_tool":
+    # Try the owning tool's registry first, but only if the target is actually
+    # registered there. Without this guard, basic_info_tool + ask_service_style
+    # would return "Could you clarify that a bit?" instead of the service-style
+    # question (basic_info_prompt default for unknown targets).
+    if tool == "basic_info_tool" and target in _BASIC_INFO_PROMPTS:
         return basic_info_prompt(target, seed)
-    if tool == "menu_selection_tool":
+    if tool == "menu_selection_tool" and target in _MENU_SELECTION_PROMPTS:
         return menu_selection_prompt(target, seed)
-    if tool == "add_ons_tool":
+    if tool == "add_ons_tool" and target in _ADD_ONS_PROMPTS:
         return add_ons_prompt(target, seed)
-    if tool == "finalization_tool":
+    if tool == "finalization_tool" and target in _FINALIZATION_PROMPTS:
         return finalization_prompt(target, seed)
+
+    # Fall through: find the target in any registry regardless of tool
     if target in _BASIC_INFO_PROMPTS:
         return basic_info_prompt(target, seed)
     if target in _MENU_SELECTION_PROMPTS:

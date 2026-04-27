@@ -72,6 +72,8 @@ class EventDetailsExtraction(BaseModel):
     def _must_be_positive(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and v <= 0:
             raise ValueError("Guest count must be positive")
+        if v is not None and v > 2000:
+            raise ValueError("Guest count seems unreasonably large — please double-check")
         return v
 
     @field_validator("venue")
@@ -193,11 +195,34 @@ class AddOnsExtraction(BaseModel):
 # ModificationTool — any previously filled slot
 # ============================================================================
 
+class SecondaryModification(BaseModel):
+    """A secondary modification to apply alongside the primary one.
+
+    Used when a single user message contains multiple cross-slot actions.
+    Same shape as ModificationExtraction but flat (no nested secondaries) to
+    keep the schema bounded.
+    """
+
+    target_slot: str = Field(
+        ...,
+        description="Exact slot name from SLOT_NAMES.",
+    )
+    action: ModificationAction
+    new_value: Optional[Any] = None
+    items_to_remove: List[str] = Field(default_factory=list)
+    items_to_add: List[str] = Field(default_factory=list)
+
+
 class ModificationExtraction(BaseModel):
     """Extract a request to change any previously filled slot.
 
     `target_slot` MUST be an exact slot_name from the registry (Section 6 of
     AGENT_SPEC.md). The Tool validates this against SLOT_NAMES before applying.
+
+    For multi-action messages ("add ravioli to mains AND remove cheese AND
+    remove adobo from appetizers"), put the FIRST action in the top-level
+    fields and any additional cross-slot actions in `secondary_modifications`.
+    The tool processes the primary first, then iterates secondaries in order.
     """
 
     target_slot: str = Field(
@@ -218,9 +243,11 @@ class ModificationExtraction(BaseModel):
     items_to_remove: List[str] = Field(
         default_factory=list,
         description=(
-            "For 'remove' or 'replace' actions on list slots: exactly which items "
-            "the user wants to remove. Parsed from natural language like "
-            "'remove the coffee bar and the blondies'."
+            "For 'remove' or 'replace' actions on list slots: the EXACT item names "
+            "from the CURRENT FILLED LISTS context. Never return fuzzy terms like "
+            "'chicken' — return 'Chicken Satay', 'BBQ Chicken Slider', etc. "
+            "Resolve group references ('remove chicken', 'drop all seafood') to the "
+            "actual matching names in the current list."
         ),
     )
     items_to_add: List[str] = Field(
@@ -228,6 +255,25 @@ class ModificationExtraction(BaseModel):
         description=(
             "For 'add' or 'replace' actions on list slots: exactly which items "
             "the user wants added. Parsed from natural language."
+        ),
+    )
+    secondary_modifications: List[SecondaryModification] = Field(
+        default_factory=list,
+        description=(
+            "Additional cross-slot modifications from the same message. "
+            "Use ONLY when the user explicitly references a different section "
+            "(e.g. primary = 'add ravioli to mains', secondary = "
+            "'remove adobo from appetizers'). Each secondary must have its own "
+            "target_slot, action, and items. Leave empty for single-section requests. "
+            "Maximum 3 secondaries to bound complexity."
+        ),
+    )
+    already_selected: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Items the user tried to add that are already in the current selection "
+            "(found in CURRENT FILLED LISTS). List their exact names here instead of "
+            "items_to_add so the response can inform the user."
         ),
     )
 
@@ -350,6 +396,7 @@ __all__ = [
     "MenuSelectionExtraction",
     "AddOnsExtraction",
     "ModificationExtraction",
+    "SecondaryModification",
     "SelectedItemGrounding",
     "FinalizationExtraction",
     "ToolCall",

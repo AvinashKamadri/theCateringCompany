@@ -1,16 +1,11 @@
 import sys
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.router import _quick_route  # noqa: E402
 from agent.state import (  # noqa: E402
     PHASE_MAIN_MENU,
     fill_slot,
     initialize_empty_slots,
 )
-
 
 def test_quick_route_tbd_event_type_wedding_routes_to_modification() -> None:
     slots = initialize_empty_slots()

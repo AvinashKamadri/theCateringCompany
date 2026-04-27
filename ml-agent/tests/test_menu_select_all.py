@@ -2,17 +2,12 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.state import (  # noqa: E402
     PHASE_MAIN_MENU,
     fill_slot,
     get_slot_value,
     initialize_empty_slots,
 )
-
 
 @pytest.mark.asyncio
 async def test_menu_select_all_does_not_require_llm(monkeypatch) -> None:

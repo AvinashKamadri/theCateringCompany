@@ -131,6 +131,25 @@ def apply_cascade(
                     clear_slot(slots, dep)
                     effects.append((dep, "cleared (wedding cake removed)"))
 
+    # --- rentals slot keeps `linens` boolean in sync ---
+    # `linens` is a denormalized convenience flag used by the recap (see
+    # finalization_tool._render_final_review_recap). When the user modifies
+    # rentals (e.g. "remove all rentals"), the rentals string changes but the
+    # stale `linens=True` would cause the recap to show "Rentals: Linens"
+    # via the fallback branch. Re-derive linens from the new rentals value.
+    elif slot_name == "rentals":
+        new_text = (str(new_value) if new_value is not None else "").lower()
+        if new_text in ("", "none", "no"):
+            if get_slot_value(slots, "linens"):
+                fill_slot(slots, "linens", False)
+                effects.append(("linens", "set False (rentals cleared)"))
+        else:
+            has_linens = "linen" in new_text
+            current_linens = get_slot_value(slots, "linens")
+            if bool(current_linens) != has_linens:
+                fill_slot(slots, "linens", has_linens)
+                effects.append(("linens", f"auto-set to {has_linens} (rentals updated)"))
+
     # --- meal_style == plated auto-notes china ---
     elif slot_name == "meal_style":
         if new_value == "plated":

@@ -2,14 +2,9 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.models import ModificationExtraction  # noqa: E402
 from agent.state import PHASE_WEDDING_CAKE, fill_slot, initialize_empty_slots  # noqa: E402
 from agent.tools.modification_tool import ModificationTool  # noqa: E402
-
 
 @pytest.mark.asyncio
 async def test_remove_all_desserts_in_wedding_cake_phase_repeats_cake_question(monkeypatch) -> None:

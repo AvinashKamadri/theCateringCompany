@@ -25,7 +25,7 @@ from agent.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
 
-_RESPONSE_MAX_TOKENS = 250
+_RESPONSE_MAX_TOKENS = 1000
 _SYSTEM_PROMPT = RESPONSE_SYSTEM_PROMPT
 
 # Minimum keyword presence per next_question_target. If the LLM's reply for an
@@ -33,22 +33,46 @@ _SYSTEM_PROMPT = RESPONSE_SYSTEM_PROMPT
 # deterministic prompt. Prevents the model from riffing into a wrap-up ("we'll
 # be in touch") when it should be asking the next question.
 _TARGET_KEYWORDS: dict[str, tuple[str, ...]] = {
-    # Keep these permissive — they're a last-resort sanity check, not a style
-    # enforcer. The rule: the reply must at least mention the thing we're
-    # trying to collect. Misses here cause legitimate replies to be discarded
-    # and replaced with stiff fallbacks.
-    "ask_name": ("name",),
+    # Minimal sanity check — the reply must clearly be asking for the right
+    # thing. Keep these very permissive: overly strict rules cause good creative
+    # LLM replies to be discarded and replaced with stiff template strings.
+    # Rule: at least ONE of these words must appear. If in doubt, add more words.
+    "ask_name": ("name", "who am i chatting", "who's planning"),
     "ask_email": ("email",),
-    "ask_phone": ("phone", "number"),
-    "ask_event_type": ("event", "wedding", "birthday", "corporate", "planning", "celebration", "kind of"),
-    "ask_partner_name": ("partner", "spouse", "fiance"),
-    "ask_company_name": ("company", "organization", "business"),
-    "ask_honoree_name": ("who", "honoree", "celebrating", "celebration", "for"),
-    "ask_other_event_type": ("event", "kind", "type", "planning", "confirm"),
-    "ask_service_type": ("drop", "onsite", "on-site", "on site", "service", "staff", "setup"),
-    "ask_event_date": ("date", "when", "day"),
-    "ask_venue": ("venue", "where", "location", "held", "address"),
-    "ask_guest_count": ("guest", "headcount", "expecting", "how many", "people", "attendees"),
+    "ask_phone": ("phone", "number", "reach", "digits"),
+    "ask_event_type": ("event", "wedding", "birthday", "corporate", "planning", "celebration", "occasion", "kind", "type", "celebrating"),
+    "ask_partner_name": ("partner", "spouse", "fiance", "other half", "name"),
+    "ask_company_name": ("company", "organization", "business", "name"),
+    "ask_honoree_name": ("who", "honoree", "celebrating", "celebration", "for", "name", "guest of honor"),
+    "ask_other_event_type": ("event", "kind", "type", "planning", "confirm", "describe"),
+    "ask_service_type": ("drop", "onsite", "on-site", "on site", "service", "staff", "setup", "deliver", "come to"),
+    "ask_event_date": ("date", "when", "day", "block off", "schedule"),
+    "ask_venue": ("venue", "where", "location", "held", "address", "happening", "place"),
+    "ask_guest_count": ("guest", "headcount", "expecting", "how many", "people", "attendees", "crowd", "group", "large", "size", "cooking for"),
+    # Menu-flow targets
+    "ask_service_style": ("cocktail", "reception", "both"),
+    "ask_appetizer_style": ("passed", "station", "served"),
+    "ask_meal_style": ("plated", "buffet", "served"),
+    "ask_dessert_gate": ("dessert", "sweet", "skip"),
+    # Wedding cake flow
+    "ask_wedding_cake": ("cake", "wedding"),
+    "ask_wedding_cake_flavor": ("flavor", "cake"),
+    "ask_wedding_cake_filling": ("filling", "cake", "inside"),
+    "ask_wedding_cake_buttercream": ("buttercream", "frosting", "outside"),
+    # Add-ons
+    "ask_drinks_interest": ("drinks", "coffee", "bar", "beverage"),
+    "ask_drinks_setup": ("drinks", "coffee", "bar", "setup"),
+    "ask_bar_package": ("bar", "beer", "wine", "open", "signature", "cocktail"),
+    "ask_tableware_gate": ("tableware", "plates", "china", "disposable", "utensils"),
+    "ask_tableware": ("tableware", "china", "plates", "disposable"),
+    "ask_utensils": ("utensils", "fork", "plastic", "bamboo", "biodegradable", "cutlery"),
+    "ask_rentals_gate": ("rental", "tables", "chairs", "linen", "anything"),
+    "ask_labor_services": ("labor", "setup", "cleanup", "staff", "service", "ceremony", "preset", "trash"),
+    # Finalization
+    "ask_special_requests_gate": ("special", "request", "anything", "flag", "note"),
+    "ask_dietary_gate": ("dietary", "allerg", "diet", "food", "restriction"),
+    "ask_additional_notes_gate": ("notes", "anything else", "to add"),
+    "ask_followup_call": ("call", "follow", "schedule", "lock", "talk"),
 }
 
 # Phrases the LLM should NEVER emit unless the intake is actually complete.
@@ -65,23 +89,126 @@ _WRAP_UP_PHRASES: tuple[str, ...] = (
 )
 
 
+_BANNED_OPENERS: tuple[str, ...] = (
+    "perfect", "great", "awesome", "got it", "sweet", "nice", "wonderful",
+    "excellent", "noted", "thank you", "thanks for", "of course",
+    "absolutely", "certainly", "sure thing", "sounds good",
+    # Corporate / robotic openings
+    "welcome to", "welcome,", "welcome!", "welcome ", "hello,", "hello!",
+    "hi there", "greetings", "to begin", "to get started",
+    # Robotic preambles flagged in the screenshot
+    "now that we have",
+    "now then",
+    "alright, so",
+    "since it's a wedding",
+    "since it is a wedding",
+)
+
+
+_BANNED_PHRASES: tuple[str, ...] = (
+    "may i have",
+    "may i get",
+    "could i have",
+    "could i get",
+    "please provide",
+    "please share",
+    "please tell me",
+    "i'd like to know",
+    # Commenty / flattery — never editorialize on the user's answer
+    "lovely name",
+    "great name",
+    "nice name",
+    "cool name",
+    "what a beautiful",
+    "sounds amazing",
+    "sounds delicious",
+    "sounds wonderful",
+)
+
+
 def _reply_fails_guardrail(text: str, ctx: dict[str, Any], status: str) -> bool:
     """Return True if the LLM reply should be discarded in favor of the fallback."""
     if not text:
         return False
-    lower = text.lower()
+    lower = text.lower().lstrip()
+
+    # Reject banned openers — the prompt already bans them but LLMs drift;
+    # this enforces it structurally so a retry is forced.
+    for opener in _BANNED_OPENERS:
+        if lower.startswith(opener):
+            return True
+
+    # Reject corporate/stiff phrases anywhere in the reply
+    # ("may I have your name?", "please provide your email", etc.)
+    for phrase in _BANNED_PHRASES:
+        if phrase in lower:
+            return True
+
+    # Reject ultra-curt replies for free-text intake questions. "Phone number?"
+    # / "Your email?" / "Your name?" feel like a form. Require at least ~4 words
+    # so the LLM produces something that sounds like a person speaking.
+    target = str(ctx.get("next_question_target") or "")
+    _conversational_targets = {
+        "ask_name", "ask_email", "ask_phone",
+        "ask_event_type", "ask_event_date", "ask_venue", "ask_guest_count",
+        "ask_partner_name", "ask_company_name", "ask_honoree_name",
+        "ask_other_event_type",
+    }
+    if target in _conversational_targets:
+        word_count = len(text.split())
+        if word_count < 4:
+            return True
 
     if status != "pending_staff_review":
         for phrase in _WRAP_UP_PHRASES:
             if phrase in lower:
                 return True
 
-    target = str(ctx.get("next_question_target") or "")
     required = _TARGET_KEYWORDS.get(target)
     if required and not any(k in lower for k in required):
         return True
 
     return False
+
+
+def _is_duplicate_of_previous(text: str, history: list[BaseMessage]) -> bool:
+    """Return True if `text` is the same (or near-same) as the previous AI message."""
+    if not text or not history:
+        return False
+    last_ai_text = ""
+    for msg in reversed(history):
+        if getattr(msg, "type", "") == "ai":
+            last_ai_text = str(getattr(msg, "content", "") or "").strip()
+            break
+    if not last_ai_text:
+        return False
+    norm_new = " ".join(text.lower().split())
+    norm_prev = " ".join(last_ai_text.lower().split())
+    if not norm_new:
+        return False
+    if norm_new == norm_prev:
+        return True
+    # Short replies that are entirely contained in the previous one are echoes.
+    if len(norm_new) < 80 and norm_new in norm_prev:
+        return True
+    return False
+
+
+def _retry_via_fallback(
+    ctx: dict[str, Any],
+    state: dict[str, Any] | None,
+    history: list[BaseMessage],
+) -> str:
+    """When direct_response duplicates, ask the registry for an alternate variant.
+
+    Re-rolls the seed with the message count so the variant differs from the
+    last one, even when ctx is otherwise identical.
+    """
+    candidate = _fallback(ctx, state)
+    if candidate and not _is_duplicate_of_previous(candidate, history):
+        return candidate
+    return ""
+
 
 class GeneratedReply(BaseModel):
     """Structured user-facing reply for the next assistant turn."""
@@ -105,12 +232,25 @@ async def render(
     """Render the assistant reply for a tool result."""
     if tool_result.direct_response:
         ctx = tool_result.response_context or {}
+        text = tool_result.direct_response
+        # Apply duplicate-guard to direct_response too. If a clarify/OOS path
+        # produces the EXACT same text as the immediately previous AI message,
+        # we'd be looping the user. Trim to a deterministic variant if available.
+        if _is_duplicate_of_previous(text, history):
+            varied = _retry_via_fallback(ctx, tool_result.state, history)
+            if varied:
+                logger.info(
+                    "render_source=direct_response_dedup tool=%s target=%s",
+                    ctx.get("tool", "-"),
+                    ctx.get("next_question_target", "-"),
+                )
+                return varied
         logger.info(
             "render_source=direct_response tool=%s target=%s",
             ctx.get("tool", "-"),
             ctx.get("next_question_target", "-"),
         )
-        return tool_result.direct_response
+        return text
 
     ctx = tool_result.response_context or {}
 
@@ -150,6 +290,7 @@ async def render(
         user_message=user_block,
         model=MODEL_RESPONSE,
         max_tokens=_RESPONSE_MAX_TOKENS,
+        temperature=0.7,
     )
     text = (structured.reply_text or "").strip() if structured else ""
 
@@ -179,6 +320,26 @@ async def render(
             text[:160],
         )
         return _fallback(ctx, tool_result.state)
+
+    # Duplicate-response guard: if the LLM regenerated the same reply as the
+    # immediately-preceding AI message, fall back to the deterministic prompt.
+    # This prevents echoes like "Reception it is." appearing twice in a row
+    # when the user pastes a long answer that the LLM gets confused on.
+    last_ai_text = ""
+    for msg in reversed(history):
+        if getattr(msg, "type", "") == "ai":
+            last_ai_text = str(getattr(msg, "content", "") or "").strip()
+            break
+    if last_ai_text:
+        norm_new = " ".join(text.lower().split())
+        norm_prev = " ".join(last_ai_text.lower().split())
+        if norm_new and (norm_new == norm_prev or (len(norm_new) < 80 and norm_new in norm_prev)):
+            logger.warning(
+                "render_source=duplicate_fallback tool=%s target=%s",
+                ctx.get("tool", "-"),
+                ctx.get("next_question_target", "-"),
+            )
+            return _fallback(ctx, tool_result.state)
 
     logger.info(
         "render_source=%s tool=%s target=%s",
@@ -278,37 +439,16 @@ def _should_force_menu_progress_render(ctx: dict[str, Any]) -> bool:
 
 
 _TEMPLATE_ONLY_TARGETS = frozenset({
-    # Wedding cake gate: yes/no only, no acknowledgment needed.
-    # Flavor/filling/buttercream are removed so the LLM can say
-    # "Funfetti — great pick! What filling would you like?" etc.
-    "ask_wedding_cake",
-    "ask_wedding_cake_flavor",
-    "ask_wedding_cake_filling",
-    "ask_wedding_cake_buttercream",
-    # Menu transitions and gates
-    "ask_service_style",
-    "ask_dessert_gate",
+    # By default we let the LLM generate every question with waiter-style warmth
+    # (see WAITER PROMPT GUIDANCE in RESPONSE_SYSTEM_PROMPT). The registry then
+    # acts as a fallback when the LLM fails the keyword guardrail.
+    #
+    # The exceptions below are NOT free-text questions — they are pure transitions
+    # or post-gate collection prompts where the LLM would tend to re-ask the gate
+    # ("are you sure you want desserts?") instead of moving on. Keep them deterministic.
     "transition_to_menu",
     "transition_to_addons",
     "transition_to_special_requests",
-    # Add-ons — all structured option selections
-    "ask_drinks_interest",
-    "ask_drinks_setup",
-    "ask_bar_package",
-    "ask_tableware_gate",
-    "ask_tableware",
-    "ask_utensils",
-    "ask_rentals_gate",
-    "ask_labor_services",
-    # Basic info constrained options
-    "ask_service_type",
-    # Finalization gate questions (yes/no, not free-text collection)
-    "ask_special_requests_gate",
-    "ask_dietary_gate",
-    "ask_additional_notes_gate",
-    "ask_followup_call",
-    # Finalization collection — user already said "yes" to the gate, just
-    # ask for the content directly. LLM would re-ask the gate question.
     "collect_special_requests",
     "collect_dietary_concerns",
     "collect_additional_notes",
@@ -343,33 +483,59 @@ def _should_force_direct_prompt(ctx: dict[str, Any]) -> bool:
 
 
 def _direct_prompt_text(ctx: dict[str, Any], state: dict[str, Any] | None = None) -> str:
-    target = str(ctx.get("next_question_target") or "")
     if ctx.get("tool") == "basic_info_tool" and ctx.get("rejected_past_date"):
-        # Keep this message explicit â€” dates are high-friction and easy to misunderstand.
-        return "That date is in the past. What date should I put down for the event? (Future date â€” YYYY-MM-DD works.)"
-    if target == "ask_service_style":
-        return (
-            "For the wedding, would you like to have a cocktail hour before the main meal, "
-            "a reception for the main meal, or both?"
-        )
+        return "That date is in the past — what's the event date? Any future date works."
     return _next_prompt(ctx, state)
+
+
+# Warm one-clause acks for unparseable input — paired with the actual next
+# question by _fallback() so the user always knows what to answer next.
+# NEVER use "didn't catch", "I don't understand", "rephrase", "try again" —
+# those are buzzkills. Keep it playful, brief, friendly waiter energy.
+_COULD_NOT_PARSE_REPLIES = [
+    "haha okay —",
+    "no worries —",
+    "alright —",
+    "sure —",
+    "got it —",
+    "right —",
+]
+
+_INVALID_VALUE_REPLIES = [
+    "hmm, that doesn't look quite right —",
+    "let me re-ask —",
+    "small snag —",
+    "one more try —",
+]
+
+
+def _pick(pool: list[str], seed: str) -> str:
+    idx = int(hashlib.md5(seed.encode()).hexdigest(), 16) % len(pool)
+    return pool[idx]
 
 
 def _fallback(ctx: dict[str, Any], state: dict[str, Any] | None = None) -> str:
     tool = str(ctx.get("tool") or "")
+    _seed = f"{tool}:{ctx.get('error')}:{ctx.get('next_question_target')}"
 
     if ctx.get("error") in {"could_not_parse", "could_not_route"}:
-        return "Sorry, I didn't quite catch that - could you say it another way?"
+        # Warm ack + the actual next question. The ack alone is a buzzkill;
+        # always pair it with the question so the user knows what to answer.
+        ack = _pick(_COULD_NOT_PARSE_REPLIES, _seed)
+        nxt = _next_prompt(ctx, state)
+        return f"{ack} {nxt}".strip() if nxt else ack
     if ctx.get("error") == "invalid_new_value":
-        return "That value didn't look right - could you try again?"
+        ack = _pick(_INVALID_VALUE_REPLIES, _seed)
+        nxt = _next_prompt(ctx, state)
+        return f"{ack} {nxt}".strip() if nxt else ack
     if ctx.get("error") == "locked_slot":
         return (
-            "That's set automatically based on your bar service selection - "
+            "That's set automatically based on your bar service selection — "
             "to change it, update your bar service choice."
         )
 
     if ctx.get("awaiting_confirm"):
-        return "Here's the summary so far - does everything look correct?"
+        return "Here's the summary so far — does everything look correct?"
     if ctx.get("status") == "pending_staff_review":
         return "All set! One of our coordinators will review your request and reach out shortly."
 
@@ -380,7 +546,7 @@ def _fallback(ctx: dict[str, Any], state: dict[str, Any] | None = None) -> str:
     if next_prompt:
         return next_prompt
 
-    return "Got it - what would you like to do next?"
+    return "What would you like to do next?"
 
 
 def _next_prompt(ctx: dict[str, Any], state: dict[str, Any] | None = None) -> str:
@@ -444,7 +610,7 @@ def _modification_prompt(ctx: dict[str, Any], state: dict[str, Any] | None = Non
         if unavailable:
             missing = ", ".join(unavailable[:6])
             suffix = "…" if len(unavailable) > 6 else ""
-            sentences.append(f"'{missing}{suffix}' isn’t on the menu.")
+            sentences.append(f"'{missing}{suffix}' isn't on the menu.")
         sentences.extend(_additional_modification_sentences(mod.get("additional_changes")))
         if follow_up:
             sentences.append(follow_up)
@@ -533,33 +699,33 @@ def _bool_modification_sentence(*, target: str, value: bool, action: str, seed: 
         if value:
             return _select_variant_text(
                 (
-                    "Got it — I’ll note a follow-up call.",
-                    "Okay — I’ll mark that you want a follow-up call.",
-                    "Noted — follow-up call requested.",
+                    "Follow-up call added.",
+                    "I'll flag that you'd like a follow-up call.",
+                    "You're on the list for a follow-up call.",
                 ),
                 seed,
             )
         return _select_variant_text(
             (
-                "Got it — no follow-up call.",
-                "Okay — I won’t request a follow-up call.",
-                "Noted — no follow-up call needed.",
+                "No follow-up call — works for me.",
+                "Skipping the follow-up call.",
+                "Follow-up call removed.",
             ),
             seed,
         )
 
     if value:
         return _select_variant_text(
-            (f"Got it — adding {label}.", f"Okay — {label} included.", f"Noted — {label} added."),
+            (f"Adding {label}.", f"{label.capitalize()} added.", f"{label.capitalize()} is in."),
             seed,
         )
     if action == "remove":
         return _select_variant_text(
-            (f"Removed {label}.", f"Okay — removing {label}.", f"Noted — {label} removed."),
+            (f"Removed {label}.", f"Dropped {label}.", f"{label.capitalize()} removed."),
             seed,
         )
     return _select_variant_text(
-        (f"Got it — no {label}.", f"Okay — skipping {label}.", f"Noted — {label} not included."),
+        (f"Skipping {label}.", f"No {label} — that works.", f"{label.capitalize()} not included."),
         seed,
     )
 
@@ -656,14 +822,29 @@ def _additional_modification_sentences(changes: Any) -> list[str]:
 def _prompt_variant_seed(ctx: dict[str, Any], state: dict[str, Any] | None = None) -> str:
     phase = ""
     turn_count = 0
+    last_user_msg = ""
+    last_ai_msg = ""
     if state:
         phase = str(state.get("conversation_phase") or "")
-        turn_count = len(state.get("messages", []))
+        msgs = state.get("messages", []) or []
+        turn_count = len(msgs)
+        # Include the most recent user/AI message text so different conversations
+        # produce different seeds even at the same phase + turn_count. Without this,
+        # ask_phone always picked the same variant on a fresh chat at turn 4.
+        for m in reversed(msgs):
+            mtype = getattr(m, "type", "") or (m.get("type") if isinstance(m, dict) else "")
+            content = getattr(m, "content", "") or (m.get("content") if isinstance(m, dict) else "")
+            if mtype == "human" and not last_user_msg:
+                last_user_msg = str(content)[:80]
+            elif mtype == "ai" and not last_ai_msg:
+                last_ai_msg = str(content)[:80]
+            if last_user_msg and last_ai_msg:
+                break
 
     tool = str(ctx.get("tool") or "")
     target = str(ctx.get("next_question_target") or "")
     filled = ",".join(sorted(str(item) for item in (ctx.get("filled_this_turn") or [])))
-    return f"{tool}|{target}|{phase}|{turn_count}|{filled}"
+    return f"{tool}|{target}|{phase}|{turn_count}|{filled}|{last_user_msg}|{last_ai_msg}"
 
 
 __all__ = ["render"]

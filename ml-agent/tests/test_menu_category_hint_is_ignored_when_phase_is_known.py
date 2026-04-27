@@ -2,10 +2,6 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.models import MenuSelectionExtraction  # noqa: E402
 from agent.state import (  # noqa: E402
     PHASE_MAIN_MENU,
@@ -13,7 +9,6 @@ from agent.state import (  # noqa: E402
     get_slot_value,
     initialize_empty_slots,
 )
-
 
 @pytest.mark.asyncio
 async def test_main_menu_phase_ignores_wrong_category_hint(monkeypatch) -> None:

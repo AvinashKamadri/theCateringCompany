@@ -2,10 +2,6 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 @pytest.mark.asyncio
 async def test_other_event_type_flows_into_custom_label_prompt() -> None:
     from agent.state import (
@@ -61,7 +57,6 @@ async def test_other_event_type_flows_into_custom_label_prompt() -> None:
     assert get_slot_value(slots, "event_type") == "Engagement party"
     assert get_slot_value(slots, "__awaiting_custom_event_type") is None
     assert result3.state["conversation_phase"] == PHASE_TRANSITION
-
 
 @pytest.mark.asyncio
 async def test_other_event_type_accepts_confirm_on_call() -> None:

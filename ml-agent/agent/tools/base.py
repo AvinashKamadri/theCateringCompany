@@ -35,6 +35,42 @@ def history_for_llm(history: list[BaseMessage], max_messages: int = 6) -> list[d
     return candidates
 
 
+def tight_history_for_llm(history: list[BaseMessage]) -> list[dict]:
+    """Minimal history window for entity extractors — last AI question + last user message only.
+
+    Why: when an extractor LLM sees the last 6 messages, it often hallucinates
+    items from past turns. E.g. after offering "Dragon Chicken" 3 turns ago,
+    a `remove platter` request gets extracted as `items_to_add=["Dragon Chicken"]`
+    because the LLM "remembers" the earlier offer. Tight context = no leakage.
+
+    Drops AI menu listings (e.g. "Here are the appetizer options: 1. ...") since
+    the extractor doesn't need the catalog — the slot value already has it.
+    """
+    candidates: list[dict] = []
+    last_ai_added = False
+    for m in reversed(history):
+        role = "user" if getattr(m, "type", "") == "human" else "assistant"
+        content = str(m.content or "").strip()
+        if not content:
+            continue
+        if role == "user":
+            # Always include user messages until we hit one we already kept.
+            candidates.insert(0, {"role": role, "content": content[:500]})
+        else:  # assistant
+            if last_ai_added:
+                continue
+            # Drop long catalog listings — keep only the last short question/ack.
+            short = content
+            if len(short) > 600:
+                # Take the last 200 chars (likely the question) only.
+                short = short[-200:]
+            candidates.insert(0, {"role": role, "content": short})
+            last_ai_added = True
+        if len(candidates) >= 3:  # at most: user, ai, user
+            break
+    return candidates
+
+
 @dataclass
 class ToolResult:
     """What every Tool returns.

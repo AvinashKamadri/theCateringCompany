@@ -1,11 +1,6 @@
 import sys
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.tools.menu_selection_tool import _list_progress_message  # noqa: E402
-
 
 def test_list_progress_message_caps_large_added_lists() -> None:
     before: list[str] = []

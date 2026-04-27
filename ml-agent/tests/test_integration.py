@@ -6,14 +6,10 @@ import uuid
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
 import orchestrator as orchestrator_module
 from agent.models import OrchestratorDecision, ToolCall
 from agent.state import PHASE_EVENT_DATE, PHASE_GREETING, PHASE_VENUE, fill_slot, get_slot_value
 from agent.tools.base import ToolResult
-
 
 class _FakeBasicInfoTool:
     name = "basic_info_tool"
@@ -69,7 +65,6 @@ class _FakeBasicInfoTool:
             direct_response="Thanks, I have the core event details.",
         )
 
-
 class _FakeModificationTool:
     name = "modification_tool"
 
@@ -93,7 +88,6 @@ class _FakeModificationTool:
             },
             direct_response=f"I updated your name to {new_name}.",
         )
-
 
 @pytest.fixture
 def orchestrator_testbed(monkeypatch):
@@ -169,7 +163,6 @@ def orchestrator_testbed(monkeypatch):
 
     return orchestrator_module.AgentOrchestrator(), state_store, message_store
 
-
 @pytest.mark.asyncio
 async def test_orchestrator_processes_and_persists_multi_turn_flow(orchestrator_testbed):
     orchestrator, state_store, message_store = orchestrator_testbed
@@ -203,7 +196,6 @@ async def test_orchestrator_processes_and_persists_multi_turn_flow(orchestrator_
     assert state_store[thread_id]["current_node"] == "complete"
     assert len(message_store[thread_id]) == 6
 
-
 @pytest.mark.asyncio
 async def test_orchestrator_applies_modification_tool_and_preserves_history(orchestrator_testbed):
     orchestrator, _, _ = orchestrator_testbed
@@ -224,7 +216,6 @@ async def test_orchestrator_applies_modification_tool_and_preserves_history(orch
     assert get_slot_value(response["slots"], "name") == "Jonathan Doe"
     assert len(response["slots"]["name"]["modification_history"]) >= 1
 
-
 @pytest.mark.asyncio
 async def test_orchestrator_resumes_from_persisted_state(orchestrator_testbed):
     orchestrator, _, _ = orchestrator_testbed
@@ -244,7 +235,6 @@ async def test_orchestrator_resumes_from_persisted_state(orchestrator_testbed):
     assert get_slot_value(response["slots"], "name") == "Bob"
     assert get_slot_value(response["slots"], "venue") == "Amphoreus Ballroom"
     assert response["current_node"] == PHASE_EVENT_DATE
-
 
 @pytest.mark.asyncio
 async def test_orchestrator_clarify_path_uses_response_renderer(orchestrator_testbed):

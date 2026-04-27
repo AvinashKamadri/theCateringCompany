@@ -2,17 +2,12 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.state import (  # noqa: E402
     PHASE_COCKTAIL,
     fill_slot,
     get_slot_value,
     initialize_empty_slots,
 )
-
 
 @pytest.mark.asyncio
 async def test_non_wedding_auto_sets_cocktail_hour_without_messaging(monkeypatch) -> None:
@@ -43,7 +38,6 @@ async def test_non_wedding_auto_sets_cocktail_hour_without_messaging(monkeypatch
     text = (result.direct_response or "").lower()
     assert "cocktail hour" not in text
 
-
 @pytest.mark.asyncio
 async def test_non_wedding_ignores_cocktail_hour_keyword_as_service_style(monkeypatch) -> None:
     import agent.tools.menu_selection_tool as menu_tool_module
@@ -69,7 +63,6 @@ async def test_non_wedding_ignores_cocktail_hour_keyword_as_service_style(monkey
     )
 
     assert not get_slot_value(result.state["slots"], "service_style")
-
 
 @pytest.mark.asyncio
 async def test_wedding_accepts_cocktail_hour_service_style(monkeypatch) -> None:

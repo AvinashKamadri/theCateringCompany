@@ -2,13 +2,8 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.state import PHASE_TABLEWARE, fill_slot, get_slot_value, initialize_empty_slots  # noqa: E402
 from agent.tools.add_ons_tool import AddOnsTool  # noqa: E402
-
 
 @pytest.mark.asyncio
 async def test_skip_utensils_sets_no_utensils(monkeypatch) -> None:

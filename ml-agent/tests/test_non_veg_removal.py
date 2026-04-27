@@ -2,14 +2,9 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.models import ModificationExtraction  # noqa: E402
 from agent.state import PHASE_REVIEW, fill_slot, get_slot_value, initialize_empty_slots  # noqa: E402
 from agent.tools.modification_tool import ModificationTool  # noqa: E402
-
 
 @pytest.mark.asyncio
 async def test_remove_non_veg_appetizers_keeps_vegetarian(monkeypatch) -> None:
@@ -48,7 +43,6 @@ async def test_remove_non_veg_appetizers_keeps_vegetarian(monkeypatch) -> None:
     assert "Brie Bites" in remaining
     assert "Chicken Satay" not in remaining
     assert "Crab Cakes" not in remaining
-
 
 @pytest.mark.asyncio
 async def test_ambiguous_remove_all_does_not_loop_into_ambiguity(monkeypatch) -> None:
@@ -102,7 +96,6 @@ async def test_ambiguous_remove_all_does_not_loop_into_ambiguity(monkeypatch) ->
     ).get("mod_ack_text") or ""
     assert "removed" in str(mod_ack).lower()
     assert str(get_slot_value(slots, "appetizers") or "").lower() in {"", "none"}
-
 
 @pytest.mark.asyncio
 async def test_ambiguous_remove_multi_indices_removes_subset(monkeypatch) -> None:

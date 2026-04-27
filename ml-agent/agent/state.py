@@ -281,6 +281,83 @@ def unfilled_required(slots: dict) -> list[str]:
     return [name for name in REQUIRED_SLOTS if not is_filled(slots, name)]
 
 
+# ============================================================================
+# Pending-state TTL — prevents stale offers from haunting later turns
+# ============================================================================
+# These slots store one-shot dialog state (e.g. "do you want Dragon Chicken as
+# a special request?") that MUST be resolved on the very next turn. If the user
+# moves on without answering yes/no, the pending payload is stale and any code
+# that re-reads it will replay an outdated offer (the "Dragon Chicken bleed").
+#
+# Solution: every pending payload carries a `created_turn` field. On every
+# routing pass, validate_pending_state() clears any pending older than TTL.
+# ============================================================================
+
+_PENDING_SLOTS = (
+    "__pending_modification_request",
+    "__pending_modification_choice",
+    "__pending_menu_choice",
+    "__pending_confirmation",
+    "__pending_cancel_event_confirm",
+)
+_PENDING_TTL = 2  # turns
+
+
+def stamp_pending(payload: Any, turn_count: int) -> Any:
+    """Attach a `created_turn` marker to a pending-state payload.
+
+    Used by tools when setting a __pending_* slot. Idempotent: if the payload
+    already has a created_turn, returns it unchanged. Bare values (non-dict)
+    are wrapped: True becomes {"value": True, "created_turn": N}.
+    """
+    if isinstance(payload, dict):
+        if "created_turn" not in payload:
+            payload = {**payload, "created_turn": turn_count}
+        return payload
+    return {"value": payload, "created_turn": turn_count}
+
+
+def validate_pending_state(slots: dict, turn_count: int) -> list[str]:
+    """Auto-clear any __pending_* slot older than TTL or with a missing turn stamp.
+
+    Returns the list of slot names that were cleared. Called once at the top of
+    `route()` so every turn starts with a clean pending-state landscape.
+    """
+    cleared: list[str] = []
+    for slot_name in _PENDING_SLOTS:
+        if not is_filled(slots, slot_name):
+            continue
+        value = get_slot_value(slots, slot_name)
+        if not isinstance(value, dict):
+            # Legacy bare value — leave it alone, it has no payload to validate.
+            continue
+        created_turn = value.get("created_turn")
+        if created_turn is None:
+            # Pre-stamped payload (legacy turn). Stamp it now so it expires next turn.
+            new_payload = {**value, "created_turn": turn_count}
+            fill_slot(slots, slot_name, new_payload)
+            continue
+        try:
+            age = turn_count - int(created_turn)
+        except (TypeError, ValueError):
+            age = _PENDING_TTL + 1  # treat malformed as stale
+        if age >= _PENDING_TTL:
+            clear_slot(slots, slot_name)
+            cleared.append(slot_name)
+    return cleared
+
+
+def unwrap_pending(value: Any) -> Any:
+    """Inverse of stamp_pending — returns the original payload without TTL fields.
+
+    Tools that read a __pending_* slot can call this to get back the raw payload
+    they originally stored, regardless of whether stamping is enabled.
+    """
+    if isinstance(value, dict) and set(value.keys()) == {"value", "created_turn"}:
+        return value["value"]
+    return value
+
+
 __all__ = [
     "ConversationState",
     "ConversationStatus",
@@ -296,6 +373,9 @@ __all__ = [
     "is_filled",
     "filled_slot_summary",
     "unfilled_required",
+    "stamp_pending",
+    "validate_pending_state",
+    "unwrap_pending",
     # phases
     "PHASE_GREETING",
     "PHASE_EVENT_TYPE",

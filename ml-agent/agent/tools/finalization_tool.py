@@ -35,7 +35,7 @@ from agent.state import (
     get_slot_value,
     is_filled,
 )
-from agent.tools.base import ToolResult, history_for_llm
+from agent.tools.base import ToolResult, history_for_llm, tight_history_for_llm
 from agent.tools.structured_choice import normalize_structured_choice
 from tools.pricing import calculate_event_pricing
 
@@ -64,7 +64,8 @@ _SYSTEM_PROMPT = (
 
 
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    return history_for_llm(history)
+    """Tight window — last AI question + last user message only."""
+    return tight_history_for_llm(history)
 
 
 def _next_target(slots: dict) -> str:
@@ -296,9 +297,10 @@ class FinalizationTool:
             fill_slot(slots, "conversation_status", "pending_staff_review")
             state["conversation_phase"] = PHASE_COMPLETE
 
-            recap = _render_review_recap(client_summary)
+            # The user just saw the recap and pressed confirm — re-printing it
+            # makes the chat feel redundant. Just show the closing message.
             closing = (
-                "\n\nYour request is locked in and sent to our team. "
+                "Your request is locked in and sent to our team. "
                 "A coordinator will review everything and reach out shortly to confirm. "
                 "Thanks so much!"
             )
@@ -313,7 +315,7 @@ class FinalizationTool:
                     "next_phase": PHASE_COMPLETE,
                     "status": "pending_staff_review",
                 },
-                direct_response=recap + closing,
+                direct_response=closing,
             )
 
         next_target = _next_target(slots)
@@ -458,7 +460,7 @@ _TABLEWARE_PRETTY = {
 }
 
 _UTENSILS_PRETTY = {
-    "standard_plastic": "standard utensils",
+    "standard_plastic": "standard plastic utensils",
     "eco_biodegradable": "eco-friendly utensils",
     "bamboo": "bamboo utensils",
     "no_utensils": "no utensils",
@@ -675,9 +677,9 @@ def _render_review_recap(s: dict) -> str:
 
     service = (s.get("service_type") or "").lower()
     if service == "dropoff":
-        lines.append("• Service: delivery only")
+        lines.append("• Service: drop-off delivery (no on-site staff)")
     elif service == "onsite":
-        lines.append("• Service: full onsite staffing")
+        lines.append("• Service: on-site with our staff")
 
     meal = (s.get("meal_style") or "").lower()
     if meal == "plated":

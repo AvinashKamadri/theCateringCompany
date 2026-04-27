@@ -2,10 +2,6 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.models import MenuSelectionExtraction  # noqa: E402
 from agent.state import (  # noqa: E402
     PHASE_COCKTAIL,
@@ -13,7 +9,6 @@ from agent.state import (  # noqa: E402
     get_slot_value,
     initialize_empty_slots,
 )
-
 
 @pytest.mark.asyncio
 async def test_appetizer_style_not_filled_from_acknowledgement(monkeypatch) -> None:

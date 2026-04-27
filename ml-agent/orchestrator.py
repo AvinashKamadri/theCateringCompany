@@ -34,6 +34,7 @@ from agent.state import (
     initialize_empty_slots,
 )
 from agent.tools import TOOL_REGISTRY
+from agent.redis_cache import delete_state as _redis_delete, get_state as _redis_get, set_state as _redis_set
 from database.db_manager import (
     create_project_and_thread,
     init_db,
@@ -68,7 +69,17 @@ class AgentOrchestrator:
     ) -> Dict[str, Any]:
         await self._ensure_init()
 
-        existing = preloaded_state if preloaded_state is not None else await load_conversation_state(thread_id)
+        # Redis → Postgres fallback for hot session state.
+        # preloaded_state is passed by api.py when it already fetched Postgres state.
+        if preloaded_state is not None:
+            existing = preloaded_state
+        else:
+            existing = await _redis_get(thread_id)
+            if existing is None:
+                existing = await load_conversation_state(thread_id)
+                if existing:
+                    # Warm the cache for subsequent turns.
+                    await _redis_set(thread_id, existing)
 
         if existing:
             state_id = existing["id"]
@@ -241,7 +252,16 @@ class AgentOrchestrator:
         # because either `existing` was loaded above or `create_project_and_thread`
         # already created the row. So we can reuse `state_id` for the AI message
         # FK and run both writes concurrently.
-        new_state_id, _ = await asyncio.gather(
+        # Build the updated state dict so Redis gets a fresh copy.
+        _updated_cache_state = {
+            "id": state_id,
+            "project_id": project_id,
+            "current_node": conversation_phase,
+            "slots": slots,
+            "is_completed": is_complete,
+        }
+
+        new_state_id, _, _ = await asyncio.gather(
             save_conversation_state(
                 thread_id=thread_id,
                 project_id=project_id,
@@ -257,6 +277,9 @@ class AgentOrchestrator:
                 content=agent_content,
                 ai_conversation_state_id=state_id,
             ),
+            # Write to Redis cache concurrently with Postgres. Evict on complete
+            # so stale completed sessions don't block new sessions with same thread.
+            _redis_delete(thread_id) if is_complete else _redis_set(thread_id, _updated_cache_state),
         )
 
         slots_filled = sum(

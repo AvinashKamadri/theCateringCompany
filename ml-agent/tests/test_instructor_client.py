@@ -4,16 +4,11 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
 from agent import instructor_client as client_module
 from agent.trace_context import TraceContextFilter, trace_scope
 
-
 class _MiniSchema(BaseModel):
     value: str
-
 
 @pytest.mark.asyncio
 async def test_extract_uses_responses_api_with_json_schema(monkeypatch):
@@ -126,7 +121,6 @@ async def test_extract_falls_back_to_chat_completions_when_responses_fails(monke
 
     assert result == _MiniSchema(value="fallback")
 
-
 @pytest.mark.asyncio
 async def test_extract_retries_with_higher_max_tokens_on_truncated_json(monkeypatch):
     calls: list[int] = []
@@ -155,7 +149,6 @@ async def test_extract_retries_with_higher_max_tokens_on_truncated_json(monkeypa
     assert calls[1] > calls[0]
     assert calls[1] >= 1000
 
-
 @pytest.mark.asyncio
 async def test_generate_text_falls_back_to_chat_completions_when_responses_fails(monkeypatch):
     async def fail_create(**kwargs):
@@ -176,7 +169,6 @@ async def test_generate_text_falls_back_to_chat_completions_when_responses_fails
     )
 
     assert text == "fallback text"
-
 
 def test_trace_context_filter_injects_defaults_and_current_scope():
     record = SimpleNamespace()

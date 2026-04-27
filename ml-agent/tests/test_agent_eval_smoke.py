@@ -2,9 +2,6 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
 from agent.router import _quick_route
 from agent.state import (
     PHASE_MAIN_MENU,
@@ -15,7 +12,6 @@ from agent.state import (
     fill_slot,
     initialize_empty_slots,
 )
-
 
 @pytest.mark.skip(reason="quick_route removed for purely intent-based routing")
 @pytest.mark.parametrize(

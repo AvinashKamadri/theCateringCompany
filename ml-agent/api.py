@@ -2,17 +2,19 @@
 FastAPI server wrapping the catering intake agent.
 """
 # Code version — bump this to verify server is running latest code
-_CODE_VERSION = "v7-2026-04-20"
+_CODE_VERSION = "v13-2026-04-26"
 
+import asyncio
+import json
 import os
 import uuid
 import logging
 from contextlib import asynccontextmanager
 
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from orchestrator import AgentOrchestrator
@@ -150,8 +152,14 @@ class ChatResponse(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def serve_test_chat():
     """Serve the test chat UI."""
-    html_path = Path(__file__).parent / "test-chat.html"
-    return HTMLResponse(html_path.read_text(encoding="utf-8"))
+    # Try local first (ml-agent/test-chat.html), then the shared tests/ copy.
+    for candidate in [
+        Path(__file__).parent / "test-chat.html",
+        Path(__file__).parent.parent / "tests" / "test-chat.html",
+    ]:
+        if candidate.exists():
+            return HTMLResponse(candidate.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="test-chat.html not found")
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
@@ -391,3 +399,95 @@ async def calculate_pricing(req: PricingRequest):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# SSE streaming endpoint — improves perceived latency significantly.
+#
+# Flow:
+#   1. Client connects → receives immediate "thinking" event (~0ms)
+#   2. Full turn processed in background (route + tool + render)
+#   3. Response text streamed word-by-word so user sees text appear live
+#   4. Final "done" event carries the complete API response payload
+#
+# Keeps the existing POST /chat endpoint unchanged — frontend can adopt this
+# endpoint progressively without any breaking changes.
+# ---------------------------------------------------------------------------
+
+@app.get("/chat/stream")
+async def chat_stream(
+    message: str = Query(...),
+    thread_id: str | None = Query(default=None),
+    author_id: str = Query(default="user"),
+    project_id: str | None = Query(default=None),
+    user_id: str | None = Query(default=None),
+):
+    """SSE streaming chat endpoint. Returns text/event-stream."""
+    _thread_id = thread_id or str(uuid.uuid4())
+
+    import re as _re
+    _uuid_pattern = _re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.I)
+    resolved_user_id = user_id or (author_id if _uuid_pattern.match(author_id) else None)
+
+    async def _event_stream():
+        # Emit thinking indicator immediately so the user sees activity.
+        yield f"data: {json.dumps({'type': 'thinking', 'thread_id': _thread_id})}\n\n"
+
+        try:
+            existing_state = await load_conversation_state(_thread_id)
+            result = await orchestrator.process_message(
+                thread_id=_thread_id,
+                message=message,
+                author_id=author_id,
+                project_id=project_id,
+                user_id=resolved_user_id,
+                preloaded_state=existing_state,
+            )
+
+            full_text: str = result["content"] or ""
+
+            # Stream the response text word-by-word with a tiny delay for
+            # a natural typing effect. Direct responses (menus, structured
+            # cards) skip the word-by-word animation and arrive as one chunk.
+            words = full_text.split(" ")
+            _is_long_prose = len(words) > 6 and "\n" not in full_text[:120]
+            if _is_long_prose:
+                buffer = ""
+                for i, word in enumerate(words):
+                    buffer += ("" if i == 0 else " ") + word
+                    # Yield every 3 words as a chunk for smooth streaming
+                    if (i + 1) % 3 == 0 or i == len(words) - 1:
+                        yield f"data: {json.dumps({'type': 'token', 'content': buffer})}\n\n"
+                        buffer = ""
+                        await asyncio.sleep(0.025)
+            else:
+                # Structured / short response — send in one shot
+                yield f"data: {json.dumps({'type': 'token', 'content': full_text})}\n\n"
+
+            # Emit the complete response payload so the client can update state
+            done_payload = {
+                "type": "done",
+                "thread_id": _thread_id,
+                "project_id": result.get("project_id", ""),
+                "current_node": result["current_node"],
+                "slots_filled": result["slots_filled"],
+                "total_slots": result["total_slots"],
+                "is_complete": result["is_complete"],
+                "input_hint": result.get("input_hint"),
+            }
+            yield f"data: {json.dumps(done_payload)}\n\n"
+
+        except Exception as exc:
+            logger.error("SSE stream error: %s", exc)
+            err_text = "I hit a snag on my end — could you try that again in a moment?"
+            yield f"data: {json.dumps({'type': 'token', 'content': err_text})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'thread_id': _thread_id, 'is_complete': False})}\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Disable Nginx buffering for SSE
+        },
+    )

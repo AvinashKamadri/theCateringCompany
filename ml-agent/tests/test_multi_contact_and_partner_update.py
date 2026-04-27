@@ -2,10 +2,6 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.models import EventDetailsExtraction  # noqa: E402
 from agent.state import (  # noqa: E402
     PHASE_GUEST_COUNT,
@@ -17,7 +13,6 @@ from agent.tools.modification_tool import (  # noqa: E402
     ModificationExtraction,
     ModificationTool,
 )
-
 
 @pytest.mark.asyncio
 async def test_partner_phone_email_updated_together(monkeypatch) -> None:

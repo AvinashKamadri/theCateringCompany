@@ -2,10 +2,6 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.state import (  # noqa: E402
     PHASE_GREETING,
     PHASE_SERVICE_TYPE,
@@ -13,7 +9,6 @@ from agent.state import (  # noqa: E402
     initialize_empty_slots,
 )
 from agent.tools.basic_info_tool import BasicInfoTool  # noqa: E402
-
 
 @pytest.mark.asyncio
 async def test_service_type_is_collected_after_menu(monkeypatch) -> None:

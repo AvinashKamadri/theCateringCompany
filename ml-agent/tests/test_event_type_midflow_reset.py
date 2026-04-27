@@ -2,10 +2,6 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 @pytest.mark.asyncio
 async def test_midflow_event_type_change_requires_confirmation_and_resets_on_yes(monkeypatch) -> None:
     import agent.tools.modification_tool as mod_tool_module
@@ -73,7 +69,6 @@ async def test_midflow_event_type_change_requires_confirmation_and_resets_on_yes
     assert get_slot_value(result2.state["slots"], "desserts") is None
     assert result2.response_context.get("next_question_target") == "ask_honoree_name"
 
-
 @pytest.mark.asyncio
 async def test_event_type_mod_normalizes_to_wedding_from_to_prefix(monkeypatch) -> None:
     import agent.tools.modification_tool as mod_tool_module
@@ -114,7 +109,6 @@ async def test_event_type_mod_normalizes_to_wedding_from_to_prefix(monkeypatch) 
     assert isinstance(pending, dict)
     assert pending.get("question_id") == "confirm_event_type_reset"
     assert pending.get("new_event_type") == "Wedding"
-
 
 @pytest.mark.asyncio
 async def test_event_type_mod_extracts_value_from_full_sentence(monkeypatch) -> None:
@@ -159,7 +153,6 @@ async def test_event_type_mod_extracts_value_from_full_sentence(monkeypatch) -> 
     assert pending.get("question_id") == "confirm_event_type_reset"
     assert pending.get("new_event_type") == "Wedding"
 
-
 @pytest.mark.asyncio
 async def test_event_type_mod_with_no_value_asks_for_new_value(monkeypatch) -> None:
     import agent.tools.modification_tool as mod_tool_module
@@ -199,7 +192,6 @@ async def test_event_type_mod_with_no_value_asks_for_new_value(monkeypatch) -> N
     assert pending.get("stage") == "value"
     assert pending.get("target_slot") == "event_type"
     assert result.direct_response is not None and "event type" in result.direct_response.lower()
-
 
 @pytest.mark.asyncio
 async def test_event_type_change_from_review_surfaces_reset_confirmation(monkeypatch) -> None:

@@ -35,3 +35,6 @@ prisma>=0.15.0  # Prisma Client Python for PostgreSQL
 # Web server
 fastapi>=0.115.0
 uvicorn>=0.30.0
+
+# Redis session cache (graceful fallback if not available)
+redis[asyncio]>=5.0.0

@@ -30,7 +30,11 @@ from agent.ambiguous_choice import (
     resolve_multi_choice_selection,
 )
 from agent.cascade import apply_cascade
-from agent.event_identity import filter_identity_fields
+from agent.event_identity import (
+    EVENT_IDENTITY_SLOTS,
+    allowed_identity_slot_for_event_type,
+    filter_identity_fields,
+)
 from agent.instructor_client import MODEL_ROUTER, extract, filter_extraction_fields
 from agent.list_slot_reopen import (
     GENERIC_REOPEN_MARKERS,
@@ -98,7 +102,7 @@ from agent.tools.basic_info_tool import (
     _next_phase as _basic_next_phase,
     _phase_to_question as _basic_phase_to_question,
 )
-from agent.tools.base import ToolResult, history_for_llm
+from agent.tools.base import ToolResult, history_for_llm, tight_history_for_llm
 from agent.tools.finalization_tool import (
     _client_facing_summary as _finalization_client_facing_summary,
     _direct_response_for_target as _finalization_direct_response_for_target,
@@ -123,25 +127,38 @@ _SYSTEM_PROMPT = (
     "target_slot MUST be one of:\n"
     f"{', '.join(SLOT_NAMES)}\n\n"
     "Map natural language to slot names:\n"
-    "- 'name / first name / my name' → name\n"
-    "- 'email' → email | 'phone' → phone\n"
-    "- 'date / when' → event_date | 'venue / location / place' → venue\n"
-    "- 'guests / headcount' → guest_count\n"
+    "- 'name / first name / my name / your name' → name\n"
+    "- 'email / email address' → email | 'phone / number / cell / mobile' → phone\n"
+    "- 'date / when / event date / start date / scheduled for' → event_date\n"
+    "- 'venue / location / place / where it is / where we are' → venue\n"
+    "- 'guests / headcount / guest count / number of guests / attendee count / people / attendees' → guest_count\n"
+    "- 'cocktail hour / reception / reception only / full reception / both' → service_style "
+    "(NOT service_type — this is which menu sections to include, not staff/dropoff)\n"
+    "- 'service type / onsite / on-site / drop-off / dropoff / delivery / staff present' → service_type\n"
     "- 'wedding cake / cake' → wedding_cake\n"
-    "- 'apps / appetizers / starters' → appetizers\n"
-    "- 'mains / main dishes / entrees / menu' → selected_dishes\n"
-    "- 'dessert / desserts / coffee bar / cookies' → desserts\n"
-    "- 'bar / bar service' → bar_service | 'bar package' → bar_package\n"
-    "- 'drinks' → drinks | 'coffee' → coffee_service\n"
-    "- 'plates / tableware / china / disposable' → tableware\n"
-    "- 'utensils / cutlery' → utensils\n"
-    "- 'linens' → rentals\n\n"
+    "- 'apps / appetizers / starters / hors d\\'oeuvres' → appetizers\n"
+    "- 'mains / main dishes / entrees / menu / food / dishes' → selected_dishes\n"
+    "- 'dessert / desserts / cookies / sweets' → desserts\n"
+    "- 'bar / bar service / open bar' → bar_service | 'bar package / bar level' → bar_package\n"
+    "- 'drinks / beverages' → drinks\n"
+    "- 'coffee / coffee station / coffee bar / coffee service' → coffee_service\n"
+    "- 'plates / tableware / china / disposable / silverware' → tableware\n"
+    "- 'utensils / cutlery / forks / knives' → utensils\n"
+    "- 'linens / tablecloths / table linens' → rentals\n"
+    "- 'staff / servers / service staff / laborers / labor / onsite help' → labor_* slots (ask which if unclear)\n\n"
+    "Negation-style removals: 'no cake', 'without the bar', 'skip the dessert' → action='remove'.\n\n"
     "action: 'add', 'remove', 'replace', or 'reopen'.\n"
     "Use 'reopen' when the user wants to reselect an entire menu section, "
     "see that menu again, or start over on appetizers, mains, desserts, or rentals "
     "without naming concrete items.\n"
-    "items_to_remove: for list slots on remove/replace, the exact items.\n"
-    "items_to_add: for list slots on add/replace, the exact items.\n"
+    "items_to_remove: for list slots on remove/replace, use the EXACT item names from CURRENT FILLED LISTS. "
+    "Never return fuzzy terms like 'chicken' — scan the list and return ALL matching names "
+    "(e.g. 'remove chicken' → ['Chicken Satay', 'BBQ Chicken Slider'] if both appear in the current list). "
+    "Group keywords (chicken, seafood, egg, beef, pork, fish, lamb, vegetarian, vegan) match every item "
+    "in the current list that contains that word — list them all.\n"
+    "items_to_add: for list slots on add/replace, the item names the user wants added.\n"
+    "already_selected: if the user tries to ADD an item already in the CURRENT FILLED LISTS, "
+    "put its exact name here instead of items_to_add so we can tell them it's already there.\n"
     "new_value: for scalar slots, the new value as a string.\n\n"
     "The user may be correcting a slot unrelated to current_phase. Do not let the phase bias target_slot selection.\n\n"
     "# Examples\n"
@@ -151,21 +168,43 @@ _SYSTEM_PROMPT = (
     "   Output: target_slot='desserts', action='reopen'\n"
     "3. User: 'add 7 layer bars'\n"
     "   Output: target_slot='desserts', action='add', items_to_add=['7-Layer Bars']\n"
-    "4. User: 'remove the soup'\n"
-    "   Output: target_slot='appetizers', action='remove', items_to_remove=['soup']\n"
-    "5. User: 'actually change the date to may 5'\n"
+    "4. Context: appetizers includes 'Chicken Satay, BBQ Chicken Slider, Crab Dip'. User: 'remove chicken'\n"
+    "   Output: target_slot='appetizers', action='remove', items_to_remove=['Chicken Satay', 'BBQ Chicken Slider']\n"
+    "5. Context: appetizers includes 'Chicken Satay, BBQ Chicken Slider'. User: 'well remove chicken too'\n"
+    "   Output: target_slot='appetizers', action='remove', items_to_remove=['Chicken Satay', 'BBQ Chicken Slider']\n"
+    "6. Context: appetizers includes 'Chicken Satay, Chicken Banh Mi Slider, BBQ Chicken Slider'. "
+    "User: 'remove chicken except chicken satay'\n"
+    "   Output: target_slot='appetizers', action='remove', "
+    "items_to_remove=['Chicken Banh Mi Slider', 'BBQ Chicken Slider']\n"
+    "7. User: 'actually change the date to may 5'\n"
     "   Output: target_slot='event_date', action='replace', new_value='May 5'\n"
-    "6. User: 'swap the chicken for fish'\n"
-    "   Output: target_slot='selected_dishes', action='replace', items_to_remove=['chicken'], items_to_add=['fish']\n"
-    "7. User: 'start over on the rentals'\n"
+    "8. User: 'swap the chicken for fish'\n"
+    "   Output: target_slot='selected_dishes', action='replace', items_to_remove=['Chicken Satay'], items_to_add=['fish']\n"
+    "   (Use exact names from current list for items_to_remove; items_to_add can be natural language.)\n"
+    "9. User: 'start over on the rentals'\n"
     "   Output: target_slot='rentals', action='reopen'\n"
-    "8. User: 'no i want 50 guests'\n"
-    "   Output: target_slot='guest_count', action='replace', new_value='50'\n"
-    "9. User: 'hey i was thinking if we can drop the cake'\n"
-    "   Output: target_slot='wedding_cake', action='remove', new_value=None\n"
-    "   (NOTE: 'drop the cake' = remove wedding_cake. NOT related to drop-off service.)\n"
-    "10. User: 'actually skip the wedding cake'\n"
+    "10. User: 'no i want 50 guests'\n"
+    "    Output: target_slot='guest_count', action='replace', new_value='50'\n"
+    "11. User: 'hey i was thinking if we can drop the cake'\n"
     "    Output: target_slot='wedding_cake', action='remove', new_value=None\n"
+    "    (NOTE: 'drop the cake' = remove wedding_cake. NOT related to drop-off service.)\n"
+    "12. Context: appetizers includes 'Chicken Satay'. User: 'add chicken satay'\n"
+    "    Output: target_slot='appetizers', action='add', already_selected=['Chicken Satay'], items_to_add=[]\n"
+    "13. User: 'actually not cocktail hour but reception'\n"
+    "    Output: target_slot='service_style', action='replace', new_value='reception'\n"
+    "    (NOTE: cocktail/reception/both is service_style, NOT service_type. Service_type is onsite vs drop-off.)\n"
+    "14. User: 'change to drop-off'\n"
+    "    Output: target_slot='service_type', action='replace', new_value='Dropoff'\n"
+    "15. Context: mains includes 'Cheese Platter'; appetizers includes 'Adobo Lime Chicken Bites'. "
+    "User: 'add ravioli menu and remove cheese platter and remove adobo lime chicken bites from appetizers'\n"
+    "    Output: target_slot='selected_dishes', action='replace', "
+    "items_to_remove=['Cheese Platter'], items_to_add=['Ravioli Menu'], "
+    "secondary_modifications=[{target_slot: 'appetizers', action: 'remove', "
+    "items_to_remove: ['Adobo Lime Chicken Bites']}]\n"
+    "    (Multi-section actions: put the FIRST in primary fields and any extras in secondary_modifications.)\n"
+    "16. User: 'change my date to march 5 and venue to riverside park'\n"
+    "    Output: target_slot='event_date', action='replace', new_value='March 5', "
+    "secondary_modifications=[{target_slot: 'venue', action: 'replace', new_value: 'Riverside Park'}]\n"
 )
 
 
@@ -288,11 +327,13 @@ def _extract_multi_scalar_updates(message: str) -> dict[str, Any]:
     if meal_style:
         updates["meal_style"] = meal_style
 
-    # Service type
-    if "drop" in low or "onsite" in low or "on-site" in low or "on site" in low:
-        if "drop" in low:
+    # Service type — match whole-word "drop" variants to avoid "drop-off" / "teardrop"
+    _svc_drop = bool(re.search(r"\bdrop[\s-]?off\b|\bdropoff\b|\bdelivery\b", low))
+    _svc_onsite = bool(re.search(r"\bonsite\b|\bon-site\b|\bon\s+site\b", low))
+    if _svc_drop or _svc_onsite:
+        if _svc_drop:
             updates["service_type"] = "Dropoff"
-        elif "onsite" in low or "on-site" in low or "on site" in low:
+        elif _svc_onsite:
             updates["service_type"] = "Onsite"
 
     # Drinks/bar package in same utterance ("Beer+Wine", "full open bar", "no drinks")
@@ -580,7 +621,14 @@ def _infer_note_slot_from_message(message: str) -> str | None:
 
 
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    return history_for_llm(history)
+    """Tight window — last AI question + last user message only.
+
+    Modification extraction is hyper-sensitive to history pollution: a "remove
+    platter" message can get extracted as `items_to_add=["Dragon Chicken"]` if
+    the LLM sees an earlier turn where Dragon Chicken was discussed. Bound the
+    context to the immediate Q/A pair to eliminate cross-turn leakage.
+    """
+    return tight_history_for_llm(history)
 
 
 def _normalize_mod_list_texts(texts: list[str], *, action: str) -> list[str]:
@@ -623,16 +671,44 @@ def _contains_specific_modification_details(message: str) -> bool:
     return False
 
 
+def _looks_like_section_decline(message: str, target_slot: str) -> bool:
+    """Detect 'i dont want desserts' / 'no desserts' / 'skip desserts' style
+    declines aimed at a whole section. Used to force action=remove instead of
+    letting the LLM mistakenly pick action=reopen.
+
+    Delegates to the centralized intents.classify_decline so this logic lives
+    in exactly one place.
+    """
+    from agent.intents import classify_decline
+    intent = classify_decline(message or "", {})
+    return intent is not None and intent.section == target_slot
+
+
 def _is_remove_all_request(message: str, *, target_slot: str) -> bool:
     msg = (message or "").strip().lower()
     if not msg:
         return False
-    if not re.search(r"\b(remove|delete|drop|clear)\b", msg):
-        return False
-    if " all " not in f" {msg} " and not msg.endswith(" all"):
-        return False
     mentions = LIST_SLOT_MENTION_PATTERNS.get(target_slot, ())
-    return any(re.search(rf"\b{re.escape(term)}\b", msg) for term in mentions)
+    has_section_mention = any(re.search(rf"\b{re.escape(term)}\b", msg) for term in mentions)
+    if not has_section_mention:
+        return False
+    # Explicit "remove all X" / "delete all X" / "clear X" commands
+    has_remove_all_verb = (
+        re.search(r"\b(remove|delete|drop|clear)\b", msg)
+        and (" all " in f" {msg} " or msg.endswith(" all"))
+    )
+    if has_remove_all_verb:
+        return True
+    # Decline / no-want patterns directed at the whole section
+    # ("i dont want desserts", "no desserts", "skip desserts", "actually no desserts")
+    has_decline = bool(re.search(
+        r"\b(?:dont|don[\s']?t|do\s+not)\s+(?:want|need|include|have)\b"
+        r"|\bno\s+(?:more\s+)?(?:" + "|".join(re.escape(t) for t in mentions) + r")\b"
+        r"|\bskip\s+(?:the\s+)?(?:" + "|".join(re.escape(t) for t in mentions) + r")\b"
+        r"|\bcancel\s+(?:the\s+)?(?:" + "|".join(re.escape(t) for t in mentions) + r")\b",
+        msg,
+    ))
+    return has_decline
 
 
 def _needs_cross_category_confirmation(*, remove_slot: str, add_slot: str | None) -> bool:
@@ -690,6 +766,23 @@ def _resolve_modification_subject_slot(message: str) -> str | None:
             if re.search(rf"\b{re.escape(alias)}\b", msg):
                 return slot
     return None
+
+
+def _remap_identity_slot_for_event_type(target_slot: str, slots: dict) -> str:
+    """Silently redirect identity-slot edits to the slot allowed for this event_type.
+
+    Birthdays have no partner_name / company_name — but users routinely say
+    "change my partner name to X" when they mean honoree_name. Without this
+    remap the modification gets dropped (filter_identity_fields strips it),
+    leaving the user with a confusing no-op response. Mirror remaps for
+    Corporate (-> company_name).
+    """
+    if target_slot not in EVENT_IDENTITY_SLOTS:
+        return target_slot
+    allowed = allowed_identity_slot_for_event_type(get_slot_value(slots, "event_type"))
+    if allowed and allowed != target_slot:
+        return allowed
+    return target_slot
 
 
 def _mentions_wedding_cake_reopen(message: str) -> bool:
@@ -817,7 +910,7 @@ class ModificationTool:
                         "next_phase": PHASE_REVIEW,
                         "next_question_target": "show_review",
                     },
-                    direct_response="Got it — let me pull up your full recap now.",
+                    direct_response="Pulling up your full recap now.",
                 )
             elif decision == "no":
                 clear_slot(slots, "__pending_cancel_event_confirm")
@@ -919,7 +1012,7 @@ class ModificationTool:
                         },
                         input_hint=input_hint,
                         direct_response=(
-                            f"Got it — we’ll keep your event type as {old_event_type or 'is'}.\n\n"
+                            f"Your event type stays as {old_event_type or 'the current one'}.\n\n"
                             + (resume_prompt or "")
                         ).strip(),
                     )
@@ -950,7 +1043,7 @@ class ModificationTool:
                         "event_type": requested_event_type,
                     },
                     input_hint=_basic_input_hint_for_phase(PHASE_CONDITIONAL_FOLLOWUP, new_slots),
-                    direct_response=("Okay — I’ll reset the details for the new event type.\n\n" + prompt).strip(),
+                    direct_response=("Okay — I'll reset the details for the new event type.\n\n" + prompt).strip(),
                 )
 
         pending_choice = get_slot_value(slots, "__pending_modification_choice")
@@ -1011,11 +1104,26 @@ class ModificationTool:
         if extracted is None:
             return self._ask_modification_target(slots, state)
 
+        # FLAG-8: detect multi-slot messages ("change date to June 15 AND venue
+        # to Central Park"). Only one slot is extracted per turn. Flag silently
+        # so the user knows to follow up rather than assuming both were applied.
+        _multi_slot_hint = _detect_second_slot_mention(message, extracted.target_slot)
+
         inferred_note_slot = _infer_note_slot_from_message(message)
         if inferred_note_slot and extracted.target_slot in {"special_requests", "dietary_concerns", "additional_notes"}:
             extracted.target_slot = inferred_note_slot
 
         target_slot = extracted.target_slot
+
+        # Identity-slot remap: "change my partner name to X" on a Birthday means
+        # the honoree's name (no partner_name slot exists). Silently remap to the
+        # allowed identity slot for the current event_type so the modification
+        # actually applies, instead of getting stripped by filter_identity_fields
+        # and producing a stale-looking no-op response.
+        remapped = _remap_identity_slot_for_event_type(target_slot, slots)
+        if remapped != target_slot:
+            extracted.target_slot = remapped
+            target_slot = remapped
 
         # Name disambiguation: if the LLM picked "name" but we're in a wedding/
         # conditional phase where partner_name is also a valid candidate, ask
@@ -1055,6 +1163,39 @@ class ModificationTool:
             if corrected and corrected != target_slot:
                 extracted.target_slot = corrected
                 target_slot = corrected
+
+        # LLM detected the user tried to add items already in their selection.
+        # Short-circuit with a notice rather than silently doing nothing.
+        if (
+            target_slot in _LIST_SLOTS
+            and extracted.action == "add"
+            and extracted.already_selected
+            and not extracted.items_to_add
+        ):
+            next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                slots=slots,
+                state=state,
+            )
+            names = ", ".join(extracted.already_selected)
+            response = f"You already have {names} in your selection."
+            if resume_prompt:
+                response = f"{response}\n\n{resume_prompt}"
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "modification": {
+                        "target_slot": target_slot,
+                        "action": "no_op",
+                        "already_selected": list(extracted.already_selected),
+                    },
+                    "next_phase": next_phase,
+                    "next_question_target": next_target,
+                    "next_question_prompt": resume_prompt,
+                },
+                input_hint=input_hint,
+                direct_response=response,
+            )
 
         # Reject unknown or locked slots
         if target_slot not in SLOT_NAMES:
@@ -1108,9 +1249,18 @@ class ModificationTool:
                         # At least one item resolved to a real catalog entry —
                         # treat as incremental add, not a reopen.
                         should_reopen = False
+            # Decline override: if the user said "i dont want X" / "no X" / "skip X"
+            # for a list section, force action=remove so _is_remove_all_request can
+            # clear the slot. Otherwise the LLM may pick action=reopen and we'd show
+            # the menu again — exact opposite of what the user wants.
+            if message and _looks_like_section_decline(message, target_slot):
+                extracted.action = "remove"
+                should_reopen = False
             if should_reopen:
-                return await self._reopen_list_slot(target_slot, slots, state, message=message)
-            return await self._apply_list_modification(extracted, slots, state, message=message)
+                _primary = await self._reopen_list_slot(target_slot, slots, state, message=message)
+                return await self._finalize_with_secondaries(_primary, extracted, slots, state, history)
+            _primary = await self._apply_list_modification(extracted, slots, state, message=message)
+            return await self._finalize_with_secondaries(_primary, extracted, slots, state, history)
 
         if target_slot == "wedding_cake":
             # Wedding cake is a multi-step sub-flow. Any attempt to "add" or
@@ -1138,7 +1288,7 @@ class ModificationTool:
                     slots=slots,
                     state=state,
                 )
-                return ToolResult(
+                _primary_cake = ToolResult(
                     state=state,
                     response_context={
                         "tool": self.name,
@@ -1156,11 +1306,129 @@ class ModificationTool:
                     input_hint=input_hint,
                     direct_response=_compose_direct_response(ack_text, resume_prompt),
                 )
-            return self._reopen_wedding_cake(slots, state)
+                return await self._finalize_with_secondaries(_primary_cake, extracted, slots, state, history)
+            _primary_reopen_cake = self._reopen_wedding_cake(slots, state)
+            return await self._finalize_with_secondaries(_primary_reopen_cake, extracted, slots, state, history)
 
-        return await self._apply_scalar_modification(extracted, message, slots, state, history)
+        _primary_scalar = await self._apply_scalar_modification(extracted, message, slots, state, history)
+        return await self._finalize_with_secondaries(_primary_scalar, extracted, slots, state, history)
 
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_secondary_summary(sec, sec_ctx):
+        return _summarize_secondary(sec, sec_ctx)
+
+    async def _finalize_with_secondaries(
+        self,
+        primary: ToolResult,
+        extracted: ModificationExtraction,
+        slots: dict,
+        state: dict,
+        history: list[BaseMessage],
+    ) -> ToolResult:
+        """Apply any secondary modifications after the primary completes.
+
+        Multi-action messages ("add ravioli, remove cheese, remove adobo from
+        appetizers") get one primary action plus zero-to-three secondaries.
+        Secondaries run sequentially, mutating the same state. Failures are
+        logged but do not abort — the primary's response is still returned.
+
+        Skipped if:
+        - primary returned an error / ambiguous-choice (user needs to respond first)
+        - primary is a pending offer (e.g. special request) — secondary would race
+        - secondary list is empty
+        """
+        secondaries = getattr(extracted, "secondary_modifications", None) or []
+        if not secondaries:
+            return primary
+
+        ctx = primary.response_context or {}
+        # Don't apply secondaries if primary needs user input or hit an error.
+        if ctx.get("error") or ctx.get("next_question_target") in {
+            "ask_modification_choice",
+            "offer_special_request_for_unavailable",
+            "confirm_event_type_reset",
+            "confirm_add_instead",
+        }:
+            return primary
+        if get_slot_value(slots, "__pending_modification_request"):
+            return primary
+        if get_slot_value(slots, "__pending_modification_choice"):
+            return primary
+
+        applied_secondary_summaries: list[str] = []
+        for sec in secondaries[:3]:  # bound to 3 to keep behavior predictable
+            try:
+                # Build a minimal ModificationExtraction from the secondary
+                sec_extracted = ModificationExtraction(
+                    target_slot=sec.target_slot,
+                    action=sec.action,
+                    new_value=sec.new_value,
+                    items_to_remove=list(sec.items_to_remove or []),
+                    items_to_add=list(sec.items_to_add or []),
+                )
+                if sec.target_slot in _LIST_SLOTS:
+                    sec_result = await self._apply_list_modification(
+                        sec_extracted, slots, state, message=None,
+                    )
+                else:
+                    sec_result = await self._apply_scalar_modification(
+                        sec_extracted, "", slots, state, history,
+                    )
+                # If the secondary needed user input, abort the rest and return
+                # the primary unchanged — the user will be re-asked next turn.
+                sec_ctx = sec_result.response_context or {}
+                if sec_ctx.get("error") or sec_ctx.get("next_question_target") in {
+                    "ask_modification_choice",
+                    "offer_special_request_for_unavailable",
+                    "confirm_event_type_reset",
+                    "confirm_add_instead",
+                }:
+                    logger.info(
+                        "secondary_modification_needed_input slot=%s — aborting remaining",
+                        sec.target_slot,
+                    )
+                    break
+                # Build a per-secondary human summary line. Prefer named items
+                # (so the user sees "removed Adobo Lime Chicken Bites from
+                # appetizers") over generic "removed appetizers".
+                summary_line = _summarize_secondary(sec, sec_ctx)
+                if summary_line:
+                    applied_secondary_summaries.append(summary_line)
+            except Exception:
+                logger.exception(
+                    "secondary_modification_failed slot=%s action=%s",
+                    sec.target_slot, sec.action,
+                )
+                # Don't let a buggy secondary break the primary response.
+                continue
+
+        # Compose a combined acknowledgment that mentions the secondary actions
+        # alongside the primary. Past bug: the primary's direct_response was
+        # used verbatim, so "add ravioli, remove cheese, remove adobo from
+        # appetizers" only acknowledged "added Ravioli". Now the user sees all.
+        if applied_secondary_summaries:
+            new_ctx = dict(primary.response_context or {})
+            new_ctx["secondary_modifications_applied"] = applied_secondary_summaries
+            new_direct = primary.direct_response
+            if new_direct:
+                # Insert the secondary lines BEFORE the resume prompt (which is
+                # typically the last paragraph after a blank line). If we can't
+                # split cleanly, just prepend the secondaries before the existing text.
+                joined = "; ".join(applied_secondary_summaries)
+                if "\n\n" in new_direct:
+                    head, _, tail = new_direct.partition("\n\n")
+                    new_direct = f"{head} (also {joined}.)\n\n{tail}"
+                else:
+                    new_direct = f"{new_direct} Also {joined}."
+            primary = ToolResult(
+                state=primary.state,
+                response_context=new_ctx,
+                input_hint=primary.input_hint,
+                direct_response=new_direct,
+            )
+        return primary
 
     async def _apply_list_modification(
         self,
@@ -1241,6 +1509,13 @@ class ModificationTool:
         # Compute remove + add sets
         remove_texts = _normalize_mod_list_texts(list(mod.items_to_remove or []), action="remove")
         add_texts = _normalize_mod_list_texts(list(mod.items_to_add or []), action="add")
+        # Anti-hallucination: when the user clearly said "remove X", the extractor
+        # sometimes invents items_to_add from earlier conversation context (e.g.
+        # "Dragon Chicken" leaking from a prior special-request offer). Wipe
+        # add_texts on a pure remove action to prevent the offer-special-request
+        # path from triggering on stale data.
+        if mod.action == "remove":
+            add_texts = []
         if mod.action == "remove" and not remove_texts and mod.new_value:
             remove_texts = _normalize_mod_list_texts([str(mod.new_value)], action="remove")
         if mod.action == "add" and not add_texts and mod.new_value:
@@ -1379,11 +1654,23 @@ class ModificationTool:
             cleaned = re.sub(r"[^a-z\s-]+", " ", (text or "").lower()).strip()
             if not cleaned:
                 return False
+            # Strip leading conversational fillers: "well remove chicken" → "remove chicken"
+            cleaned = re.sub(
+                r"^(?:well|oh|also|and|so|um|uh|yeah|ok|okay|hey|actually|now|alright|right)\s+",
+                "", cleaned,
+            ).strip()
+            if not cleaned:
+                return False
             if re.search(r"\bnon[\s-]?veg\b|\bnon[\s-]?vegetarian\b", cleaned):
                 return True
             group_words = {"veg", "vegetarian", "egg", "seafood", "fish", "chicken", "pork", "beef"}
             tokens = [t for t in re.split(r"\s+", cleaned) if t]
-            stop = {"remove", "add", "delete", "drop", "take", "off", "all", "items", "item", "except", "but", "not", "and", "&"}
+            # "too", "also", "as well" at end of phrase are fillers, not meaningful content
+            stop = {
+                "remove", "add", "delete", "drop", "take", "off", "all", "items", "item",
+                "except", "but", "not", "and", "&", "too", "also", "please", "the", "those",
+                "them", "these",
+            }
 
             if cleaned in group_words:
                 return True
@@ -1410,6 +1697,83 @@ class ModificationTool:
             return include, exclude
 
         if target_slot in {"appetizers", "selected_dishes"} and isinstance(menu, dict):
+            # "remove chicken except chicken satay" — keyword group minus explicit keep items.
+            # Must run BEFORE the disambiguation / group-selector path so the "except" clause
+            # is honoured rather than ignored.
+            if mod.action in {"remove", "replace"} and current_items:
+                def _parse_keyword_except(text: str) -> tuple[list[str], list[str]] | None:
+                    """Return (to_remove_names, to_keep_names) for 'remove GROUP except ITEM' patterns."""
+                    norm = normalize_choice_text(text or "")
+                    if not norm:
+                        return None
+                    _kw_except = re.match(
+                        r"^(?:remove|delete|drop|clear)\s+(?P<kw>\w+(?:\s+\w+)?)"
+                        r"\s+(?:except|but(?:\s+not)?)\s+(?P<rest>.+)$",
+                        norm,
+                        flags=re.IGNORECASE,
+                    )
+                    if not _kw_except:
+                        return None
+                    keyword = (_kw_except.group("kw") or "").lower().strip()
+                    except_text = (_kw_except.group("rest") or "").strip()
+                    _group_words = {"veg", "vegetarian", "egg", "seafood", "fish", "chicken", "pork", "beef"}
+                    if keyword not in _group_words:
+                        return None
+                    # Items in current selection that contain the keyword
+                    kw_items = [n for n in current_items if keyword in n.lower()]
+                    if not kw_items:
+                        return None
+                    # Resolve except clause against keyword items
+                    except_parts = [p.strip().lower() for p in re.split(r"[,&]|\band\b", except_text) if p.strip()]
+                    keep = []
+                    for item in kw_items:
+                        item_lower = item.lower()
+                        if any(ep in item_lower or item_lower in ep for ep in except_parts):
+                            keep.append(item)
+                    to_remove = [n for n in kw_items if n not in keep]
+                    return (to_remove, keep) if to_remove else None
+
+                for _src in ([message] if message else []) + list(remove_texts):
+                    _kw_result = _parse_keyword_except(str(_src or ""))
+                    if _kw_result:
+                        _to_remove, _to_keep = _kw_result
+                        kept = [n for n in current_items if n not in set(_to_remove)]
+                        new_value = await self._format_value_for_slot(slot=target_slot, combined_names=kept, slots=slots)
+                        old_value = get_slot_value(slots, target_slot)
+                        fill_slot(slots, target_slot, new_value)
+                        effects = apply_cascade(target_slot, old_value, new_value, slots)
+                        next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                            slots=slots, state=state,
+                        )
+                        ack = _list_mod_ack(
+                            target_slot=target_slot,
+                            removed=_to_remove,
+                            added=[],
+                            new_value=new_value,
+                        ) or "Updated your selection."
+                        return ToolResult(
+                            state=state,
+                            response_context={
+                                "tool": self.name,
+                                "modification": {
+                                    "target_slot": target_slot,
+                                    "action": "remove",
+                                    "removed": _to_remove,
+                                    "added": [],
+                                    "old_value": old_value,
+                                    "new_value": new_value,
+                                    "remaining_items": parse_slot_items(new_value) if new_value and str(new_value).lower() != "none" else [],
+                                    "mod_ack_text": ack,
+                                },
+                                "cascade_effects": effects,
+                                "next_phase": next_phase,
+                                "next_question_target": next_target,
+                                "next_question_prompt": resume_prompt,
+                            },
+                            input_hint=input_hint,
+                            direct_response=_compose_direct_response(ack, resume_prompt),
+                        )
+
             # Bulk remove: "remove non-veg/seafood/egg/etc"
             if mod.action in {"remove", "replace"} and current_items:
                 group = None
@@ -1530,14 +1894,22 @@ class ModificationTool:
                             direct_response=_compose_direct_response(ack, resume_prompt),
                         )
 
-        # Replace no-op: "replace X with X"
+        # Replace no-op: "replace X with X" — same item on both sides.
+        # Handles both cases: item exists (already selected) and item doesn't
+        # exist (nothing to replace), so we never fuzzy-match something unrelated.
         if (
             mod.action == "replace"
             and len(remove_texts) == 1
             and len(add_texts) == 1
             and remove_texts[0].strip().lower() == add_texts[0].strip().lower()
-            and any(remove_texts[0].strip().lower() == ci.lower() for ci in current_items)
         ):
+            _item_lower = remove_texts[0].strip().lower()
+            _in_current = any(_item_lower == ci.lower() for ci in current_items)
+            _ack = (
+                "That's already selected."
+                if _in_current
+                else f"{remove_texts[0].strip().title()} isn't in your current selection — nothing to replace."
+            )
             next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
                 slots=slots,
                 state=state,
@@ -1557,8 +1929,93 @@ class ModificationTool:
                     "next_question_prompt": resume_prompt,
                 },
                 input_hint=input_hint,
-                direct_response=_compose_direct_response("That's already selected.", resume_prompt),
+                direct_response=_compose_direct_response(_ack, resume_prompt),
             )
+
+        # Category disambiguation with multi-select.
+        # If the user's removal text matches a category name (e.g. "platters",
+        # "appetizers", "chicken") rather than a specific dish, AND ≥2 currently-
+        # selected items in this slot fall in that category, ask which to remove
+        # via a multi-select widget. Avoids silently removing only one item when
+        # the user clearly means several.
+        if (
+            mod.action == "remove"
+            and current_items
+            and remove_texts
+            and len(remove_texts) == 1
+            and isinstance(menu, dict)
+            and menu
+        ):
+            _query = remove_texts[0].strip().lower()
+            # Skip if the query exactly matches a dish in the current selection
+            # (specific dish, not a category) — fall through to normal removal.
+            _exact_dish = any(_query == ci.lower() for ci in current_items)
+            if not _exact_dish and _query:
+                # Build category lookup from the menu data.
+                _items_in_category: list[str] = []
+                _matched_category: str | None = None
+
+                # 1) Direct category-name match (e.g. "platters" matches "Platters").
+                for cat_name, cat_items in menu.items():
+                    cat_lower = cat_name.lower()
+                    cat_loose = re.sub(r"[^a-z0-9]+", " ", cat_lower).strip()
+                    if (
+                        _query == cat_lower
+                        or _query == cat_loose
+                        or _query in cat_lower.split()
+                        or (_query.endswith("s") and _query[:-1] in cat_lower)
+                        or (cat_lower.endswith("s") and cat_lower[:-1] == _query)
+                    ):
+                        # Items in current selection that belong to this category.
+                        cat_item_names = {
+                            str(it.get("name") or "").strip().lower()
+                            for it in cat_items if it.get("name")
+                        }
+                        matches = [n for n in current_items if n.lower() in cat_item_names]
+                        if len(matches) > len(_items_in_category):
+                            _items_in_category = matches
+                            _matched_category = cat_name
+
+                if _matched_category and len(_items_in_category) >= 2:
+                    next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                        slots=slots, state=state,
+                    )
+                    options = [
+                        {"value": name, "label": name}
+                        for name in _items_in_category
+                    ]
+                    options.append({"value": "all", "label": f"All {_matched_category}"})
+                    fill_slot(slots, "__pending_modification_request", {
+                        "stage": "category_remove_disambiguation",
+                        "target_slot": target_slot,
+                        "category": _matched_category,
+                        "candidate_items": list(_items_in_category),
+                        "resume_phase": next_phase,
+                        "resume_target": next_target,
+                        "resume_prompt": resume_prompt,
+                    })
+                    items_list_text = "\n".join(
+                        f"{i + 1}. {name}" for i, name in enumerate(_items_in_category)
+                    )
+                    prompt = (
+                        f"You have multiple {_matched_category} selected. "
+                        f"Which would you like to remove?\n{items_list_text}\n"
+                        f"(Pick one, several, or 'all'.)"
+                    )
+                    return ToolResult(
+                        state=state,
+                        response_context={
+                            "tool": self.name,
+                            "action": "clarification",
+                            "next_question_target": "category_remove_disambiguation",
+                        },
+                        input_hint={
+                            "type": "options",
+                            "options": options,
+                            "multi": True,
+                        },
+                        direct_response=prompt,
+                    )
 
         if message and current_items and mod.action in {"remove", "replace"} and remove_texts:
             # Restrict grounding to items whose names contain the query tokens.
@@ -1569,80 +2026,68 @@ class ModificationTool:
                 item for item in current_items
                 if any(rt.lower() in item.lower() for rt in remove_texts)
             ]
-            # Pre-check: if the query is a partial word that matches multiple items
-            # and none of those items IS the query exactly, skip grounding and
-            # immediately show disambiguation. This prevents the grounding LLM from
-            # silently picking one (e.g. "remove adobo" → always ask which Adobo item).
-            if len(name_matched) > 1 and not any(
-                rt.strip().lower() == item.lower()
-                for rt in remove_texts
-                for item in name_matched
-            ):
-                ambiguous_query = remove_texts[0]
-                return self._ambiguous_list_choice_result(
-                    target_slot=target_slot,
-                    action=mod.action,
-                    choice_kind="remove",
-                    query=ambiguous_query,
-                    matches=name_matched,
-                    items_to_remove=remove_texts,
-                    items_to_add=add_texts,
-                    slots=slots,
-                    state=state,
+            # When a partial query matches multiple items (e.g. "remove paneer"
+            # matching both "Paneer Tikka" and "Paneer Butter Masala"), we used
+            # to ask the user which one. Per product decision: just remove all
+            # matches and let staff filter at review. Less friction, more flow.
+            # The Remove phase below uses _resolve_names_to_remove which already
+            # collects every matching item.
+            # No name-level match at all — the item isn't in the selection.
+            # Don't run grounding against the full list; that lets the LLM fuzzy-
+            # match an unrelated item (e.g. "crab cakes" → "Crab Dip").
+            current_lower = {n.lower() for n in current_items}
+            _all_exact = remove_texts and all(rt.strip().lower() in current_lower for rt in remove_texts)
+            if not name_matched and not _all_exact:
+                _not_found = remove_texts[0] if len(remove_texts) == 1 else ", ".join(remove_texts)
+                _nf_next_phase, _nf_next_target, _nf_input_hint, _nf_resume = (
+                    await _resume_after_modification(slots=slots, state=state)
                 )
-            grounded = await self._ground_selected_removals(
-                target_slot=target_slot,
-                message=message,
-                remove_texts=remove_texts,
-                current_items=name_matched if name_matched else current_items,
-                menu=menu,
-            )
-            if grounded is not None:
-                if grounded.status == "resolved" and grounded.matched_names:
-                    remove_texts = grounded.matched_names
-                    # If grounding resolved to multiple items, the user's query
-                    # was a partial word (e.g. "bacon") that hit several entries.
-                    # Force disambiguation regardless of what the LLM said.
-                    if len(remove_texts) > 1:
-                        ambiguous_query = grounded.reference_text or ", ".join(remove_texts)
-                        return self._ambiguous_list_choice_result(
-                            target_slot=target_slot,
-                            action=mod.action,
-                            choice_kind="remove",
-                            query=ambiguous_query,
-                            matches=grounded.matched_names,
-                            items_to_remove=remove_texts,
-                            items_to_add=add_texts,
-                            slots=slots,
-                            state=state,
-                        )
-                elif grounded.status == "ambiguous" and grounded.matched_names:
-                    ambiguous_query = grounded.reference_text or ", ".join(remove_texts)
-                    return self._ambiguous_list_choice_result(
-                        target_slot=target_slot,
-                        action=mod.action,
-                        choice_kind="remove",
-                        query=ambiguous_query,
-                        matches=grounded.matched_names,
-                        items_to_remove=[ambiguous_query],
-                        items_to_add=add_texts,
-                        slots=slots,
-                        state=state,
-                    )
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "modification": {
+                            "target_slot": target_slot,
+                            "action": "no_op",
+                            "old_value": current_value,
+                            "new_value": current_value,
+                        },
+                        "next_phase": _nf_next_phase,
+                        "next_question_target": _nf_next_target,
+                        "next_question_prompt": _nf_resume,
+                    },
+                    input_hint=_nf_input_hint,
+                    direct_response=_compose_direct_response(
+                        f"{_not_found.title()} isn't in your current selection.",
+                        _nf_resume,
+                    ),
+                )
 
-        ambiguous_choice = _find_ambiguous_removal_choice(current_items, remove_texts)
-        if ambiguous_choice:
-            return self._ambiguous_list_choice_result(
-                target_slot=target_slot,
-                action=mod.action,
-                choice_kind="remove",
-                query=ambiguous_choice["query"],
-                matches=ambiguous_choice["matches"],
-                items_to_remove=remove_texts,
-                items_to_add=add_texts,
-                slots=slots,
-                state=state,
-            )
+            # Skip grounding when all remove_texts are already exact names from
+            # current_items — the main LLM resolved group keywords to exact names
+            # via CURRENT FILLED LISTS context, so no further resolution needed.
+            if not _all_exact:
+                grounded = await self._ground_selected_removals(
+                    target_slot=target_slot,
+                    message=message,
+                    remove_texts=remove_texts,
+                    current_items=name_matched if name_matched else current_items,
+                    menu=menu,
+                )
+                if grounded is not None:
+                    if grounded.status == "resolved" and grounded.matched_names:
+                        remove_texts = grounded.matched_names
+                        # Multi-match: just remove all of them. No clarification ask.
+                    elif grounded.status == "ambiguous" and grounded.matched_names:
+                        # Same here — keep all matched items in the remove set
+                        # and let the Remove phase delete them all.
+                        remove_texts = grounded.matched_names
+
+        # Note: we used to ask "which one should I remove?" when a query like "paneer"
+        # matched multiple items. Removed because it interrupts the flow and the user
+        # almost always means "all matches". Staff filters edge cases at review time.
+        # The remove phase below already removes every matching item via
+        # _resolve_names_to_remove, so just continue.
 
         # --- Remove phase ---
         remaining = list(current_items)
@@ -1974,6 +2419,65 @@ class ModificationTool:
                         direct_response=_compose_direct_response("That's already selected.", resume_prompt),
                     )
 
+        # Replace where the add-side resolved to nothing — don't commit the remove.
+        # Without this guard the removal writes to state while the add silently fails.
+        if mod.action == "replace" and removed_names and not added_items_resolved:
+            _ra_next_phase, _ra_next_target, _ra_input_hint, _ra_resume = (
+                await _resume_after_modification(slots=slots, state=state)
+            )
+            if unavailable:
+                _unavail_str = ", ".join(unavailable)
+                fill_slot(slots, "__pending_modification_request", {
+                    "stage": "offer_special_request_for_unavailable",
+                    "items": unavailable,
+                    "removed_names": removed_names,
+                    "target_slot": target_slot,
+                    "resume_phase": _ra_next_phase,
+                    "resume_target": _ra_next_target,
+                    "resume_prompt": _ra_resume,
+                })
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "next_question_target": "offer_special_request_for_unavailable",
+                    },
+                    input_hint={
+                        "type": "options",
+                        "options": [
+                            {"value": "yes", "label": "Yes, add as special request"},
+                            {"value": "no", "label": "No, continue"},
+                        ],
+                    },
+                    direct_response=(
+                        f"\"{_unavail_str}\" isn't on our menu — {', '.join(removed_names)} hasn't been removed. "
+                        f"Want to add \"{_unavail_str}\" as a special request instead?"
+                    ),
+                )
+            else:
+                # Add-side item is already in the selection — nothing to do.
+                _already_str = ", ".join(add_texts)
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "modification": {
+                            "target_slot": target_slot,
+                            "action": "no_op",
+                            "old_value": current_value,
+                            "new_value": current_value,
+                        },
+                        "next_phase": _ra_next_phase,
+                        "next_question_target": _ra_next_target,
+                        "next_question_prompt": _ra_resume,
+                    },
+                    input_hint=_ra_input_hint,
+                    direct_response=_compose_direct_response(
+                        f"{_already_str.title()} is already selected — {', '.join(removed_names)} hasn't been removed.",
+                        _ra_resume,
+                    ),
+                )
+
         # Combine
         combined_names = list(remaining)
         if not cross_add_slot:
@@ -2001,6 +2505,39 @@ class ModificationTool:
                         "error": "dessert_overflow",
                         "max_desserts": _MAX_DESSERTS,
                         "current_desserts": remaining,
+                        "attempted_additions": attempted,
+                    },
+                    input_hint={
+                        "type": "options",
+                        "options": [
+                            {"value": f"remove {name}", "label": f"Remove {name}"}
+                            for name in remaining
+                        ],
+                    }
+                    if remaining
+                    else None,
+                    direct_response=prompt,
+                )
+
+        # Enforce mains cap (5 dishes) across modifications.
+        if target_slot == "selected_dishes":
+            _MAX_MAINS = 5
+            if len(combined_names) > _MAX_MAINS:
+                attempted = [i["name"] for i in added_items_resolved if i.get("name")]
+                attempted_text = f" (trying to add {', '.join(attempted)})" if attempted else ""
+                current_text = ", ".join(remaining) if remaining else "none"
+                prompt = (
+                    f"Main dishes are capped at {_MAX_MAINS}{attempted_text}. "
+                    f"Right now you have: {current_text}. "
+                    "Tell me which main to remove first."
+                )
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "error": "mains_overflow",
+                        "max_mains": _MAX_MAINS,
+                        "current_mains": remaining,
                         "attempted_additions": attempted,
                     },
                     input_hint={
@@ -2159,7 +2696,8 @@ class ModificationTool:
                 current = parse_slot_items(get_slot_value(slots, slot_name) or "")
                 norm_remove = {normalize_choice_text(i) for i in items}
                 kept = [i for i in current if normalize_choice_text(i) not in norm_remove]
-                fill_slot(slots, slot_name, ", ".join(kept) if kept else "")
+                new_value = await self._format_value_for_slot(slot=slot_name, combined_names=kept, slots=slots)
+                fill_slot(slots, slot_name, new_value)
             # Build confirmation and resume
             removed_summary = ", ".join(resolved)
             _, next_target, input_hint, resume_prompt = await _resume_after_modification(
@@ -2294,6 +2832,9 @@ class ModificationTool:
         msg_lower = normalize_choice_text(message or "")
         cancel_exact = {
             "nothing",
+            "no",
+            "nope",
+            "nah",
             "no change",
             "no changes",
             "nevermind",
@@ -2321,6 +2862,8 @@ class ModificationTool:
             return any(msg.startswith(p) for p in cancel_prefixes)
         if stage == "offer_special_request_for_unavailable":
             items = [str(v) for v in (pending_request.get("items") or []) if str(v).strip()]
+            pending_removed = [str(v) for v in (pending_request.get("removed_names") or []) if str(v).strip()]
+            pending_slot = str(pending_request.get("target_slot") or "")
             resume_prompt = str(pending_request.get("resume_prompt") or "")
             next_phase = pending_request.get("resume_phase")
             next_target = pending_request.get("resume_target")
@@ -2331,7 +2874,15 @@ class ModificationTool:
                 new_items_str = ", ".join(items)
                 new_sr = f"{existing_sr}; {new_items_str}".strip("; ") if existing_sr else new_items_str
                 fill_slot(slots, "special_requests", new_sr)
+                # Also commit the removal side of a replace operation
+                if pending_removed and pending_slot:
+                    current = parse_slot_items(get_slot_value(slots, pending_slot) or "")
+                    rem_lower = {r.lower() for r in pending_removed}
+                    kept = [i for i in current if i.lower() not in rem_lower]
+                    new_val = await self._format_value_for_slot(slot=pending_slot, combined_names=kept, slots=slots)
+                    fill_slot(slots, pending_slot, new_val)
                 state["conversation_phase"] = next_phase or state.get("conversation_phase")
+                ack = f"Removed {', '.join(pending_removed)} and added \"{new_items_str}\" to your special requests." if pending_removed else f"Added \"{new_items_str}\" to your special requests."
                 return ToolResult(
                     state=state,
                     response_context={
@@ -2340,10 +2891,7 @@ class ModificationTool:
                         "next_question_target": next_target,
                         "next_question_prompt": resume_prompt,
                     },
-                    direct_response=_compose_direct_response(
-                        f"Got it — added \"{new_items_str}\" to your special requests.",
-                        resume_prompt,
-                    ),
+                    direct_response=_compose_direct_response(ack, resume_prompt),
                 )
             elif yn == "no":
                 clear_slot(slots, "__pending_modification_request")
@@ -2359,31 +2907,18 @@ class ModificationTool:
                     direct_response=_compose_direct_response("No worries — let's continue!", resume_prompt),
                 )
             else:
-                items_str = ", ".join(items)
-                return ToolResult(
-                    state=state,
-                    response_context={
-                        "tool": self.name,
-                        "next_question_target": "offer_special_request_for_unavailable",
-                    },
-                    input_hint={
-                        "type": "options",
-                        "options": [
-                            {"value": "yes", "label": "Yes, add as special request"},
-                            {"value": "no", "label": "No, continue"},
-                        ],
-                    },
-                    direct_response=(
-                        f"We don't offer \"{items_str}\" in our menu. "
-                        f"Want to add it as a special request? (yes/no)"
-                    ),
-                )
+                # Not a yes/no — the user has clearly moved on to a new intent
+                # ("skip dessert", "remove platter", etc.). Clear the stale pending
+                # request and return None so the orchestrator re-routes the message
+                # normally instead of repeatedly re-prompting the abandoned offer.
+                clear_slot(slots, "__pending_modification_request")
+                return None
 
         if stage == "confirm_add_instead":
             add_slot = str(pending_request.get("add_slot") or "")
             items_to_add = [str(v) for v in (pending_request.get("items_to_add") or []) if str(v).strip()]
-            clear_slot(slots, "__pending_modification_request")
             if msg_lower in {"yes", "y", "yeah", "yep", "sure", "ok", "okay", "confirm", "go ahead"}:
+                clear_slot(slots, "__pending_modification_request")
                 return await self._apply_list_modification(
                     ModificationExtraction(
                         target_slot=add_slot,
@@ -2394,6 +2929,7 @@ class ModificationTool:
                     state,
                     message=message,
                 )
+            clear_slot(slots, "__pending_modification_request")
             # Default to no-op and resume the flow.
             next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
                 slots=slots,
@@ -2451,9 +2987,90 @@ class ModificationTool:
                     resume_prompt,
                 ),
             )
+        if stage == "category_remove_disambiguation":
+            target_slot = str(pending_request.get("target_slot") or "")
+            candidates = [
+                str(v) for v in (pending_request.get("candidate_items") or []) if str(v).strip()
+            ]
+            raw = (message or "").strip()
+            raw_lower = raw.lower()
+            selected_names: list[str] = []
+
+            if not candidates or not target_slot:
+                clear_slot(slots, "__pending_modification_request")
+                return None
+
+            # "all" / "both" / "every" → remove all candidates
+            if raw_lower in {"all", "both", "every", "everything", "all of them", "all of the above"}:
+                selected_names = list(candidates)
+            else:
+                # Parse comma-separated selections — supports numbered indices,
+                # substrings of item names, and exact names. Multi-select friendly.
+                parts = [p.strip() for p in re.split(r"[,;]+|\band\b", raw, flags=re.IGNORECASE) if p.strip()]
+                if not parts:
+                    parts = [raw] if raw else []
+                seen_lower: set[str] = set()
+                for part in parts:
+                    p_lower = part.lower()
+                    if p_lower.isdigit():
+                        idx = int(p_lower) - 1
+                        if 0 <= idx < len(candidates):
+                            name = candidates[idx]
+                            if name.lower() not in seen_lower:
+                                selected_names.append(name)
+                                seen_lower.add(name.lower())
+                        continue
+                    matched_name: str | None = None
+                    for cand in candidates:
+                        if cand.lower() == p_lower or p_lower in cand.lower():
+                            matched_name = cand
+                            break
+                    if matched_name and matched_name.lower() not in seen_lower:
+                        selected_names.append(matched_name)
+                        seen_lower.add(matched_name.lower())
+
+            if not selected_names:
+                # Couldn't parse — re-prompt with the same options.
+                items_list_text = "\n".join(
+                    f"{i + 1}. {name}" for i, name in enumerate(candidates)
+                )
+                category = str(pending_request.get("category") or "")
+                options = [{"value": name, "label": name} for name in candidates]
+                options.append({"value": "all", "label": f"All {category}" if category else "All"})
+                return ToolResult(
+                    state=state,
+                    response_context={
+                        "tool": self.name,
+                        "action": "clarification",
+                        "next_question_target": "category_remove_disambiguation",
+                    },
+                    input_hint={
+                        "type": "options",
+                        "options": options,
+                        "multi": True,
+                    },
+                    direct_response=(
+                        f"I didn't catch that. Pick one or more by number or name "
+                        f"(or 'all').\n{items_list_text}"
+                    ),
+                )
+
+            clear_slot(slots, "__pending_modification_request")
+            return await self._apply_list_modification(
+                ModificationExtraction(
+                    target_slot=target_slot,
+                    action="remove",
+                    items_to_remove=selected_names,
+                ),
+                slots,
+                state,
+                message="",
+            )
+
         if stage == "name_disambiguation":
             clear_slot(slots, "__pending_modification_request")
             target_slot = "partner_name" if "partner" in msg_lower else "name"
+            target_slot = _remap_identity_slot_for_event_type(target_slot, slots)
             return self._ask_for_target_value(
                 target_slot=target_slot,
                 slots=slots,
@@ -2471,6 +3088,7 @@ class ModificationTool:
             target_slot = _resolve_modification_subject_slot(message)
             if not target_slot:
                 return self._ask_modification_target(slots, state)
+            target_slot = _remap_identity_slot_for_event_type(target_slot, slots)
 
             clear_slot(slots, "__pending_modification_request")
             if origin_phase == PHASE_REVIEW:
@@ -3130,6 +3748,17 @@ class ModificationTool:
             applied: list[str] = []
             if extracted is not None:
                 values = extracted.model_dump(exclude_none=True)
+                # Identity-slot remap: LLM may extract partner_name even though
+                # this is a Birthday (no partner_name slot). Redirect to the
+                # event-type's allowed identity slot before filtering would
+                # otherwise drop the value entirely.
+                allowed_identity = allowed_identity_slot_for_event_type(get_slot_value(slots, "event_type"))
+                if allowed_identity:
+                    for src in EVENT_IDENTITY_SLOTS:
+                        if src == allowed_identity:
+                            continue
+                        if src in values and values[src] and not values.get(allowed_identity):
+                            values[allowed_identity] = values[src]
                 # Apply identity gating (partner/company/honoree) based on current event_type
                 values = filter_identity_fields(values, event_type=get_slot_value(slots, "event_type"))
 
@@ -3196,6 +3825,60 @@ class ModificationTool:
                     input_hint=input_hint,
                     direct_response=_compose_direct_response(ack_text, resume_prompt),
                 )
+
+        if target_slot == "service_style":
+            candidate = normalize_choice_text(str(new_value or message or ""))
+            style_map = {
+                "cocktail hour": ("cocktail hour", True),
+                "cocktail": ("cocktail hour", True),
+                "reception": ("reception", False),
+                "reception only": ("reception", False),
+                "full reception": ("reception", False),
+                "both": ("both", True),
+                "cocktail hour + reception": ("both", True),
+                "cocktail hour and reception": ("both", True),
+            }
+            resolved = None
+            for key, val in style_map.items():
+                if key in candidate:
+                    resolved = val
+                    break
+            if not resolved:
+                return self._ask_for_target_value(
+                    target_slot="service_style",
+                    slots=slots,
+                    state=state,
+                )
+            new_style, wants_cocktail = resolved
+            old_style = get_slot_value(slots, "service_style")
+            old_cocktail = get_slot_value(slots, "cocktail_hour")
+            fill_slot(slots, "service_style", new_style)
+            fill_slot(slots, "cocktail_hour", wants_cocktail)
+            effects = apply_cascade("service_style", old_style, new_style, slots)
+            effects.extend(apply_cascade("cocktail_hour", old_cocktail, wants_cocktail, slots))
+            ack_text = f"Switched to {new_style}."
+            next_phase, next_target, input_hint, resume_prompt = await _resume_after_modification(
+                slots=slots,
+                state=state,
+            )
+            return ToolResult(
+                state=state,
+                response_context={
+                    "tool": self.name,
+                    "modification": {
+                        "target_slot": "service_style",
+                        "action": mod.action,
+                        "old_value": old_style,
+                        "new_value": new_style,
+                        "mod_ack_text": ack_text,
+                    },
+                    "next_phase": next_phase,
+                    "next_question_target": next_target,
+                    "next_question_prompt": resume_prompt,
+                },
+                input_hint=input_hint,
+                direct_response=_compose_direct_response(ack_text, resume_prompt),
+            )
 
         if target_slot == "event_type":
             # Prefer the extractor's parsed value when present. The raw message
@@ -3727,6 +4410,16 @@ class ModificationTool:
             )
             if event_extracted is not None:
                 extracted_values = event_extracted.model_dump(exclude_none=True)
+                # Identity-slot remap: if the user's message says "partner name"
+                # but target_slot was remapped to honoree_name (Birthday) /
+                # company_name (Corporate), copy the LLM-extracted value across
+                # before filter_extraction_fields drops the source identity slot.
+                if target_slot in EVENT_IDENTITY_SLOTS:
+                    for src in EVENT_IDENTITY_SLOTS:
+                        if src == target_slot:
+                            continue
+                        if src in extracted_values and extracted_values[src] and not extracted_values.get(target_slot):
+                            extracted_values[target_slot] = extracted_values[src]
                 extracted_values = filter_extraction_fields(extracted_values, [target_slot])
                 effective_event_type = extracted_values.get("event_type") or get_slot_value(slots, "event_type")
                 extracted_values = filter_identity_fields(
@@ -4379,6 +5072,41 @@ _SLOT_PRETTY = {
 }
 
 
+def _summarize_secondary(sec, sec_ctx) -> str | None:
+    """Build a human-readable line for a secondary modification's effect.
+
+    Examples produced:
+      "removed Adobo Lime Chicken Bites from appetizers"
+      "added Ravioli Menu to main dishes"
+      "set service_type to Onsite"
+    """
+    target = str(getattr(sec, "target_slot", "") or "")
+    if not target:
+        return None
+    label = _SLOT_PRETTY.get(target, target.replace("_", " "))
+
+    items_to_remove = [str(x).strip().lower() for x in (getattr(sec, "items_to_remove", None) or []) if str(x).strip()]
+    items_to_add = [str(x).strip().lower() for x in (getattr(sec, "items_to_add", None) or []) if str(x).strip()]
+    new_value = getattr(sec, "new_value", None)
+    action = str(getattr(sec, "action", "") or "")
+
+    # List-slot phrasings — name the items so the user sees what changed.
+    parts: list[str] = []
+    if items_to_remove and items_to_add:
+        parts.append(f"replaced {', '.join(items_to_remove)} with {', '.join(items_to_add)} in {label}")
+    elif items_to_remove:
+        parts.append(f"removed {', '.join(items_to_remove)} from {label}")
+    elif items_to_add:
+        parts.append(f"added {', '.join(items_to_add)} to {label}")
+    elif action == "remove" and not items_to_remove:
+        parts.append(f"cleared {label}")
+    elif new_value is not None:
+        parts.append(f"set {label} to {new_value}")
+    if not parts:
+        return None
+    return parts[0]
+
+
 def _list_mod_ack(
     *,
     target_slot: str,
@@ -4455,10 +5183,20 @@ def _pretty_slot_value(target_slot: str, value: Any) -> str:
     return text
 
 
-def _compose_direct_response(ack_text: str | None, resume_prompt: str | None) -> str | None:
-    if ack_text and resume_prompt:
-        return f"{ack_text}\n\n{resume_prompt}"
-    return ack_text or resume_prompt
+def _compose_direct_response(
+    ack_text: str | None,
+    resume_prompt: str | None,
+    *,
+    multi_slot_hint: str | None = None,  # FLAG-8
+) -> str | None:
+    parts: list[str] = []
+    if ack_text:
+        parts.append(ack_text)
+    if multi_slot_hint:
+        parts.append(multi_slot_hint)
+    if resume_prompt:
+        parts.append(resume_prompt)
+    return "\n\n".join(parts) if parts else None
 
 
 async def _resume_after_modification(
@@ -4662,6 +5400,24 @@ _SLOT_LABELS = {
     "additional_notes": "notes",
     "followup_call_requested": "follow-up call",
 }
+
+
+_SECOND_SLOT_PATTERNS = re.compile(
+    r"\band\b.{2,60}\b(?:"
+    r"venue|location|date|guest\s*count|guests|headcount|name|email|phone|"
+    r"service\s*type|bar|drinks|coffee|cake|dessert|appetizer|mains|dishes|"
+    r"tableware|linens|rentals|labor|staff"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_second_slot_mention(message: str, primary_slot: str | None) -> str | None:
+    """FLAG-8: return a hint if the message likely mentions a second slot change
+    that won't be captured in this turn. Returns None if no second slot is detected."""
+    if not _SECOND_SLOT_PATTERNS.search(message):
+        return None
+    return "Heads up — it looks like you may have wanted to change something else too. Just let me know what else to update!"
 
 
 __all__ = ["ModificationTool"]

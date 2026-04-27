@@ -1,10 +1,7 @@
 import sys
 from typing import get_args
 
-
 # Keep imports consistent with the rest of the suite (run from repo root).
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
 
 def test_tool_registry_matches_toolname_literal() -> None:
     """Adding a new tool must update BOTH ToolName and TOOL_REGISTRY.
@@ -18,7 +15,6 @@ def test_tool_registry_matches_toolname_literal() -> None:
     toolname_values = set(get_args(ToolName))
     registry_names = set(TOOL_REGISTRY.keys())
     assert toolname_values == registry_names
-
 
 def test_phase_to_tool_values_are_valid_tools() -> None:
     """Router phase ownership must only reference known tools."""

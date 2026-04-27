@@ -34,7 +34,7 @@ from agent.state import (
     get_slot_value,
     is_filled,
 )
-from agent.tools.base import ToolResult, history_for_llm
+from agent.tools.base import ToolResult, history_for_llm, tight_history_for_llm
 from agent.modification_picker import make_modification_picker_result
 from agent.tools.structured_choice import normalize_structured_choice
 
@@ -182,6 +182,17 @@ _TABLEWARE_MAP: dict[str, str] = {
     "no tableware": "no_tableware",
     "no tableware needed": "no_tableware",
     "none": "no_tableware",
+    # Common style synonyms users type instead of clicking the structured option.
+    # "upgrade" alone is ambiguous between silver/gold; default to silver (cheapest upgrade).
+    "upgrade": "silver_disposable",
+    "upgrade tableware": "silver_disposable",
+    "premium": "silver_disposable",
+    "premium disposable": "silver_disposable",
+    "compostable": "silver_disposable",
+    "disposable": "standard_disposable",
+    "standard": "standard_disposable",
+    "skip": "no_tableware",
+    "skip tableware": "no_tableware",
 }
 
 _UTENSILS_MAP: dict[str, str] = {
@@ -200,7 +211,8 @@ _UTENSILS_MAP: dict[str, str] = {
     "no cutlery needed": "no_utensils",
 }
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    return history_for_llm(history)
+    """Tight window — last AI question + last user message only."""
+    return tight_history_for_llm(history)
 
 
 def _phase_of(slots: dict) -> str:
@@ -252,7 +264,7 @@ class AddOnsTool:
             _vague_replies = [
                 "Water, lemonades, and soft drinks are already included at no extra charge! The question is about extras — would you like to add coffee service or bar service? (yes or no)",
                 "Those are on us! Water and lemonades come with every package. Would you like to add coffee service, bar service, both, or neither?",
-                "Great news — water, lemonade, and non-alcoholic drinks are covered. Would you like to add coffee service or bar service on top of that?",
+                "Water, lemonade, and non-alcoholic drinks are all covered — want to add coffee service or bar service on top of that?",
             ]
             _idx = int(hashlib.md5(message.encode()).hexdigest(), 16) % len(_vague_replies)
             return ToolResult(
@@ -363,10 +375,28 @@ class AddOnsTool:
 
         input_hint = _input_hint_for_target(next_target, slots)
 
+        # Drinks "no" ack — when the user declines drinks/coffee/bar, prepend a
+        # short acknowledgement so the next prompt doesn't feel like the bot
+        # ignored their answer (matches the tone of other add-on acks).
+        direct_response: str | None = None
+        _filled_names = {f[0] for f in fills}
+        if "drinks" in _filled_names and get_slot_value(slots, "drinks") is False:
+            _next_q = _direct_response_for_target(next_target, slots) or ""
+            direct_response = ("No extra drinks then. " + _next_q).strip()
+        elif (
+            "coffee_service" in _filled_names
+            and "bar_service" in _filled_names
+            and get_slot_value(slots, "coffee_service") is False
+            and get_slot_value(slots, "bar_service") is False
+        ):
+            _next_q = _direct_response_for_target(next_target, slots) or ""
+            direct_response = ("Just water and lemonade then. " + _next_q).strip()
+
         return ToolResult(
             state=state,
             response_context=response_context,
             input_hint=input_hint,
+            direct_response=direct_response,
         )
 
 

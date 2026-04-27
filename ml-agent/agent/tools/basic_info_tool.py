@@ -40,7 +40,7 @@ from agent.state import (
     get_slot_value,
     is_filled,
 )
-from agent.tools.base import ToolResult, history_for_llm
+from agent.tools.base import ToolResult, history_for_llm, tight_history_for_llm
 from agent.modification_picker import make_modification_picker_result
 from agent.tools.structured_choice import normalize_structured_choice
 
@@ -57,14 +57,56 @@ _PHASE_ALLOWED_FIELDS = {
 }
 
 
+def _expected_field_for_phase(phase: str | None, slots: dict) -> str | None:
+    """Return the SINGLE field the extractor should focus on this turn.
+
+    Multi-field phases like PHASE_GREETING (name → email → phone) resolve to
+    the first unfilled field in the sequence. PHASE_CONDITIONAL_FOLLOWUP picks
+    the right identity slot based on event_type. Used by `_SYSTEM_PROMPT`'s
+    `expected_field` instruction to prevent multi-field hallucinations.
+    """
+    if not phase:
+        return None
+    allowed = _PHASE_ALLOWED_FIELDS.get(phase, [])
+    if not allowed:
+        return None
+    # Phase-specific resolution
+    if phase == PHASE_CONDITIONAL_FOLLOWUP:
+        et = str(get_slot_value(slots, "event_type") or "").lower()
+        if "wedding" in et:
+            return "partner_name"
+        if "corporate" in et:
+            return "company_name"
+        if "birthday" in et:
+            return "honoree_name"
+        return None
+    # Default: first unfilled field in the allowed order
+    for field in allowed:
+        if not is_filled(slots, field):
+            return field
+    return allowed[0]  # all filled — return first as a default
+
+
 _SYSTEM_PROMPT = (
     "# Role\n"
     "You extract event planning details from a customer message.\n\n"
-    "# Rules\n"
+    "# CRITICAL: ONE FIELD PER TURN\n"
+    "The user is being asked ONE specific question this turn — the `expected_field` "
+    "given in the input payload. Your job is to extract a value for THAT field if "
+    "the message provides one. All OTHER fields MUST be None.\n"
+    "Do NOT 'helpfully' fill multiple fields. Do NOT re-extract values you saw in "
+    "earlier turns. Do NOT cross-pollinate fields (a phone number is NEVER a name "
+    "or an email; an email is NEVER a name).\n"
+    "If the message clearly modifies a different filled slot ('change date to May 5'), "
+    "extract that one different field. Otherwise: only the expected_field.\n\n"
+    "# Field rules\n"
     "- Extract ONLY what is explicitly stated in the message.\n"
     "- Return None for anything not mentioned.\n"
     "- Never invent data.\n"
-    "- name: first+last if both given, else whatever is given.\n"
+    "- Never put an email address into the `name` field. Never put a phone number "
+    "into the `email` or `name` field. Names contain at least 2 letters and no '@'.\n"
+    "- name: first+last if both given, else whatever is given. Reject if it contains "
+    "'@' or looks like a phone number.\n"
     "- event_type: ONLY extract if the user clearly names an event type. "
     "Map 'wedding'->Wedding, 'birthday/bday'->Birthday, "
     "'corporate/company/office'->Corporate. "
@@ -80,18 +122,24 @@ _SYSTEM_PROMPT = (
     "- partner_name / company_name / honoree_name: only extract if event_type "
     "matches (Wedding / Corporate / Birthday).\n\n"
     "# Examples\n"
-    "1. User: 'Syed Ali'\n"
-    "   Extract: name='Syed Ali'\n"
-    "2. User: 'corporate'\n"
+    "1. expected_field=name, User: 'Syed Ali'\n"
+    "   Extract: name='Syed Ali' (all others None)\n"
+    "2. expected_field=email, User: 'syed@example.com'\n"
+    "   Extract: email='syed@example.com' (all others None — NOT name='syed', NOT phone)\n"
+    "3. expected_field=phone, User: '+1 1234567890'\n"
+    "   Extract: phone='+1 1234567890' (all others None — NOT email, NOT name)\n"
+    "4. expected_field=event_type, User: 'corporate'\n"
     "   Extract: event_type='Corporate'\n"
-    "3. User: 'drop off'\n"
+    "5. expected_field=service_type, User: 'drop off'\n"
     "   Extract: service_type='Dropoff'\n"
-    "4. User: 'around 100'\n"
+    "6. expected_field=guest_count, User: 'around 100'\n"
     "   Extract: guest_count=100\n"
-    "5. User: '2026-04-25'\n"
+    "7. expected_field=event_date, User: '2026-04-25'\n"
     "   Extract: event_date='2026-04-25'\n"
-    "6. User: 'change the date'\n"
+    "8. expected_field=venue, User: 'change the date'\n"
     "   Extract: (all fields None)\n"
+    "9. expected_field=venue, User: 'actually change date to May 5'\n"
+    "   Extract: event_date='May 5' (legitimate cross-slot mid-flow correction)\n"
 )
 
 _BASIC_FOLLOWUP_FILLER = {
@@ -203,7 +251,8 @@ def _normalize_tbd_venue(message_lower: str) -> str | None:
 
 
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    return history_for_llm(history)
+    """Tight window — last AI question + last user message only."""
+    return tight_history_for_llm(history)
 
 
 def _menu_is_complete(slots: dict) -> bool:
@@ -472,15 +521,46 @@ class BasicInfoTool:
             # LLM extraction runs normally — _PHASE_ALLOWED_FIELDS filters the
             # result to only partner_name / company_name / honoree_name, so
             # any `name` over-extraction is discarded automatically.
+            #
+            # Deterministic fallback for partner/honoree/company name. The LLM
+            # extractor is occasionally flaky (says "Sydney Sweeney" → extracts
+            # nothing → bot re-asks the same question). If the user's message
+            # is a clean 1-4 word letter-only answer to a wedding/birthday/
+            # corporate identity prompt, fill the slot deterministically.
+            if not _skip_extraction:
+                _candidate = (message or "").strip()
+                _word_count = len(_candidate.split())
+                _looks_like_a_name = bool(
+                    _candidate
+                    and 1 <= _word_count <= 4
+                    and re.search(r"[A-Za-z]{2,}", _candidate)
+                    and not re.search(r"\d{3,}", _candidate)  # no long digit runs
+                    and "@" not in _candidate                  # not an email
+                )
+                if _looks_like_a_name:
+                    if "wedding" in _event_type_val and not is_filled(slots, "partner_name"):
+                        fill_slot(slots, "partner_name", _candidate)
+                        filled_this_turn.append(("partner_name", _candidate))
+                        _skip_extraction = True
+                    elif "birthday" in _event_type_val and not is_filled(slots, "honoree_name"):
+                        fill_slot(slots, "honoree_name", _candidate)
+                        filled_this_turn.append(("honoree_name", _candidate))
+                        _skip_extraction = True
+                    elif "corporate" in _event_type_val and not is_filled(slots, "company_name"):
+                        fill_slot(slots, "company_name", _candidate)
+                        filled_this_turn.append(("company_name", _candidate))
+                        _skip_extraction = True
 
         if state.get("conversation_phase") == PHASE_WEDDING_CAKE:
             cake_stage = _wedding_cake_stage(slots)
             if cake_stage == "ask_wedding_cake":
+                from agent.intents import classify_skip_gate
+                _cake_skip = classify_skip_gate(message, PHASE_WEDDING_CAKE, slots)
                 if _msg_lower in {"yes", "yes please", "yes, add a wedding cake"}:
                     fill_slot(slots, "__wedding_cake_gate", True)
                     filled_this_turn.append(("__wedding_cake_gate", True))
                     _skip_extraction = True
-                elif _msg_lower in {"no", "no thanks", "skip"}:
+                elif _cake_skip is not None:
                     fill_slot(slots, "__wedding_cake_gate", False)
                     fill_slot(slots, "wedding_cake", "none")
                     filled_this_turn.append(("__wedding_cake_gate", False))
@@ -640,10 +720,25 @@ class BasicInfoTool:
                     _skip_extraction = True
 
         if not _skip_extraction:
+            # Tell the extractor exactly which field is expected this turn so it
+            # doesn't fill three fields when only one was asked. Past bug: phone
+            # answer turn had the LLM fill name=email, email=phone, etc. With
+            # `expected_field` in the payload + tightened system prompt, the
+            # extractor only fills the asked-for field unless the user explicitly
+            # corrects a different filled slot.
+            _expected_field = _expected_field_for_phase(
+                state.get("conversation_phase"), slots,
+            )
+            user_payload = (
+                f"expected_field: {_expected_field}\n"
+                f"customer_message: {message}"
+                if _expected_field
+                else message
+            )
             extracted = await extract(
                 schema=EventDetailsExtraction,
                 system=_SYSTEM_PROMPT,
-                user_message=message,
+                user_message=user_payload,
                 history=_history_for_llm(history),
             )
 
@@ -670,10 +765,45 @@ class BasicInfoTool:
                 old_value = get_slot_value(slots, field_name)
                 if field_name == "event_date":
                     value = value.isoformat() if hasattr(value, "isoformat") else str(value)
-                # Name must contain at least one letter — reject purely numeric/symbol strings
-                if field_name == "name":
+                # Name validation — reject pure numeric/symbol strings, reject when
+                # digits outnumber letters, reject too-short noise.
+                if field_name in {"name", "partner_name", "honoree_name", "company_name"}:
                     name_str = str(value or "").strip()
-                    if not any(c.isalpha() for c in name_str):
+                    # Skip silently if the LLM put an email/phone-shaped value
+                    # into a name field. Past bug: user typed phone, LLM re-extracted
+                    # name=email string from history → recap header said email, not name.
+                    if "@" in name_str or re.match(r"^[+\d][\d\s\-().]+$", name_str):
+                        continue
+                    # Don't overwrite an already-filled name with a different value
+                    # unless this is an explicit modification (handled elsewhere).
+                    # Past bug: LLM re-extracted name on later turns, clobbering the
+                    # original. Only allow overwrite if value matches existing.
+                    existing_name = get_slot_value(slots, field_name)
+                    if existing_name and existing_name != name_str:
+                        # Existing value is set — let modification_tool change it
+                        # explicitly. Don't allow accidental clobbers.
+                        continue
+                    letters = sum(1 for c in name_str if c.isalpha())
+                    digits = sum(1 for c in name_str if c.isdigit())
+                    name_invalid = (
+                        letters == 0
+                        or letters < 2
+                        or digits > letters
+                        or not re.search(r"[A-Za-z]{2,}", name_str)
+                    )
+                    if name_invalid:
+                        target_for_field = {
+                            "name": "ask_name",
+                            "partner_name": "ask_partner_name",
+                            "honoree_name": "ask_honoree_name",
+                            "company_name": "ask_company_name",
+                        }[field_name]
+                        retry_msg = {
+                            "name": "That doesn't look like a name — what's your name?",
+                            "partner_name": "Hmm, doesn't look like a name. What's your partner's name?",
+                            "honoree_name": "Doesn't look like a name. Who are we celebrating?",
+                            "company_name": "Doesn't look like a company name. Which company is this for?",
+                        }[field_name]
                         return ToolResult(
                             state=state,
                             response_context={
@@ -681,9 +811,76 @@ class BasicInfoTool:
                                 "filled_this_turn": [],
                                 "cascade_effects": [],
                                 "next_phase": state.get("conversation_phase"),
-                                "next_question_target": "ask_name",
+                                "next_question_target": target_for_field,
                             },
-                            direct_response="That doesn't look like a name. Could you please share your first and last name?",
+                            direct_response=retry_msg,
+                        )
+
+                # Phone validation — must contain at least 7 digits and not be
+                # mostly letters. Past bug: "guggugagaga" was accepted as a phone.
+                # Skip silently when the LLM accidentally returned an empty string
+                # or an email-shaped value for the phone field — let other slots fill.
+                if field_name == "phone":
+                    phone_str = str(value or "").strip()
+                    if not phone_str or "@" in phone_str:
+                        # LLM hallucinated phone='' or phone='someone@example.com';
+                        # skip filling and DON'T error the whole turn.
+                        continue
+                    digit_count = sum(1 for c in phone_str if c.isdigit())
+                    letter_count = sum(1 for c in phone_str if c.isalpha())
+                    phone_invalid = (
+                        digit_count < 7  # need at least 7 digits for any real phone
+                        or letter_count > digit_count  # mostly letters → not a phone
+                        or not re.search(r"\d", phone_str)
+                    )
+                    if phone_invalid:
+                        return ToolResult(
+                            state=state,
+                            response_context={
+                                "tool": self.name,
+                                "filled_this_turn": [],
+                                "cascade_effects": [],
+                                "next_phase": state.get("conversation_phase"),
+                                "next_question_target": "ask_phone",
+                            },
+                            direct_response="That doesn't look like a phone number — what's your phone number?",
+                        )
+
+                # Email validation — must be a parseable email address.
+                # Past bug: phone-shaped value ("+1 1234567890") was extracted into
+                # `email` field and rejected as "not an email" — confusing the user
+                # because they were asked for phone, not email. Skip silently when
+                # the value clearly isn't an email attempt (no '@', mostly digits).
+                if field_name == "email":
+                    email_str = str(value or "").strip()
+                    if not email_str:
+                        continue  # nothing to fill, nothing to validate
+                    digit_count = sum(1 for c in email_str if c.isdigit())
+                    letter_count = sum(1 for c in email_str if c.isalpha())
+                    looks_like_phone = (
+                        "@" not in email_str
+                        and digit_count >= 7
+                        and digit_count > letter_count
+                    )
+                    if looks_like_phone:
+                        # LLM mis-routed a phone string into the email slot.
+                        continue
+                    email_invalid = not re.match(
+                        r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$",
+                        email_str,
+                        re.IGNORECASE,
+                    )
+                    if email_invalid:
+                        return ToolResult(
+                            state=state,
+                            response_context={
+                                "tool": self.name,
+                                "filled_this_turn": [],
+                                "cascade_effects": [],
+                                "next_phase": state.get("conversation_phase"),
+                                "next_question_target": "ask_email",
+                            },
+                            direct_response="That doesn't look like an email address — what's your email?",
                         )
                 fill_slot(slots, field_name, value)
                 filled_this_turn.append((field_name, value))

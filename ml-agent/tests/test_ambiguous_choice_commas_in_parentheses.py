@@ -1,11 +1,6 @@
 import sys
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.ambiguous_choice import resolve_multi_choice_selection  # noqa: E402
-
 
 def test_resolve_multi_choice_selection_does_not_split_commas_in_parentheses() -> None:
     options = [

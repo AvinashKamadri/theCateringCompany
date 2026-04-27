@@ -23,7 +23,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel as _BaseModel
 
-from agent.instructor_client import MODEL_ROUTER, extract
+from agent.instructor_client import MODEL_ROUTER, extract, generate_text
 from agent.tools.base import history_for_llm
 from agent.list_slot_reopen import explicit_reopen_list_slot, menu_section_for_phase
 from agent.models import OrchestratorDecision, TurnRoutingSignals
@@ -60,6 +60,7 @@ from agent.state import (
     get_slot_value,
     is_filled,
     unfilled_required,
+    validate_pending_state,
 )
 from agent.tools.add_ons_tool import (
     _next_target as _addons_next_target,
@@ -73,13 +74,39 @@ logger = logging.getLogger(__name__)
 
 CONFIDENCE_THRESHOLD = 0.80
 
+# FLAG-9: phase-specific clarifying questions for the "unclear" intent path.
+# When TurnRoutingSignals can't determine intent, return a targeted re-ask
+# rather than an empty clarifying_question that forces the LLM generator to guess.
+_PHASE_CLARIFYING_QUESTIONS: dict[str, str] = {
+    PHASE_GREETING:            "Sorry — what's your name?",
+    PHASE_EVENT_TYPE:          "What kind of event is this — wedding, birthday, corporate, or something else?",
+    PHASE_CONDITIONAL_FOLLOWUP: "Could you clarify that a bit? I want to make sure I get the name right.",
+    PHASE_EVENT_DATE:          "What date are you thinking for the event?",
+    PHASE_VENUE:               "Where's the event happening? Or say TBD if it's not locked in yet.",
+    PHASE_GUEST_COUNT:         "How many people are you expecting? Even a rough number works.",
+    PHASE_SERVICE_TYPE:        "Did you want drop-off delivery or full onsite service with staff?",
+    PHASE_COCKTAIL:            "Not sure I caught that — want to do a cocktail hour, the full reception, or both?",
+    PHASE_MAIN_MENU:           "Could you repeat that? I want to make sure I pick the right dishes.",
+    PHASE_DESSERT:             "Want to add desserts, or skip them?",
+    PHASE_DRINKS_BAR:          "Did you want to add drinks or bar service, or skip for now?",
+    PHASE_TABLEWARE:           "Could you clarify what you'd like for tableware?",
+    PHASE_RENTALS:             "Did you need any rentals like linens, tables, or chairs?",
+    PHASE_LABOR:               "What onsite labor services did you want to include?",
+    PHASE_SPECIAL_REQUESTS:    "Did you have a special request in mind, or would you like to skip?",
+    PHASE_DIETARY:             "Any dietary needs or food allergies to note, or are we good?",
+    PHASE_FOLLOWUP:            "Want a quick follow-up call, or are you good to go from here?",
+    PHASE_REVIEW:              "Does the summary look right, or is there something you'd like to change?",
+}
+
 # Words that almost always mean "I want to change something already filled."
 # Hard markers: alone signal modification intent unambiguously.
 _HARD_MOD_KEYWORDS = frozenset({
     "change", "update", "replace", "swap", "remove", "delete", "edit",
     "switch", "different", "wrong", "correct", "modify", "fix",
     "take out", "take off", "add back", "bring back", "put back", "undo",
-    "not a", "not an", "it is a", "it's a",
+    "not a", "not an", "it is a", "it's a", "its a", "its an",
+    # FLAG-2: common natural-language removal phrases missed before
+    "get rid of", "lose the", "ditch", "drop the", "no more",
 })
 
 # Soft markers: hedging words that only signal modification when paired with a hard marker
@@ -89,6 +116,9 @@ _SOFT_MOD_KEYWORDS = frozenset({
     "actually", "no wait", "wait", "i meant", "cancel",
     "mistake", "my bad", "mb", "sorry", "oops", "scratch that", "nevermind",
     "never mind", "instead",
+    # Common typos for "actually" — users sometimes mistype and we don't want
+    # the modification intent to be silently dropped.
+    "acutally", "actaully", "acually",
 })
 
 _MOD_KEYWORDS = _HARD_MOD_KEYWORDS | _SOFT_MOD_KEYWORDS
@@ -416,7 +446,16 @@ def _looks_like_modification_intent(message: str) -> bool:
     # explicit change/removal verb so "actually, I'd like salmon" (first fill)
     # doesn't block the free-text autoroute.
     if has_soft:
-        return bool(re.search(r"\b(?:remove|delete|drop|replace|swap|change|update|fix|edit)\b", msg))
+        change_verb = bool(re.search(r"\b(?:remove|delete|drop|replace|swap|change|update|fix|edit)\b", msg))
+        if change_verb:
+            return True
+        # FLAG-1: "actually/wait/sorry ... instead" — hedging + alternative phrasing
+        # is almost always a correction ("actually salmon instead"). Guard: require
+        # the hedging word to be present alongside "instead" so bare "instead" in a
+        # first-fill answer (e.g. "I'd like a reception instead") doesn't trigger this.
+        if re.search(r"\b(?:actually|no wait|wait|sorry|i meant)\b", msg) and re.search(r"\binstead\b", msg):
+            return True
+        return False
 
     if re.search(r"\b(?:add|readd|re-add|bring|put)\b.*\bback\b", msg):
         return True
@@ -478,6 +517,59 @@ def _quick_route(message: str, state: dict) -> str | None:
     phase = state.get("conversation_phase") or PHASE_GREETING
     msg_lower = _normalize_choice(message)
 
+    # Deterministic gate-skip — single source of truth in agent/intents.py.
+    # If the user's reply is a known skip value for the current phase's gate,
+    # route directly to the owning tool. Must run BEFORE any modification-intent
+    # detection since "skip" is not a modification verb.
+    from agent.intents import classify_skip_gate
+    if msg_lower:
+        skip_intent = classify_skip_gate(message, phase, slots)
+        if skip_intent:
+            if skip_intent.section in {"desserts"}:
+                return "menu_selection_tool"
+            if skip_intent.section in {"wedding_cake"}:
+                return "basic_info_tool"
+            if skip_intent.section in {"rentals", "tableware", "drinks", "labor"}:
+                return "add_ons_tool"
+            if skip_intent.section in {"special_requests", "dietary_concerns", "followup_call_requested"}:
+                return "finalization_tool"
+
+    # Wedding cake → desserts phase-jump: when the user is mid wedding-cake
+    # flavor/filling/buttercream and says "actually lets do desserts" / "want
+    # desserts" / "add desserts", treat it as an explicit phase-jump back to
+    # the dessert section rather than answering the cake question.
+    if (
+        phase == PHASE_WEDDING_CAKE
+        and is_filled(slots, "__wedding_cake_gate")
+        and get_slot_value(slots, "__wedding_cake_gate") is True
+        and msg_lower
+        and re.search(
+            r"\b(?:lets?\s+do|let'?s\s+do|actually\s+(?:do\s+)?|want|add|do)\s+desserts?\b"
+            r"|^desserts?$"
+            r"|\bdessert\s+menu\b"
+            r"|\b(?:show|reselect|redo|reopen|revisit|change|update|edit)\s+(?:the\s+|my\s+)?desserts?\b",
+            msg_lower,
+        )
+    ):
+        return "modification_tool"
+
+    # Wedding cake gate protection — at PHASE_WEDDING_CAKE with the gate question
+    # still pending, don't let the LLM router silently bypass the question. Only
+    # explicit modification commands (add/remove/etc.) should leave this phase.
+    # Without this guard, an unrelated message like "I need pepsi" was being routed
+    # to modification_tool which set wedding_cake=none and advanced to drinks.
+    if (
+        phase == PHASE_WEDDING_CAKE
+        and not is_filled(slots, "__wedding_cake_gate")
+        and msg_lower
+        and not re.match(
+            r"^(?:(?:can|could|would|please|let(?:'s|\s+us))\s+)?"
+            r"(?:add|remove|delete|change|update|swap|replace|cancel|skip|include|exclude|edit|fix)\b",
+            msg_lower,
+        )
+    ):
+        return "basic_info_tool"
+
     # Free-text phases (date/venue/guests/service type): if the user starts
     # the message with an edit verb, it's almost certainly a modification (not
     # the answer we asked for). Route to modification_tool so the request
@@ -489,11 +581,22 @@ def _quick_route(message: str, state: dict) -> str | None:
     # If the user is clearly *updating* a basic-info field while we're in some
     # other phase (menus, add-ons, etc.), route to modification_tool so it can
     # apply the update without phase-lock swallowing it.
-    if phase not in _FREE_TEXT_AUTOROUTE_PHASES and msg_lower:
+    # Excluded: PHASE_SERVICE_TYPE and PHASE_WEDDING_CAKE where "drop-off" / "yes"
+    # are structured first-fill answers, not service-type modification commands.
+    _BASIC_UPDATE_EXCLUDED = _FREE_TEXT_AUTOROUTE_PHASES | {PHASE_SERVICE_TYPE, PHASE_WEDDING_CAKE}
+    if phase not in _BASIC_UPDATE_EXCLUDED and msg_lower:
         mentions_basic_update = bool(
             re.search(
                 r"\b(?:venue|location|guest count|guests|headcount|attendees|"
                 r"event date|date is|service type|drop[- ]?off|on[- ]?site)\b",
+                msg_lower,
+            )
+            # FLAG-7: natural numeric guest count patterns ("party of 100",
+            # "we have 80 people", "it's for 50 people") not caught above.
+            or re.search(
+                r"\b(?:party|group|table|event)\s+of\s+\d+\b"
+                r"|\bwe(?:'re|'ll|\s+are|\s+will\s+be)?\s+(?:have\s+)?\d+\s+(?:people|guests|attendees|folks)\b"
+                r"|\b(?:it(?:'s|\s+is)\s+for|for\s+about|around)\s+\d+\s+(?:people|guests)\b",
                 msg_lower,
             )
         )
@@ -512,11 +615,15 @@ def _quick_route(message: str, state: dict) -> str | None:
 
     # "I want X" patterns where X might not be on the menu → let modification_tool
     # handle it and offer a special request if the item isn't found.
-    # Excluded phases: free-text phases (user is answering a direct question) and
-    # PHASE_SERVICE_TYPE / PHASE_WEDDING_CAKE (structured binary choices where
-    # "I want onsite" or "I want vanilla cake" should reach the owning tool, not
-    # modification_tool which would try to treat it as a mid-flow edit).
-    _WANT_X_EXCLUDED = _FREE_TEXT_AUTOROUTE_PHASES | {PHASE_SERVICE_TYPE, PHASE_WEDDING_CAKE}
+    # Excluded phases: free-text phases (user is answering a direct question),
+    # PHASE_SERVICE_TYPE / PHASE_WEDDING_CAKE (structured binary choices), and
+    # menu phases where "I want salmon" is a valid first-fill answer that should
+    # reach menu_selection_tool via LLM router, not detour through modification_tool.
+    # FLAG-3: added PHASE_COCKTAIL, PHASE_MAIN_MENU, PHASE_DESSERT
+    _WANT_X_EXCLUDED = _FREE_TEXT_AUTOROUTE_PHASES | {
+        PHASE_SERVICE_TYPE, PHASE_WEDDING_CAKE,
+        PHASE_COCKTAIL, PHASE_MAIN_MENU, PHASE_DESSERT,
+    }
     if msg_lower and phase not in _WANT_X_EXCLUDED and re.match(
         r"^i\s+(?:want|need|would\s+like|d\s+like|am\s+looking\s+for)\s+\w",
         msg_lower,
@@ -524,7 +631,23 @@ def _quick_route(message: str, state: dict) -> str | None:
         return "modification_tool"
 
     # Modification intent always routes to modification_tool regardless of phase.
-    if msg_lower and _looks_like_modification_intent(message):
+    # Exception: free-text phases and PHASE_SERVICE_TYPE/PHASE_WEDDING_CAKE use the
+    # autoroute guard below (line 632+) or structured-answer detection instead.
+    _MOD_INTENT_EXCLUDED = _FREE_TEXT_AUTOROUTE_PHASES | {PHASE_SERVICE_TYPE, PHASE_WEDDING_CAKE}
+    if msg_lower and phase not in _MOD_INTENT_EXCLUDED and _looks_like_modification_intent(message):
+        # Event identity corrections ("actually it's a corporate event",
+        # "my bad it is a wedding", "it's a birthday not a wedding") must
+        # route to modification_tool. Past bug: routed to basic_info_tool but
+        # the basic_info_tool's _PHASE_ALLOWED_FIELDS filter strips event_type
+        # at every phase past PHASE_EVENT_TYPE, so the correction silently
+        # disappeared. modification_tool has the proper event-type-reset
+        # confirmation flow (does the user want to wipe partner_name, menu, etc.).
+        if re.search(
+            r"\b(?:it(?:'s|\s+is)\s+a|type\s+is|actually\s+a"
+            r"|not\s+a\s+wedding|not\s+a\s+birthday|not\s+corporate)\b",
+            msg_lower,
+        ) and re.search(r"\b(?:corporate|wedding|birthday|other)\b", msg_lower):
+            return "modification_tool"
         return "modification_tool"
 
     # Partner/company/honoree name updates should not be swallowed by basic-info
@@ -567,6 +690,22 @@ def _quick_route(message: str, state: dict) -> str | None:
         "change", "no, make changes", "i need to change something", "make changes",
     }:
         return "modification_tool"
+
+    # Review recap: confirmation phrases → finalization_tool deterministically.
+    # These fall through to the LLM otherwise, which is non-deterministic and
+    # occasionally mis-routes them to modification_tool.
+    if phase == PHASE_REVIEW and msg_lower and re.search(
+        r"\b(?:looks?\s+(?:good|great|correct|right|fine|perfect|solid|good\s+to\s+go)"
+        r"|all\s+(?:good|set|correct|looks?\s+good)"
+        r"|send\s+it|submit(?:\s+it)?"
+        r"|confirm(?:ed)?|approve[sd]?"
+        r"|go\s+ahead|proceed(?:\s+with\s+(?:it|this|that))?"
+        r"|that(?:'s|\s+is)\s+(?:correct|right|it|all|fine|good|perfect)"
+        r"|yes[,.]?\s+(?:proceed|submit|confirm|send|go|looks?\s+good)"
+        r")\b",
+        msg_lower,
+    ) and not _looks_like_modification_intent(message):
+        return "finalization_tool"
 
     # Route bare yes/no directly to the tool that owns the pending gate
     # question — no slot filling here. The tool itself handles the fill
@@ -612,6 +751,24 @@ def _quick_route(message: str, state: dict) -> str | None:
             return "menu_selection_tool"
         if _looks_like_structured_finalization_answer(message, state):
             return "finalization_tool"
+
+    # Menu-selection phases: any non-modification, non-meta message is almost
+    # certainly a menu selection answer. Route directly to avoid LLM latency
+    # and prevent the LLM from misrouting "I want salmon" to modification_tool.
+    # Guard: _normalize_choice strips leading soft markers ("actually", "wait"),
+    # so check the raw message for soft mod markers before firing the catch-all.
+    _has_soft_marker_raw = any(
+        (re.search(rf"\b{re.escape(kw)}\b", message.lower()) if " " not in kw else kw in message.lower())
+        for kw in _SOFT_MOD_KEYWORDS
+    )
+    if (
+        phase in {PHASE_COCKTAIL, PHASE_MAIN_MENU, PHASE_DESSERT}
+        and msg_lower
+        and not _looks_like_modification_intent(message)
+        and not _has_soft_marker_raw
+        and not _looks_like_meta_command(msg_lower)
+    ):
+        return "menu_selection_tool"
 
     return None
 
@@ -759,12 +916,175 @@ _OUT_OF_SCOPE_PATTERNS = re.compile(
 )
 
 _OUT_OF_SCOPE_REPLIES = [
-    "That's a bit outside my wheelhouse! I'm here to help plan your catering event. Shall we pick up where we left off?",
-    "I'm only able to help with catering and event planning — that one's out of my scope. Ready to continue with your event details?",
-    "Oops, that's not something I can help with! I specialize in catering. Would you like to get back to planning your event?",
-    "I'm afraid that's outside my area — I'm your catering planning assistant. Want to continue with your event?",
-    "I can only assist with catering and event planning. Let's get back to making your event amazing!",
+    "Ha, not quite my territory — but I'd love to help plan your event. Where were we?",
+    "Way outside my lane, but events? That's my whole thing. Back to yours.",
+    "Catering and parties is what I do — happy to keep that going.",
+    "I'll leave that one alone — but the food and event side, I'm all yours. Let's keep building this.",
+    "Not my area, but your event is. Back to the fun stuff.",
 ]
+
+# Signals that a message is personal/expressive and clearly off-topic.
+# Checked ONLY when no _IN_SCOPE_ANCHORS are present, so catering context
+# (e.g. "dying to try the salmon") won't accidentally trigger this path.
+_EXPRESSIVE_OOS_PATTERN = re.compile(
+    # Personal address words that rarely appear in catering intake
+    r"\b(?:brother|bro(?:tha)?|sis(?:ta)?|sister|bruh|bruv|dawg|homie|dude|fam|man|mate|babes?|babe)\b"
+    # Health/physical state with zero catering relevance
+    r"|\b(?:ulcer|stomachache|heartburn|migraine|nauseous|vomit(?:ing)?|hangover|"
+    r"bleeding|dizzy|faint(?:ing)?|cramp(?:s|ing)?)\b"
+    # "where's my [non-catering item]" — personal possession queries
+    r"|\bwhere(?:'s|\s+is)\s+(?:my|the)\s+(?!(?:proposal|quote|booking|order|event|contract|invoice))\w+"
+    # Internet/informal slang that signals off-topic banter
+    r"|\b(?:lmao|lmfao|smh|oof|yikes|bruhhh+|ayyy+|ngl|imo|tbh|lowkey|highkey|slay|periodt?)\b"
+    # Social/flirty messages ("hey baby", "wanna hang", "wanna date")
+    r"|\b(?:wanna\s+(?:hang|date|chill|meet|talk|hook)|hey\s+(?:baby|girl|boy|sexy|cutie)|"
+    r"you\s+(?:cute|pretty|hot|fine|sexy)|how\s+old\s+are\s+you|what(?:'s|\s+is)\s+your\s+(?:name|number|age))\b"
+    # Repeated letters = expressive elongation (WOOOOOTAHHH, WOTAHHH, noooo, yesss)
+    r"|[a-zA-Z]*([a-zA-Z])\1{2,}[a-zA-Z]*"
+    # Foreign / non-English phrases (non-ASCII characters) — clearly off-topic
+    r"|[^\x00-\x7F]{3,}"
+    # Euphemistic profanity and expressive nonsense ("motherflower", "what the")
+    r"|\b(?:motherflower|motherfudge|what\s+the\s+(?:heck|heck|fudge|flip)|"
+    r"oh\s+my\s+(?:god|gosh|lord|goodness)|holy\s+(?:moly|cow|smokes?|crap))\b",
+    re.IGNORECASE,
+)
+
+_PERSONALITY_REDIRECT_PROMPT = """\
+You are a warm, playful catering coordinator with a waiter's personality — peaceful, \
+joyous, and chatty. The customer just sent a message that doesn't relate to event details.
+
+Rules:
+1. Acknowledge their message in ONE short clause — match their energy (light-hearted \
+if they're joking, empathetic if they're struggling, calm if they're confused).
+2. Pivot naturally back to the catering form in the same breath.
+3. ONE OR TWO SHORT SENTENCES MAXIMUM. Total reply under 25 words. Punchy, NOT corporate.
+4. NEVER start with: Got it, Perfect, Great, Noted, Of course, Absolutely, Sure thing, \
+Thanks, I understand, I see, No worries.
+5. Do NOT answer the off-topic content literally or give advice on it.
+6. End with the pending question (provided in context) word-for-word or close to it.
+7. CRITICAL: do NOT lecture or volunteer extra catering facts. Only mention water/lemonade \
+or menu items if the customer's message LITERALLY references them. If they said "I have \
+ulcers" or "I'm tired" — just acknowledge the feeling briefly and redirect. Don't bring up \
+water, lemonade, drinks, menu items, or anything else.
+8. NEVER repeat your previous reply. If you already redirected once, find a different short \
+acknowledgement this turn.
+
+ONLY when the customer's literal message contains "water", "wotah", "lemonade", "drink(s)", \
+"thirsty", or similar — you may say "water and lemonade are on us" before redirecting. \
+NEVER use "drinks are free" — only water and lemonade are.
+"""
+
+
+def _extract_last_question(history: list) -> str:
+    """Pull just the most recent question sentence from the last AI message.
+
+    The previous bug split on '?' and grabbed pieces[-1] + '?', which captured
+    the entire prior message. We want ONLY the final question — typically the
+    last 1-2 sentences ending in '?'.
+    """
+    if not history:
+        return ""
+    for msg in reversed(history):
+        if getattr(msg, "type", "") != "ai":
+            continue
+        content = str(getattr(msg, "content", "") or "").strip()
+        if "?" not in content:
+            return ""
+        # Take everything up to the last '?', then walk back to the last sentence
+        # boundary (period, newline) to isolate just the question sentence.
+        before_q, _, _ = content.rpartition("?")
+        # Find the start of the question sentence: last period, newline, or '!'
+        boundary = max(
+            before_q.rfind("\n"),
+            before_q.rfind(". "),
+            before_q.rfind("! "),
+            before_q.rfind(": "),
+        )
+        question_start = boundary + 1 if boundary >= 0 else 0
+        question = before_q[question_start:].strip(" .!\n") + "?"
+        # Sanity cap — never longer than 200 chars
+        if len(question) > 200:
+            question = question[-200:].lstrip()
+        return question
+    return ""
+
+
+async def _personality_oos_response(message: str, state: dict, history: list | None = None) -> str | None:
+    """
+    Acknowledge + bridge for personal/expressive off-topic messages.
+
+    Fires when a message has no in-scope catering anchors AND contains at least
+    one expressive OOS signal (personal address, health term, internet slang, etc.).
+    Calls the LLM to generate a personality-matched one-liner that acknowledges the
+    user's vibe and redirects to the current pending question.
+    """
+    stripped = message.strip()
+    # Personality OOS fires for two cases:
+    #   1. Expressive markers (brother/bruh/health terms/elongation/foreign chars)
+    #   2. Personal statements like "I have X", "I'm X", "we feel X" that don't
+    #      look like a service question or a structured intake answer.
+    _msg_lower_stripped = stripped.lower()
+    _is_personal_statement = bool(re.match(
+        r"^(?:i\s+(?:have|got|am|feel|need|don'?t|can'?t|'m|'ve)\s+\w|"
+        r"i'm\s+\w|im\s+\w|we'?(?:re|ve|ll)\s+\w|"
+        r"my\s+\w|me\s+(?:and|too|also)\b)",
+        _msg_lower_stripped,
+    ))
+    # Don't treat "i want X" / "i'd like X" as personality OOS — those are
+    # legitimate intake answers ("I want salmon", "I'd like a wedding cake").
+    _is_intake_intent = bool(re.match(
+        r"^i\s+(?:want|need\s+)|i'd\s+(?:like|love)|i\s+would\s+like",
+        _msg_lower_stripped,
+    ))
+    if not _EXPRESSIVE_OOS_PATTERN.search(stripped) and not (
+        _is_personal_statement and not _is_intake_intent
+    ):
+        return None
+
+    # Pull the actual question the bot just asked. Use _extract_last_question so
+    # we get only the question sentence, not the entire previous AI message.
+    pending_q = _extract_last_question(history or [])
+    if not pending_q:
+        phase = state.get("conversation_phase", "")
+        pending_q = _PHASE_CLARIFYING_QUESTIONS.get(phase, "")
+
+    # Pass the previous AI reply so the LLM can avoid duplicating wording.
+    last_ai = ""
+    if history:
+        for msg in reversed(history):
+            if getattr(msg, "type", "") == "ai":
+                last_ai = str(getattr(msg, "content", "") or "").strip()[:300]
+                break
+
+    context_lines = []
+    if pending_q:
+        context_lines.append(f"Current pending question to redirect to: {pending_q}")
+    else:
+        context_lines.append("Redirect them back to continuing the event planning form.")
+    if last_ai:
+        context_lines.append(
+            f"Your previous reply was: {last_ai}\n"
+            "Do NOT repeat that wording. Pick a different short acknowledgement."
+        )
+    context_block = "\n".join(context_lines)
+
+    try:
+        response = await generate_text(
+            system=_PERSONALITY_REDIRECT_PROMPT,
+            user=f"Customer message: {message}\n{context_block}",
+            model=MODEL_ROUTER,
+            max_tokens=80,
+            temperature=0.95,
+        )
+        if response:
+            return response.strip()
+    except Exception:
+        logger.debug("Personality OOS response failed", exc_info=True)
+
+    import hashlib
+    idx = int(hashlib.md5(message.encode()).hexdigest(), 16) % len(_OUT_OF_SCOPE_REPLIES)
+    return _OUT_OF_SCOPE_REPLIES[idx]
+
 
 def _out_of_scope_response(message: str) -> str | None:
     """Return a varied redirect message if the message is clearly off-topic, else None."""
@@ -777,74 +1097,263 @@ def _out_of_scope_response(message: str) -> str | None:
     return None
 
 
-class _FAQDetection(_BaseModel):
-    is_faq: bool
-    answer: str | None = None
+# ---------------------------------------------------------------------------
+# FAQ routing — keyword pre-filter + canned answers + LLM fallback
+#
+# Architecture:
+#   1. Short/direct messages → skip FAQ check entirely (0ms)
+#   2. FAQ keyword match → return canned answer (0ms)
+#   3. FAQ keyword match but no canned answer → call LLM for answer (~400ms)
+#   4. No keyword match → skip FAQ check entirely (0ms)
+#
+# This replaces the previous always-on LLM FAQ classification call that ran
+# for every single message (~400ms wasted on 90%+ of turns that are NOT FAQs).
+# ---------------------------------------------------------------------------
 
+# Patterns that signal a genuine service question — not an intake answer.
+_FAQ_KEYWORD_PATTERN = re.compile(
+    r"\b(?:"
+    # Pricing
+    r"how\s+much|what\s+(?:does|do|is|are)\s+(?:it|this|the|your|that)\s+(?:cost|price|run|go\s+for)"
+    r"|pric(?:e|es|ing)|cost(?:s|ing)?|quot(?:e|es|ing)|rate(?:s)?|budget|package(?:s)?|proposal"
+    r"|expensive|cheap|afford"
+    # Dietary
+    r"|halal|kosher|vegan|vegetarian|gluten[\s-]?free|nut[\s-]?free|dairy[\s-]?free"
+    r"|allerg(?:y|ies|ic)|dietary|food\s+restriction"
+    # What's included
+    r"|what(?:'s|\s+is)\s+included|what\s+comes\s+with|what\s+do\s+you\s+include"
+    r"|is\s+(?:water|lemonade|drinks?|tea|coffee)\s+included"
+    # Minimums / capacity
+    r"|minimum\s+(?:guest|order|booking|headcount)|guest\s+minimum|minimum\s+order"
+    r"|how\s+many\s+(?:guests|people)\s+(?:minimum|min|do\s+you|can\s+you)"
+    r"|max(?:imum)?\s+(?:guest|capacity|headcount)"
+    # Service area / travel
+    r"|service\s+area|what\s+areas|where\s+do\s+you\s+(?:serve|operate|go|travel|deliver|work|cover)"
+    r"|do\s+you\s+(?:travel|come\s+to|cover|serve|deliver\s+to)\b"
+    r"|how\s+far\s+do\s+you\s+(?:travel|go|deliver)"
+    # Tastings
+    r"|tasting(?:s)?|taste\s+test|try\s+the\s+food|sample\s+the\s+(?:menu|food)"
+    # Follow-up / timeline
+    r"|when\s+(?:will|do|should|would|can)\s+(?:i|we|you|someone)\s+(?:hear|get|receive|reach|contact|follow)"
+    r"|how\s+(?:long|soon|quickly)\s+(?:will|do|does|can)\s+(?:you|we|someone|they)\s+(?:get\s+back|respond|reply|reach|contact)"
+    r"|follow[\s-]?up|get\s+back\s+to\s+(?:me|us)|response\s+time|turnaround"
+    # Cancellation / changes / refunds
+    r"|cancell?ation\s+polic(?:y|ies)|cancell?ation\s+fee|refund(?:s|able)?|cancel(?:led)?\s+(?:my\s+)?(?:order|booking|event)"
+    r"|can\s+i\s+(?:change|modify|update|edit|cancel)\s+(?:my|the)\s+(?:order|booking|menu|event|selection)"
+    r"|change\s+(?:my\s+)?(?:order|booking|menu)\s+later"
+    # How it works / process
+    r"|how\s+does\s+this\s+work|what\s+(?:are\s+the\s+)?steps|what\s+happens\s+next\s+after"
+    r"|what\s+is\s+the\s+process|walk\s+me\s+through"
+    # Recommendations / popular
+    r"|what\s+(?:do\s+you\s+)?recommend|what(?:'s|\s+is)\s+(?:most\s+)?popular|best[\s-]seller"
+    r"|your\s+(?:best|top|most\s+popular)\s+(?:dish|item|option|choice)"
+    # Deposits / payment
+    r"|deposit(?:s)?|payment\s+(?:plan|method|option)|invoice|billing|when\s+(?:do\s+i|is)\s+(?:pay|payment|due)"
+    r"|how\s+do\s+(?:i|we)\s+pay"
+    # Advance booking
+    r"|how\s+far\s+in\s+advance|how\s+early|book(?:ing)?\s+(?:deadline|window|period|notice)"
+    r"|last[\s-]minute\s+booking"
+    # Staff / rentals
+    r"|do\s+you\s+(?:provide|have|offer|include|supply)\s+(?:tables?|chairs?|linens?|rentals?|staff|servers?|setup)"
+    r"|(?:tables?|chairs?|linens?|rentals?|staff|servers?)\s+(?:included|provided|available|rented)"
+    r")\b",
+    re.IGNORECASE,
+)
 
-_FAQ_SYSTEM_PROMPT = """\
-You are a catering intake assistant FAQ classifier.
+# Short messages that are almost certainly intake answers, not FAQs.
+# Checked BEFORE the keyword scan to avoid false positives on short messages
+# that contain an incidental keyword (e.g. "no bar please" shouldn't hit FAQ).
+# Allow underscores so structured option values (beer_wine_signature) skip FAQ.
+# Word count kept at 5 to avoid catching real FAQs like "do you offer vegan options".
+_FAQ_SKIP_PATTERN = re.compile(
+    r"^(?:"
+    r"[a-z_]+(?:[\s,]+[a-z_]+){0,4}"  # 1-5 word phrases incl. structured values
+    r"|[0-9]{1,4}"                      # pure numbers (guest counts, years)
+    r"|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}"  # email addresses
+    r"|\+?[\d\s\-().]{7,15}"           # phone numbers
+    r"|\d{4}-\d{2}-\d{2}"             # ISO dates
+    r")$",
+    re.IGNORECASE,
+)
 
-Decide if the user message is a genuine side-question about the catering service (FAQ) or if it
-is directly answering / advancing the intake form (even if awkwardly).
+# Structured-value pattern: a single token with underscores (no spaces).
+# Examples: beer_wine_signature, labor_ceremony_setup, eco_biodegradable.
+# These are sent by option buttons and are NEVER service questions, regardless
+# of length. Skip the FAQ check up front.
+_STRUCTURED_VALUE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$", re.IGNORECASE)
 
-FAQ — is_faq=true examples:
-- "How much does it cost?" / "What are your prices?"
-- "Do you do halal / kosher / vegan food?"
-- "What's included in the package?"
-- "How many guests minimum?"
-- "How does this work?" / "What are the steps?"
-- "What do you recommend?" / "What's most popular?"
-- "When will I hear back?" / "When do you follow up?"
-- "Can you accommodate allergies?"
-- "Do you provide tables and chairs / linens / rentals?"
-- "Can I change my order later?"
-- "Do you do tastings?"
-- "What areas do you serve?"
-- "How far in advance do I need to book?"
+# ---------------------------------------------------------------------------
+# Business facts the LLM uses to answer ANY service question.
+# Single source of truth — update this block when policies change.
+# ---------------------------------------------------------------------------
+_FAQ_BUSINESS_FACTS_PROMPT = """\
+You are a friendly catering coordinator helping a customer plan their event — think \
+of yourself like a great waiter taking down details: peaceful, playful, and joyous. \
+You're chatty mid-form, so questions about the service get a quick warm answer \
+before steering back to the planning.
 
-NOT FAQ — is_faq=false — always return false for these:
-- "no", "yes", "sure", "ok", "nope" — user is answering the last question asked
-- Giving a name, date, venue, guest count, or phone number
-- Selecting menu items, a service type, or saying "onsite" / "dropoff"
-- Asking to change or modify something already filled in
-- Greetings like "hi" or "hello"
-- Any short reply (≤ 5 words) right after the assistant asked a direct question
-- Anything that sounds like a confused answer to the last question rather than a new question
+STEP 1 — CLASSIFY:
+Is this message a question about the catering service itself (pricing, what's included, \
+policies, dietary options, how it works, minimum guests, service area, tastings, follow-up, \
+cancellation, deposits, rentals, staffing, recommendations, etc.)?
 
-CRITICAL: If the conversation history shows the assistant just asked a direct intake question
-(e.g. "What type of event?", "Drop-off or onsite?", "How many guests?"), and the user's reply
-does NOT look like a genuine question about the service, return is_faq=false. The user is
-probably just answering or confused — do not intercept their reply.
+If NO — the message is an intake answer (name, date, venue, yes/no, food choice, etc.) — \
+reply with exactly: NOT_FAQ
 
-Rules when writing the answer (only when is_faq=true):
-1. Answer briefly — 2-3 sentences max.
-2. End with ONLY a plain redirect statement like "Let's keep going!" — no question of any kind.
-3. Water and lemonades are always complimentary — mention this if relevant.
-4. Pricing is always custom (based on guest count, menu, services) — never quote a number.
-5. ABSOLUTE RULE: Your answer must NOT contain any question mark (?). No follow-up questions
-   whatsoever. A question in your answer would cause the user's next reply to be misread as
-   an intake answer, breaking the form. End with a statement only.
-6. If genuinely unsure whether it's an FAQ, return is_faq=false so the intake can proceed normally.
+A phase hint may be included. If the customer is mid-collection (e.g. phase is \
+S17_special_requests, S18_dietary, S5–S8 menu phases) and the message reads as a \
+description of what they want or need (rather than a question), reply NOT_FAQ — \
+let the intake collect their answer rather than answering it as a FAQ.
+
+If YES — answer it using ONLY the facts below.
+
+BUSINESS FACTS:
+- Complimentary (on the house, every package): chilled water and fresh lemonade. \
+Basic napkins and utensils are also included.
+- Drinks beyond water/lemonade are NOT free — coffee service and bar service \
+(beer, wine, signature cocktails, full open bar) are paid add-ons.
+- Add-ons (available, not default): bar service / alcohol, coffee station, premium tableware \
+(silver/gold disposable, real china), rental items (tables, chairs, linens), \
+on-site servers / labor (ceremony setup, table setup, preset, cleanup, trash removal)
+- Menu highlights: 40+ appetizers (chicken, pork, beef, seafood, canapés, vegetarian), \
+17 main menus including signature combos like Prime Rib & Salmon, BBQ menus, Burger Bar, \
+Mediterranean, Mexican Char Grilled, Tex-Mex, Italian, Soup/Salad/Sandwich, plus 8 desserts. \
+For weddings, we also offer a 2-tier custom wedding cake with multiple flavor/filling/buttercream combos.
+- Service style: onsite (our staff sets up and serves at your venue) or drop-off (we deliver, \
+no staff). For weddings the customer also picks cocktail hour, reception, or both.
+- Pricing: fully custom — based on guest count, menu selections, and add-ons; \
+a detailed proposal is sent after the form is complete; NEVER quote a dollar amount.
+- Guest minimums: vary by event type — confirmed on the follow-up call
+- Service area: we serve the greater area; travel details and fees confirmed on follow-up call
+- Tastings: available for select packages — discussed during the follow-up call
+- Follow-up timeline: a coordinator reaches out within 24-48 hours of form completion
+- Cancellation / payment / deposits: outlined in the contract, reviewed on the follow-up call
+- Booking lead time: recommend at least 2-4 weeks in advance; last-minute handled case by case
+- Dietary / allergens: we accommodate vegetarian, vegan, halal, gluten-free, common allergies; \
+note it in the form and the team handles it
+- If a fact is not listed above: tell them it will be confirmed on the follow-up call
+
+RESPONSE RULES (only when answering a FAQ):
+1. Answer in 1-2 short sentences using only the facts above. Sound like a warm waiter \
+chatting at the table — playful, peaceful, joyous, NEVER stiff or order-taking.
+2. End with a natural redirect back to the form. No question marks anywhere. \
+Examples: "anyway, where were we", "let's keep going", "back to your event", "now then —".
+3. NEVER start with: Got it, Perfect, Great, Noted, Of course, Absolutely, Sure thing, \
+Thanks, I understand, Certainly.
+4. Do NOT invent policies, prices, or details not listed above.
+5. When the customer asks about water specifically, lead with "water and lemonade are on us" \
+(or similar) — never say "drinks are free", because the bar/coffee add-ons cost extra.
+6. Reference the menu specifically when relevant (e.g. if they ask about signature dishes, \
+mention real ones from the catalog like "Prime Rib & Salmon" or "Mediterranean Bar").
 """
 
 
-async def _in_scope_faq_response(message: str, history: list) -> str | None:
-    """Use an LLM to detect and answer any in-scope catering FAQ mid-flow."""
+async def _in_scope_faq_response(
+    message: str,
+    history: list,
+    phase: str = "",
+    pending_question: str = "",
+) -> str | None:
+    """
+    Detect and answer catering FAQs using a single LLM classify+answer call.
+
+    The LLM decides if the message is a service question — no keyword gate needed.
+    Only short/obvious intake answers (names, numbers, yes/no) are skipped up front
+    to avoid wasting tokens on clear non-FAQs.
+
+    When `pending_question` is provided, it's appended to the FAQ answer so the
+    user is reminded what they were being asked — without this, the chat can lose
+    the original intake question after a FAQ answer.
+    """
+    stripped = message.strip()
+    lower = stripped.lower()
+
+    # Structured option values (e.g. "beer_wine_signature", "labor_ceremony_setup")
+    # are sent by option buttons. Never a FAQ regardless of length.
+    if _STRUCTURED_VALUE_PATTERN.match(stripped):
+        return None
+
+    # Comma-separated structured values from multi-select widgets
+    # (e.g. "labor_ceremony_setup, labor_table_setup, labor_cleanup").
+    if "," in stripped and all(
+        _STRUCTURED_VALUE_PATTERN.match(p.strip()) for p in stripped.split(",") if p.strip()
+    ):
+        return None
+
+    # If the message clearly looks like a question, do NOT skip the FAQ check
+    # even when it's short. "where is my water?", "do you have vegan?", etc.
+    _looks_like_question = (
+        "?" in stripped
+        or lower.startswith((
+            "what", "where", "when", "why", "how", "who", "which",
+            "do you", "does ", "is ", "are ", "can ", "could ", "would ",
+            "should ", "will ", "have you", "any ",
+        ))
+    )
+
+    if not _looks_like_question:
+        # Skip short messages that are almost certainly intake answers.
+        if len(stripped) <= 40 and _FAQ_SKIP_PATTERN.match(stripped):
+            return None
+
+        # Skip very short messages regardless (1-2 words won't be a service question).
+        if len(stripped) <= 15:
+            return None
+
+    # Phase context helps the LLM disambiguate intake answers from FAQs. E.g.
+    # "we have peanut allergies for two guests" is an answer in PHASE_DIETARY,
+    # but could look like a FAQ ("do you accommodate allergies?") otherwise.
+    phase_hint = f"\nCurrent conversation phase: {phase}" if phase else ""
+
+    def _append_pending(answer_text: str) -> str:
+        """Tack the pending intake question onto the FAQ answer."""
+        if not pending_question:
+            return answer_text
+        return f"{answer_text}\n\n{pending_question}"
+
     try:
-        result = await extract(
-            schema=_FAQDetection,
-            system=_FAQ_SYSTEM_PROMPT,
-            user_message=message,
-            history=_history_for_llm(history),
+        answer = await generate_text(
+            system=_FAQ_BUSINESS_FACTS_PROMPT,
+            user=f"Customer message: {message}{phase_hint}",
             model=MODEL_ROUTER,
-            max_tokens=300,
+            max_tokens=150,
+            temperature=0.5,
         )
-        if isinstance(result, _FAQDetection) and result.is_faq and result.answer:
-            return result.answer
+        if not answer:
+            # Empty LLM response — fall through to deterministic fallback,
+            # not None (which would let the conversation give up on this FAQ).
+            answer = ""
+        clean = answer.strip()
+        # LLM signals "not a FAQ" — fall through to normal routing.
+        if clean.upper().startswith("NOT_FAQ") or clean == "NOT_FAQ":
+            return None
+        # Strip a trailing question the model snuck in (we'll append our own).
+        # Past bug: if the trimmed answer was ≤20 chars, we returned None and
+        # the user got nothing — looked like the bot "gave up". Now we always
+        # produce SOMETHING (even short acks get padded by _append_pending).
+        if "?" in clean:
+            clean = clean.rsplit("?", 1)[0].strip()
+            if len(clean) > 20:
+                return _append_pending(clean + ".")
+            # Too short on its own — defer to the deterministic fallback below.
+            clean = ""
+        if clean:
+            return _append_pending(clean)
+        # Empty / too-short LLM answer → fall through to deterministic fallback
     except Exception:
-        logger.debug("FAQ LLM check failed — skipping", exc_info=True)
-    return None
+        logger.debug("FAQ LLM answer failed — skipping", exc_info=True)
+
+    import hashlib as _hs
+    _faq_fallbacks = [
+        "The team can cover that on the follow-up call — anyway, back to it.",
+        "That one's better confirmed on the follow-up call. Where were we?",
+        "Coordinator will walk through that with you after you submit. Moving on.",
+        "We'll get to the specifics on the follow-up. Let's keep going.",
+        "Good question — your coordinator will go over that on the call.",
+        "We'll cover the specifics during the follow-up. Picking up where we left off:",
+    ]
+    _fi = int(_hs.md5(message.encode()).hexdigest(), 16) % len(_faq_fallbacks)
+    return _append_pending(_faq_fallbacks[_fi])
 
 
 # Short vague/filler messages that can't advance the flow but aren't off-topic.
@@ -882,16 +1391,20 @@ _VAGUE_PATTERNS = re.compile(
 )
 
 _VAGUE_REPLIES = [
-    "No worries! Take your time — just let me know whenever you're ready to continue.",
-    "That's totally fine! Whenever you're ready, just reply and we'll keep going.",
-    "No rush at all! Just answer when you're ready and we'll pick right back up.",
-    "All good! Just share your thoughts whenever you're ready.",
-    "Take your time! I'm here whenever you want to continue.",
-    "Happy to wait! Just let me know when you're ready to move forward.",
+    "No worries — take your time.",
+    "That's fine, no rush.",
+    "All good — whenever you're ready.",
+    "No rush at all.",
+    "Take your time!",
+    "Happy to wait.",
 ]
 
 def _vague_response(message: str, state: dict) -> str | None:
-    """Return a gentle nudge if the message is clearly too vague to act on."""
+    """Return a gentle nudge if the message is clearly too vague to act on.
+
+    FLAG-5: appends the current pending question so the user knows exactly
+    where to pick back up, instead of getting a dead-end 'take your time'.
+    """
     phase = state.get("conversation_phase") or ""
     msg_norm = _normalize_choice(message)
     if not msg_norm:
@@ -899,17 +1412,19 @@ def _vague_response(message: str, state: dict) -> str | None:
     # Don't intercept during menu phases — user could be typing item numbers/names.
     if phase in {PHASE_COCKTAIL, PHASE_MAIN_MENU, PHASE_DESSERT}:
         return None
-    # Exact token match (short phrases)
-    if msg_norm in _VAGUE_TOKENS:
-        import hashlib
-        idx = int(hashlib.md5(message.encode()).hexdigest(), 16) % len(_VAGUE_REPLIES)
-        return _VAGUE_REPLIES[idx]
-    # Pattern match (slightly longer vague sentences, up to ~60 chars)
-    if len(msg_norm) <= 60 and _VAGUE_PATTERNS.search(msg_norm):
-        import hashlib
-        idx = int(hashlib.md5(message.encode()).hexdigest(), 16) % len(_VAGUE_REPLIES)
-        return _VAGUE_REPLIES[idx]
-    return None
+
+    is_vague = msg_norm in _VAGUE_TOKENS or (len(msg_norm) <= 60 and _VAGUE_PATTERNS.search(msg_norm))
+    if not is_vague:
+        return None
+
+    import hashlib
+    idx = int(hashlib.md5(message.encode()).hexdigest(), 16) % len(_VAGUE_REPLIES)
+    base = _VAGUE_REPLIES[idx]
+
+    pending_q = _PHASE_CLARIFYING_QUESTIONS.get(phase, "")
+    if pending_q:
+        return f"{base} To pick up where we left off: {pending_q}"
+    return base
 
 
 async def route(
@@ -931,6 +1446,63 @@ async def route(
             confidence=1.0,
         )
 
+    # Pending-state TTL — auto-clear stale __pending_* slots so a forgotten
+    # "yes/no" offer from 3 turns ago can't replay itself today (the Dragon
+    # Chicken bleed). Counted in turns via len(state["messages"]).
+    _turn_count = len(state.get("messages") or [])
+    _cleared_pending = validate_pending_state(state["slots"], _turn_count)
+    if _cleared_pending:
+        logger.info(
+            "pending_state_ttl cleared=%s turn=%d",
+            ",".join(_cleared_pending),
+            _turn_count,
+        )
+
+    # Pending confirmation/choice/request must take TOP priority — if the bot
+    # asked "yes/no" to reset event type and the user replies "yes", that yes
+    # must reach the tool that asked the question, NOT get swallowed by a
+    # phase bypass below.
+    #
+    # CRITICAL: __pending_confirmation can be set by ANY tool (modification_tool
+    # for event-type-reset, add_ons_tool for rentals/tableware/drinks gates,
+    # finalization_tool for confirmation gates). The payload includes a `tool`
+    # field saying which tool owns the pending question — route there, NOT
+    # always to modification_tool. Past bug: hard-coded routing to modification_tool
+    # caused the rentals gate to loop forever because add_ons_tool's pending
+    # confirmations were sent to the wrong handler.
+    _pending_confirm = get_slot_value(state["slots"], "__pending_confirmation")
+    if _pending_confirm:
+        owning_tool = "modification_tool"  # safe default for legacy payloads
+        if isinstance(_pending_confirm, dict):
+            tool_in_payload = _pending_confirm.get("tool")
+            if tool_in_payload in {
+                "modification_tool", "add_ons_tool",
+                "menu_selection_tool", "basic_info_tool", "finalization_tool",
+            }:
+                owning_tool = tool_in_payload
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name=owning_tool, reason=f"pending:__pending_confirmation:{owning_tool}")],
+            confidence=1.0,
+        )
+
+    # The other pending slots have a fixed owning tool — no payload routing needed.
+    _pending_routes: list[tuple[str, str]] = [
+        ("__pending_modification_choice", "modification_tool"),
+        ("__pending_modification_request", "modification_tool"),
+        ("__pending_menu_choice", "menu_selection_tool"),
+        ("__pending_cancel_event_confirm", "modification_tool"),
+    ]
+    for _slot_name, _route_tool in _pending_routes:
+        if get_slot_value(state["slots"], _slot_name):
+            from agent.models import ToolCall as _TC
+            return OrchestratorDecision(
+                action="tool_call",
+                tool_calls=[_TC(tool_name=_route_tool, reason=f"pending:{_slot_name}")],
+                confidence=1.0,
+            )
+
     # Out-of-scope guardrail — catch clearly off-topic messages before any
     # routing logic runs, so they never reach a tool or the LLM router.
     _oos = _out_of_scope_response(message)
@@ -949,6 +1521,17 @@ async def route(
     # These must be checked before the FAQ LLM call to prevent misclassification.
     _pre_faq_phase = state.get("conversation_phase", "")
     _pre_faq_msg = message.lower()
+
+    # Greeting phase — always basic_info_tool. No FAQ possible at turn 1.
+    # Without this, "Hello! I need help planning my event." hits the FAQ LLM
+    # which misclassifies "help planning" as a service inquiry.
+    if _pre_faq_phase == PHASE_GREETING:
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name="basic_info_tool", reason="greeting_phase_bypass")],
+            confidence=1.0,
+        )
 
     # Cancel-event intent — always modification_tool regardless of phase so the
     # confirmation flow runs, never FAQ/OOS which would swallow it.
@@ -981,7 +1564,11 @@ async def route(
         _is_i_want = bool(re.match(
             r"^i\s+(?:want|need|would\s+like|d\s+like|am\s+looking\s+for)\s+\w",
             _pre_faq_msg,
-        ) and _pre_faq_phase not in {PHASE_SERVICE_TYPE, PHASE_WEDDING_CAKE})
+        ) and _pre_faq_phase not in {
+            PHASE_SERVICE_TYPE, PHASE_WEDDING_CAKE,
+            # FLAG-3: "I want X" is a valid first-fill answer in menu phases
+            PHASE_COCKTAIL, PHASE_MAIN_MENU, PHASE_DESSERT,
+        })
         if _is_dont_want or _is_i_want:
             from agent.models import ToolCall as _TC
             return OrchestratorDecision(
@@ -990,10 +1577,263 @@ async def route(
                 confidence=1.0,
             )
 
+    # Command-style bypass — "add X", "can we add X", "please remove X", etc. are
+    # always modification intents, never service questions. Bypass FAQ LLM to
+    # prevent "can we add a coffee station" being classified as a coffee-service FAQ.
+    #
+    # EXCEPTION: gate-skip values like "skip dessert" / "skip cake" must reach
+    # the gate handler (via _quick_route → menu_selection_tool / basic_info_tool),
+    # NOT modification_tool. The gate handler clears the section cleanly; routing
+    # to modification_tool would invoke an LLM extractor that mis-fires
+    # action=reopen and shows the menu again.
+    from agent.intents import classify_skip_gate as _classify_skip_gate
+    _skip_gate_intent = _classify_skip_gate(message, _pre_faq_phase, state["slots"])
+    # Strip leading conjunctions ("and add Sushi Bites", "also remove X", "plus add Y")
+    # before the command-style match so a stray "and" doesn't drop the modification.
+    _pre_faq_msg_stripped = re.sub(
+        r"^(?:and|also|plus|&&)\s+", "", _pre_faq_msg
+    ).strip()
+    if _pre_faq_msg and _skip_gate_intent is None and (
+        re.match(
+            r"^(?:(?:can|could|would)\s+(?:we|you|i)\s+|please\s+|let(?:'s|\s+us)\s+)?"
+            r"(?:add|remove|delete|change|update|swap|replace|cancel|skip|include|exclude)\b",
+            _pre_faq_msg,
+        )
+        or re.match(
+            r"^(?:(?:can|could|would)\s+(?:we|you|i)\s+|please\s+|let(?:'s|\s+us)\s+)?"
+            r"(?:add|remove|delete|change|update|swap|replace|cancel|skip|include|exclude)\b",
+            _pre_faq_msg_stripped,
+        )
+    ):
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name="modification_tool", reason="pre_faq_command_bypass")],
+            confidence=1.0,
+        )
+
+    # Free-text collection bypass — when the user is mid-answering a free-text
+    # question (special requests / dietary concerns), their reply is the answer,
+    # not a service question. Without this guard "we have a kid with peanut allergy"
+    # could be misclassified as a dietary FAQ and never get stored.
+    _slots = state.get("slots", {})
+    _in_special_req_collect = (
+        get_slot_value(_slots, "__gate_special_requests") is True
+        and not is_filled(_slots, "special_requests")
+    )
+    _in_dietary_collect = (
+        get_slot_value(_slots, "__gate_dietary") is True
+        and not is_filled(_slots, "dietary_concerns")
+    )
+    if _in_special_req_collect or _in_dietary_collect:
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name="finalization_tool", reason="collection_phase_bypass")],
+            confidence=1.0,
+        )
+
+    # Event-type-correction guard runs BEFORE every phase bypass below.
+    # Catches "actually it's a wedding" / "my bad it is a wedding" /
+    # "its a wedding not birthday" at any phase past greeting and routes to
+    # modification_tool (which has the proper event-type-reset confirmation
+    # flow). Otherwise these would get swallowed by menu/conditional/etc.
+    # bypasses and the correction would silently disappear.
+    _is_event_type_correction_early = bool(re.search(
+        r"\b(?:it(?:'s|\s+is)\s+a|its\s+a|actually(?:\s+(?:a|an|its|it's))?|"
+        r"my\s+bad|i\s+meant|correction|change\s+(?:to|it))\b.{0,40}"
+        r"\b(?:wedding|birthday|corporate)\b",
+        _pre_faq_msg,
+    ))
+    if _is_event_type_correction_early and _pre_faq_phase != PHASE_GREETING:
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name="modification_tool", reason="event_type_correction")],
+            confidence=1.0,
+        )
+
+    # Menu-phase fast path — only fire when the message CLEARLY looks like a
+    # menu selection: comma-separated list, numeric index, or a structured value.
+    # For everything else (personal chitchat, off-topic, etc.), let the message
+    # fall through to OOS/FAQ/LLM router so we don't silently swallow it as a
+    # "no items matched" turn that re-asks without acknowledgement.
+    _menu_phases = {PHASE_COCKTAIL, PHASE_MAIN_MENU, PHASE_DESSERT}
+    _has_oos_marker = bool(_EXPRESSIVE_OOS_PATTERN.search(_pre_faq_msg))
+    _mentions_off_menu_drink = bool(re.search(
+        r"\b(?:water|wotah|woder|warer|wadder|"
+        r"lemonade|pepsi|coke|coca|sprite|soda|juice|tea|"
+        r"milk|smoothie)\b",
+        _pre_faq_msg,
+    ))
+    # Clear menu-selection signals
+    _looks_like_menu_pick = (
+        "," in _pre_faq_msg                                   # multi-item list
+        or bool(re.match(r"^\d+(?:[\s,]+\d+)*$", _pre_faq_msg))  # numeric indices
+        or _pre_faq_msg in {"all", "everything", "all of them"}
+    )
+    # Personal statements (health/feeling/state) should NEVER be treated as menu picks.
+    # Carefully exclude "want"/"need"/"would like" — those are intake intents
+    # ("I want salmon", "I need a wedding cake" are valid menu requests).
+    _looks_like_personal = bool(re.match(
+        r"^(?:i\s+(?:have|got|am|feel|don'?t|can'?t|'m|'ve|hate|love)|"
+        r"i'm|im\s+|we're|we'?ve\s+(?:got|been)|"
+        r"my\s+\w|me\s+(?:and|too|also))",
+        _pre_faq_msg,
+    ))
+    if (
+        _pre_faq_phase in _menu_phases
+        and _pre_faq_msg
+        and "?" not in _pre_faq_msg
+        and not _pre_faq_msg.startswith((
+            "what", "where", "when", "why", "how", "who", "which",
+            "do you", "does ", "is ", "are ", "can ", "could ", "would ",
+            "should ", "will ", "have you", "any ",
+        ))
+        and not _has_oos_marker
+        and not _mentions_off_menu_drink
+        and not _looks_like_personal
+        and (_looks_like_menu_pick or len(_pre_faq_msg) <= 30)
+    ):
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name="menu_selection_tool", reason="menu_phase_answer_bypass")],
+            confidence=1.0,
+        )
+
+    # Conditional follow-up bypass — partner_name / honoree_name / company_name
+    # collection. The user's reply is a name, not a service question.
+    if (
+        _pre_faq_phase == PHASE_CONDITIONAL_FOLLOWUP
+        and _pre_faq_msg
+        and "?" not in _pre_faq_msg
+        and not _pre_faq_msg.startswith((
+            "what", "where", "when", "why", "how", "who", "which", "do you",
+        ))
+        and not _has_oos_marker
+        and not _looks_like_personal
+    ):
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name="basic_info_tool", reason="conditional_followup_bypass")],
+            confidence=1.0,
+        )
+
+    # Free-text basic-info phase bypass — date/venue/guest count answers may be long
+    # phrases that the FAQ LLM misclassifies. If the user is in a free-text intake
+    # phase and the message doesn't start with a question word, treat it as the answer.
+    _free_text_intake_phases = {PHASE_EVENT_DATE, PHASE_VENUE, PHASE_GUEST_COUNT, PHASE_EVENT_TYPE}
+    if (
+        _pre_faq_phase in _free_text_intake_phases
+        and _pre_faq_msg
+        and "?" not in _pre_faq_msg
+        and not _pre_faq_msg.startswith((
+            "what", "where", "when", "why", "how", "who", "which",
+            "do you", "does ", "is ", "are ", "can ", "could ", "would ",
+            "should ", "will ", "have you", "any ",
+        ))
+        and not re.search(
+            r"\b(?:remove|delete|change|update|swap|replace|cancel|skip)\b",
+            _pre_faq_msg,
+        )
+        and not _has_oos_marker
+        and not _looks_like_personal
+    ):
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name="basic_info_tool", reason="free_text_intake_bypass")],
+            confidence=1.0,
+        )
+
+    # Service type / wedding cake gate phases — short structured answers ("drop-off",
+    # "yes", "skip", "tbd"). When in these phases and the message isn't a question,
+    # treat as answer. We INCLUDE "skip" here (unlike other phases) because the basic
+    # info tool's _SERVICE_TYPE_INVALID handling re-asks gracefully rather than
+    # letting modification_tool wrongly "remove" an unfilled service_type.
+    if (
+        _pre_faq_phase in {PHASE_SERVICE_TYPE, PHASE_WEDDING_CAKE}
+        and _pre_faq_msg
+        and "?" not in _pre_faq_msg
+        and not _pre_faq_msg.startswith((
+            "what", "where", "when", "why", "how", "who", "which", "do you",
+        ))
+        and not re.search(
+            r"\b(?:remove|delete|change|update|swap|replace|cancel)\b",
+            _pre_faq_msg,
+        )
+        and not _has_oos_marker
+        and not _looks_like_personal
+    ):
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name="basic_info_tool", reason="binary_gate_bypass")],
+            confidence=1.0,
+        )
+
+    # Add-ons phases (drinks/bar/tableware/rentals/labor) — short answers like "yes",
+    # "no", "coffee and bar". Same protection: non-question messages are answers.
+    _addons_phases = {PHASE_DRINKS_BAR, PHASE_TABLEWARE, PHASE_RENTALS, PHASE_LABOR}
+    if (
+        _pre_faq_phase in _addons_phases
+        and _pre_faq_msg
+        and "?" not in _pre_faq_msg
+        and not _pre_faq_msg.startswith((
+            "what", "where", "when", "why", "how", "who", "which",
+            "do you", "does ", "is ", "are ", "can ", "could ",
+        ))
+        and not re.search(
+            r"\b(?:remove|delete|change|update|swap|replace|cancel)\b",
+            _pre_faq_msg,
+        )
+        and not _has_oos_marker
+        and not _looks_like_personal
+    ):
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name="add_ons_tool", reason="addons_phase_answer_bypass")],
+            confidence=1.0,
+        )
+
+    # Finalization gates (special_requests/dietary/followup/review) — non-question
+    # messages route to finalization_tool so it can apply yes/no, confirm, etc.
+    _finalization_phases = {PHASE_SPECIAL_REQUESTS, PHASE_DIETARY, PHASE_FOLLOWUP, PHASE_REVIEW}
+    if (
+        _pre_faq_phase in _finalization_phases
+        and _pre_faq_msg
+        and "?" not in _pre_faq_msg
+        and not _pre_faq_msg.startswith((
+            "what", "where", "when", "why", "how", "who", "which",
+            "do you", "does ", "is ", "are ",
+        ))
+        and not re.search(
+            r"\b(?:remove|delete|change|update|swap|replace)\b",
+            _pre_faq_msg,
+        )
+        and not _has_oos_marker
+        and not _looks_like_personal
+    ):
+        from agent.models import ToolCall as _TC
+        return OrchestratorDecision(
+            action="tool_call",
+            tool_calls=[_TC(tool_name="finalization_tool", reason="finalization_phase_bypass")],
+            confidence=1.0,
+        )
+
     # In-scope FAQ guard — catering-related questions that can't advance the
     # form (pricing, what's included, recommendations, dietary, etc.).
     # Answer briefly and redirect rather than letting the LLM router fumble them.
-    _faq = await _in_scope_faq_response(message, history)
+    # Also pull the pending intake question from history so we can re-ask it
+    # after the FAQ answer (state stays put while FAQ runs, but we need to remind
+    # the user what they were being asked).
+    _pending_question = _extract_last_question(history)
+    _faq = await _in_scope_faq_response(
+        message, history, phase=_pre_faq_phase, pending_question=_pending_question,
+    )
     if _faq:
         return OrchestratorDecision(
             action="clarify",
@@ -1012,6 +1852,21 @@ async def route(
             confidence=1.0,
             clarifying_question=_vague,
         )
+
+    # Personality OOS catch — personal/expressive messages with no catering context
+    # (e.g. "BROTHER WHERE IS MY SALT", "I HAVE ULCER BROTHER"). The _FAQ_SKIP_PATTERN
+    # in _in_scope_faq_response correctly skips these as "short intake answers", so they
+    # would fall through to the LLM router which answers them too literally. Intercept here
+    # with an acknowledge+bridge LLM response that mirrors the user's energy and redirects.
+    if not _IN_SCOPE_ANCHORS.search(message):
+        _persona_oos = await _personality_oos_response(message, state, history=history)
+        if _persona_oos:
+            return OrchestratorDecision(
+                action="clarify",
+                tool_calls=[],
+                confidence=1.0,
+                clarifying_question=_persona_oos,
+            )
 
     # Fast path — skip LLM for obvious continuations and modification intents.
     # Honor structured answers to the most recent assistant question, even if
@@ -1120,10 +1975,18 @@ async def route(
             )
         if signals.intent == "unclear":
             _cancel_decision()
+            # FLAG-9: return a phase-grounded question instead of empty clarification
+            # so the orchestrator has a real clarifying_question to show rather than
+            # falling back to a generic LLM-generated "I didn't understand".
+            _phase_q = _PHASE_CLARIFYING_QUESTIONS.get(
+                state.get("conversation_phase") or PHASE_GREETING,
+                "Could you say that a different way? I want to make sure I get it right.",
+            )
             return OrchestratorDecision(
                 action="clarify",
                 tool_calls=[],
                 confidence=signals.confidence,
+                clarifying_question=_phase_q,
             )
 
     try:
@@ -1174,7 +2037,21 @@ async def route(
             # Structured first-fill answers ("plated", "upgrade", "ADD DESSERTS")
             # are caught by _quick_route before reaching this code, so
             # high-confidence modification_tool picks here are genuine edits.
-            if chosen != "modification_tool":
+            #
+            # FLAG-12: also allow basic_info_tool through when the message is
+            # clearly correcting event identity ("actually it's corporate",
+            # "wait it's a birthday") — phase-locking those sends the wrong tool
+            # and completely ignores the correction.
+            _is_identity_correction = (
+                chosen == "basic_info_tool"
+                and re.search(
+                    r"\b(?:event\s+type|it(?:'s|\s+is)\s+a|type\s+is|actually\s+a"
+                    r"|corporate|wedding|birthday|not\s+a\s+wedding|not\s+a\s+birthday"
+                    r"|not\s+corporate)\b",
+                    message.lower(),
+                )
+            )
+            if chosen != "modification_tool" and not _is_identity_correction:
                 logger.info(
                     "phase_lock: overriding %s -> %s for phase %s",
                     chosen, expected, phase,

@@ -2,10 +2,6 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 @pytest.mark.asyncio
 async def test_skip_desserts_does_not_call_llm(monkeypatch) -> None:
     import agent.tools.menu_selection_tool as menu_tool_module
@@ -36,7 +32,6 @@ async def test_skip_desserts_does_not_call_llm(monkeypatch) -> None:
 
     assert get_slot_value(result.state["slots"], "desserts") == "none"
     assert result.state["conversation_phase"] != PHASE_DESSERT
-
 
 @pytest.mark.asyncio
 async def test_skip_desserts_prompts_for_wedding_cake_gate(monkeypatch) -> None:

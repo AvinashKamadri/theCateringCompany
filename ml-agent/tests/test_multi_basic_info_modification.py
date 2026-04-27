@@ -2,10 +2,6 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.models import EventDetailsExtraction  # noqa: E402
 from agent.state import (  # noqa: E402
     PHASE_DRINKS_BAR,
@@ -17,7 +13,6 @@ from agent.tools.modification_tool import (  # noqa: E402
     ModificationExtraction,
     ModificationTool,
 )
-
 
 @pytest.mark.asyncio
 async def test_modification_updates_venue_and_guest_count_from_one_message(monkeypatch) -> None:
@@ -43,7 +38,6 @@ async def test_modification_updates_venue_and_guest_count_from_one_message(monke
 
     assert get_slot_value(result.state["slots"], "venue") == "Pearluxe Tower"
     assert get_slot_value(result.state["slots"], "guest_count") == 66
-
 
 @pytest.mark.asyncio
 async def test_custom_event_type_after_tbd_does_not_force_reset(monkeypatch) -> None:

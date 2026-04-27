@@ -2,15 +2,10 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.models import ModificationExtraction  # noqa: E402
 from agent.state import PHASE_COCKTAIL, PHASE_REVIEW, fill_slot, get_slot_value, initialize_empty_slots  # noqa: E402
 from agent.tools.menu_selection_tool import MenuSelectionTool  # noqa: E402
 from agent.tools.modification_tool import ModificationTool  # noqa: E402
-
 
 @pytest.mark.asyncio
 async def test_mod_remove_seafood_removes_only_seafood(monkeypatch) -> None:
@@ -51,7 +46,6 @@ async def test_mod_remove_seafood_removes_only_seafood(monkeypatch) -> None:
     assert "Chicken Satay" in remaining
     assert "Deviled Egg" in remaining
     assert "Brie Bites" in remaining
-
 
 @pytest.mark.asyncio
 async def test_mod_add_all_non_veg_except_pork_and_chicken_adds_only_allowed(monkeypatch) -> None:
@@ -94,7 +88,6 @@ async def test_mod_add_all_non_veg_except_pork_and_chicken_adds_only_allowed(mon
     assert "Chicken Satay" not in remaining
     assert "Bacon Bourbon Meatballs" not in remaining
     assert "Charred Tomato and Pesto" not in remaining
-
 
 @pytest.mark.asyncio
 async def test_menu_select_all_non_veg_except_pork_and_chicken(monkeypatch) -> None:

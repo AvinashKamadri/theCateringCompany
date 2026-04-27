@@ -57,7 +57,7 @@ from agent.state import (
     get_slot_value,
     is_filled,
 )
-from agent.tools.base import ToolResult, history_for_llm
+from agent.tools.base import ToolResult, history_for_llm, tight_history_for_llm
 from agent.tools.structured_choice import normalize_structured_choice
 from agent.tools.finalization_tool import (
     _client_facing_summary as _finalization_client_facing_summary,
@@ -98,7 +98,13 @@ _SYSTEM_PROMPT = (
 
 
 def _history_for_llm(history: list[BaseMessage]) -> list[dict]:
-    return history_for_llm(history)
+    """Tight window — prevents cross-turn item hallucination.
+
+    Past extractor bug: appetizer paste containing "Grilled Shrimp Cocktail"
+    re-filled `cocktail_hour=True` because the extractor saw the earlier
+    "cocktail hour" turn AND the word "cocktail" in the new menu items.
+    """
+    return tight_history_for_llm(history)
 
 
 def _message_explicitly_sets_service_style(message_lower: str) -> bool:
@@ -337,9 +343,17 @@ class MenuSelectionTool:
                 direct_response="Appetizers can only be served one way — passed around by staff, or set up as a self-serve station. Which do you prefer?",
             )
 
-        # "none"/"no"/"both"/"neither" for meal_style → reject clearly instead of
-        # falling through to FAQ which gives an irrelevant educational answer.
-        _MEAL_STYLE_INVALID = {"none", "no", "nope", "both", "neither", "n/a", "na", "skip", "fix it", "fix"}
+        # Invalid meal_style answers — reject clearly instead of letting the
+        # LLM fuzzily map them to "buffet" (past bug: "half" → buffet).
+        # Anything not in _MEAL_STYLE_MAP must explicitly land here OR fall
+        # through to the LLM extractor under a strict guard below.
+        _MEAL_STYLE_INVALID = {
+            "none", "no", "nope", "both", "neither", "n/a", "na",
+            "skip", "fix it", "fix",
+            # Past hallucinations / bad fuzzy maps
+            "half", "halfway", "middle", "mid",
+            "either", "any", "anything", "whatever", "you decide", "up to you",
+        }
         if expecting_meal_style and not is_filled(slots, "meal_style") and _msg_lower in _MEAL_STYLE_INVALID:
             return ToolResult(
                 state=state,
@@ -485,12 +499,14 @@ class MenuSelectionTool:
             _style_only = True
 
         # Allow skipping desserts with a single reply ("skip", "no thanks", etc.)
-        # even if the gate/menu was already shown.
-        _DESSERT_SKIP_VALUES = {"skip", "skip dessert", "skip desserts", "no thanks", "no", "none", "pass"}
+        # even if the gate/menu was already shown. Skip values come from the
+        # centralized agent.intents module (single source of truth).
+        from agent.intents import classify_skip_gate
+        _dessert_skip_intent = classify_skip_gate(message, PHASE_DESSERT, slots)
         if (
             phase == PHASE_DESSERT
             and not is_filled(slots, "desserts")
-            and _msg_lower in _DESSERT_SKIP_VALUES
+            and _dessert_skip_intent is not None
         ):
             fill_slot(slots, "desserts", "none")
             fills.append(("desserts", "none"))
@@ -612,7 +628,24 @@ class MenuSelectionTool:
                 # Prevents "ok"/"sure" replies (or menu item lists) from being
                 # misread as choosing cocktail hour during weddings.
                 event_type = (get_slot_value(slots, "event_type") or "").lower()
-                if "wedding" in event_type and _message_explicitly_sets_service_style(_msg_lower):
+                # Bug guard: appetizer names like "Grilled Shrimp Cocktail" contain
+                # the word "cocktail" — when the user pastes a long item list, the
+                # extractor + regex see "cocktail" and re-fill cocktail_hour. That
+                # pollutes `fills` and makes the response say "Cocktail hour it is."
+                # instead of acknowledging the appetizer selection. Skip the re-fill
+                # if cocktail_hour is already set to the same value, and skip entirely
+                # when the message looks like a comma-separated item list (3+ commas).
+                _looks_like_item_list = _msg_lower.count(",") >= 3
+                _already_same = (
+                    is_filled(slots, "cocktail_hour")
+                    and get_slot_value(slots, "cocktail_hour") == extracted.cocktail_hour
+                )
+                if (
+                    "wedding" in event_type
+                    and _message_explicitly_sets_service_style(_msg_lower)
+                    and not _looks_like_item_list
+                    and not _already_same
+                ):
                     old = get_slot_value(slots, "cocktail_hour")
                     fill_slot(slots, "cocktail_hour", extracted.cocktail_hour)
                     fills.append(("cocktail_hour", extracted.cocktail_hour))
@@ -626,9 +659,26 @@ class MenuSelectionTool:
                     effects.extend(apply_cascade("cocktail_hour", old, extracted.cocktail_hour, slots))
 
             # ---- meal_style ----
+            # Strict guard: only accept meal_style if the user's message actually
+            # contains plated/buffet keywords. Past bug: "half" → LLM fuzzed to
+            # "buffet" and silently filled. Now we verify the message ACTUALLY
+            # contains a meal-style keyword before trusting the extractor.
+            _meal_style_keyword_in_msg = bool(re.search(
+                r"\b(?:plated|buffet|family[\s-]?style|served|sit[\s-]?down|stand[\s-]?up)\b",
+                _msg_lower,
+            ))
+            # CRITICAL: meal_style can ONLY be filled when selected_dishes is
+            # already filled. Otherwise the user has skipped the main menu entirely.
+            # Past bug: "buffet" typed at PHASE_MAIN_MENU with empty selected_dishes
+            # silently filled meal_style and advanced to dessert — the user never
+            # picked their main dishes. Now we require selected_dishes filled OR
+            # current_target == "ask_meal_style" (which itself requires dishes).
+            _selected_dishes_filled = is_filled(slots, "selected_dishes")
             if (
                 extracted.meal_style is not None
                 and (expecting_meal_style or not extracted.raw_items)
+                and _meal_style_keyword_in_msg
+                and _selected_dishes_filled
             ):
                 old = get_slot_value(slots, "meal_style")
                 fill_slot(slots, "meal_style", extracted.meal_style)
@@ -644,9 +694,28 @@ class MenuSelectionTool:
                 fills.append(("appetizer_style", extracted.appetizer_style))
 
             # ---- menu_notes ----
+            # Strict validator: menu_notes must look like a real menu instruction
+            # ("no pork in any dish", "vegetarian only", "halal please"). Personal
+            # statements ("i have an ulcer", "im sad") and small talk get rejected.
             if extracted.menu_notes is not None:
-                fill_slot(slots, "menu_notes", extracted.menu_notes)
-                fills.append(("menu_notes", extracted.menu_notes))
+                _note = str(extracted.menu_notes).strip()
+                _note_lower = _note.lower()
+                _looks_personal = bool(re.match(
+                    r"^(?:i\s+(?:have|got|am|feel|don'?t|can'?t|'m|'ve|hate|love)|"
+                    r"i'm|im\s+|we're|we'?ve\s+(?:got|been)|"
+                    r"my\s+\w|me\s+(?:and|too|also))",
+                    _note_lower,
+                ))
+                _is_menu_relevant = bool(re.search(
+                    r"\b(?:no|without|skip|avoid|less|more|extra|add|include|exclude|"
+                    r"vegetarian|vegan|halal|kosher|gluten|dairy|nut|allerg|spicy|mild|"
+                    r"meat|pork|beef|chicken|seafood|fish|egg|cheese|sauce|gravy|topping|"
+                    r"dressing|side|garnish|portion|serving)\b",
+                    _note_lower,
+                ))
+                if _note and not _looks_personal and _is_menu_relevant:
+                    fill_slot(slots, "menu_notes", _note)
+                    fills.append(("menu_notes", _note))
 
             # ---- custom_menu ----
             if extracted.custom_menu is True:
@@ -749,6 +818,37 @@ class MenuSelectionTool:
                             direct_response=(
                                 f"I appreciate your appetite — however you can only choose 4 desserts. "
                                 f"Please narrow it down and pick up to 4.\n\n{menu_text}"
+                            ),
+                        )
+                    if target_slot == "__mains_overflow__":
+                        # Hard cap exceeded — reject selection and reshow the menu
+                        state["conversation_phase"] = PHASE_MAIN_MENU
+                        overflow_hint = await _input_hint_for_menu_phase(PHASE_MAIN_MENU, slots)
+                        menu_text = (
+                            _format_menu_response(PHASE_MAIN_MENU, overflow_hint, slots)
+                            if overflow_hint else ""
+                        )
+                        return ToolResult(
+                            state=state,
+                            response_context={
+                                "tool": self.name,
+                                "filled_this_turn": [],
+                                "cascade_effects": [],
+                                "unmatched_items": [],
+                                "next_phase": PHASE_MAIN_MENU,
+                                "current_selections": {
+                                    "appetizers": get_slot_value(slots, "appetizers"),
+                                    "selected_dishes": get_slot_value(slots, "selected_dishes"),
+                                    "desserts": get_slot_value(slots, "desserts"),
+                                },
+                                "needs_custom_menu_call": bool(get_slot_value(slots, "custom_menu")),
+                                "next_question_target": "show_main_menu",
+                                "mains_overflow": matched_count,
+                            },
+                            input_hint=overflow_hint,
+                            direct_response=(
+                                f"That's {matched_count} dishes — main menu is capped at 5. "
+                                f"Pick 3 to 5 of your favorites.\n\n{menu_text}"
                             ),
                         )
                     if matched_count > 0:
@@ -981,6 +1081,11 @@ class MenuSelectionTool:
         if replace_existing:
             if resolved_text == "none" and existing_names:
                 resolved_text = get_slot_value(slots, target_slot) or ""
+            # Hard cap: 5 main dishes max
+            if target_slot == "selected_dishes":
+                count = len([n for n in (resolution.matched_items or []) if n.get("name")])
+                if count > 5:
+                    return [("__mains_overflow__", str(count), count)]
             return [(target_slot, resolved_text, 1 if resolved_text else 0)]
 
         # Merge with existing — never replace silently
@@ -995,6 +1100,14 @@ class MenuSelectionTool:
             # "All" (or all-except) can be a no-op when everything is already selected.
             resolved_text = get_slot_value(slots, target_slot) or ""
             return [(target_slot, resolved_text, 1 if resolved_text else 0)]
+
+        # Hard cap: 5 main dishes max. Count combined matched + existing.
+        if target_slot == "selected_dishes":
+            existing_lower = {n.lower() for n in existing_names}
+            new_count = len([m for m in matched if m.get("name") and m["name"].lower() not in existing_lower])
+            total = len(existing_names) + new_count
+            if total > 5:
+                return [("__mains_overflow__", str(total), total)]
 
         return [(target_slot, resolved_text, len(matched))]
 
@@ -1532,7 +1645,7 @@ def _format_menu_response(phase: str, hint: dict, slots: dict) -> str | None:
         if not lines:
             return None
         max_s = hint.get("max_select", 4)
-        return "Awesome, let's add some desserts! Here are the dessert options:\n" + "\n".join(lines) + f"\nPick up to {max_s}!"
+        return "Here are the dessert options:\n" + "\n".join(lines) + f"\nPick up to {max_s}!"
 
     return None
 
@@ -1551,11 +1664,11 @@ def _build_menu_turn_response(
     if "service_style" in filled_slots or "cocktail_hour" in filled_slots:
         service_style = str(get_slot_value(slots, "service_style") or "").lower()
         if service_style == "both":
-            lead = "Got it — we will plan for both cocktail hour and reception."
+            lead = "Planning for both cocktail hour and reception."
         elif service_style == "reception":
-            lead = "Got it — we will plan for the reception."
+            lead = "Reception it is."
         else:
-            lead = "Got it — we will plan for cocktail hour."
+            lead = "Cocktail hour it is."
         menu_text = _format_menu_response(next_phase, input_hint, slots) if input_hint else None
         return lead + ("\n\n" + menu_text if menu_text else "")
 
@@ -1571,11 +1684,6 @@ def _build_menu_turn_response(
 
     if "appetizer_style" in filled_slots:
         style = str(get_slot_value(slots, "appetizer_style") or "").lower()
-        lead = (
-            "Perfect — we will have the appetizers passed around."
-            if style == "passed"
-            else "Perfect — we will set the appetizers at a station."
-        )
         lead = "Appetizers will be passed around." if style == "passed" else "Appetizers will be set up at a station."
         menu_text = _format_menu_response(next_phase, input_hint, slots) if input_hint else None
         return lead + ("\n\n" + menu_text if menu_text else "")
@@ -1593,18 +1701,18 @@ def _build_menu_turn_response(
     if "meal_style" in filled_slots:
         meal_style = str(get_slot_value(slots, "meal_style") or "").lower()
         if meal_style == "plated":
-            lead = "Perfect — we will serve the meal plated."
+            lead = "Plated service it is."
         elif meal_style == "buffet":
-            lead = "Perfect — we will serve the meal buffet-style."
+            lead = "Buffet-style it is."
         else:
-            lead = "Got it — noted."
+            lead = "Your meal style has been noted."
 
         return lead
 
     if "desserts" in filled_slots:
         desserts_val = str(get_slot_value(slots, "desserts") or "")
         if desserts_val.strip().lower() in {"none", "no", "n/a"}:
-            lead = "Got it — we’ll skip desserts."
+            lead = "No desserts — skipping that section."
         else:
             lead = _list_progress_message(
                 label="desserts",

@@ -283,13 +283,14 @@ async def extract(
     model: Optional[str] = None,
     max_tokens: int = 5000,
     max_retries: int = 2,
+    temperature: float = 0,
 ) -> Optional[T]:
     """Extract structured data using the Responses API with strict JSON schema.
 
     Returns None if extraction fails after max_retries.
     """
-    if max_retries > 2:
-        max_retries = 2
+    if max_retries > 3:
+        max_retries = 3
 
     input_items = _response_input(
         user_message=user_message,
@@ -304,7 +305,22 @@ async def extract(
 
     last_exc: Exception | None = None
     attempt_max_tokens = max_tokens
+    # FLAG-6/11: inject validation error into retry prompt so the model knows
+    # what it got wrong. Only set on non-truncation errors (truncation is fixed
+    # by bumping max_tokens, not by rephrasing). Reset on each new attempt.
+    _error_hint: str | None = None
     for attempt in range(max_retries + 1):
+        # Rebuild input_items each attempt so we can inject the error hint.
+        _user_msg_for_attempt = user_message
+        if _error_hint:
+            _user_msg_for_attempt = (
+                user_message
+                + f"\n\n[Your previous response had a validation error: {_error_hint}. Please correct and try again.]"
+            )
+        _input_items = _response_input(
+            user_message=_user_msg_for_attempt,
+            history=history[-6:] if history else None,
+        )
         try:
             increment_llm_call()
             logger.info(
@@ -317,7 +333,7 @@ async def extract(
             response = await _raw_async.responses.create(
                 model=_model,
                 instructions=system,
-                input=input_items,
+                input=_input_items,
                 text=_text_format_for_schema(schema),
                 max_output_tokens=attempt_max_tokens,
                 metadata=request_tags["metadata"],
@@ -325,7 +341,7 @@ async def extract(
                 safety_identifier=request_tags["safety_identifier"],
                 service_tier="default",
                 store=False,
-                temperature=0,
+                temperature=temperature,
             )
             _elapsed_ms = int((time.monotonic() - _t0) * 1000)
             _record_response_usage(response)
@@ -348,19 +364,32 @@ async def extract(
         except ValidationError as e:
             logger.warning("Validation failed for %s (attempt %d): %s", schema.__name__, attempt + 1, e)
             last_exc = e
-            if attempt < max_retries and _is_truncated_json_validation_error(e):
-                new_max = _bump_max_tokens(attempt_max_tokens)
-                if new_max != attempt_max_tokens:
-                    logger.info(
-                        "Retrying %s with higher max_output_tokens (%d -> %d) due to truncated JSON",
-                        schema.__name__,
-                        attempt_max_tokens,
-                        new_max,
+            if attempt < max_retries:
+                if _is_truncated_json_validation_error(e):
+                    new_max = _bump_max_tokens(attempt_max_tokens)
+                    if new_max != attempt_max_tokens:
+                        logger.info(
+                            "Retrying %s with higher max_output_tokens (%d -> %d) due to truncated JSON",
+                            schema.__name__,
+                            attempt_max_tokens,
+                            new_max,
+                        )
+                        attempt_max_tokens = new_max
+                    _error_hint = None  # truncation fix is token bump, not feedback
+                else:
+                    # Non-truncation error: inject what went wrong into the next attempt
+                    _error_hint = "; ".join(
+                        f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
+                        for err in e.errors()[:3]
                     )
-                    attempt_max_tokens = new_max
+                    logger.info(
+                        "Retrying %s with error feedback: %s",
+                        schema.__name__, _error_hint,
+                    )
         except Exception as e:
             logger.warning("Extraction error for %s (attempt %d): %s", schema.__name__, attempt + 1, e)
             last_exc = e
+            _error_hint = None  # non-validation errors don't benefit from error feedback
 
     logger.warning("Responses extraction error for %s: %s", schema.__name__, last_exc)
     try:

@@ -2,10 +2,6 @@ import sys
 
 import pytest
 
-
-sys.path.insert(0, r"c:\Projects\CateringCompany\ml-agent")
-
-
 from agent.state import (  # noqa: E402
     PHASE_SERVICE_TYPE,
     fill_slot,
@@ -13,7 +9,6 @@ from agent.state import (  # noqa: E402
 )
 from agent.tools.modification_tool import ModificationTool  # noqa: E402
 from agent.tools.modification_tool import ModificationExtraction  # noqa: E402
-
 
 @pytest.mark.asyncio
 async def test_add_all_desserts_reopen_warns_about_max_four(monkeypatch) -> None:
